@@ -142,7 +142,7 @@ coverage = "coverage run -m pytest --cov=src/treehornx --cov-report=term-missing
 format = "ruff format && isort . "
 validate = "isort --check . && ruff format --check && ruff check && pyright"
 test = "task unit-test"
-verify = "task format && task validate && task test"
+verify = "task format && task validate && task coverage"
 build = "task validate && task test"
 docs = "cd docs && sphinx-build -b html source build/html && cd ../"
 docs-clean = "rm -rf docs/build"
