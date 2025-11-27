@@ -5,7 +5,7 @@ on:
     branches: ["main"]
 
 permissions:
-  pages: write
+  contents: write
 
 jobs:
   docs:
