@@ -1,15 +1,16 @@
-name: Build Docs
+name: Python Tests
 
 on:
   push:
-    branches: [ "main" ]
+    branches: [ main, dev ]
+  pull_request:
+    branches: [ main, dev ]
 
 jobs:
-  docs:
+  test:
     runs-on: ubuntu-latest
 
     steps:
-     
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -27,13 +28,6 @@ jobs:
         run: |
           uv sync  # installs dependencies from pyproject.toml
 
-      - name: Build docs
+      - name: Test
         run: |
-          uv run task docs
-
-      - name: Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v3
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: docs/build/html
-
+          uv run task verify
