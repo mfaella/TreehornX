@@ -46,11 +46,6 @@ cd TreehornX
 ``` bash
 uv sync
 ```
-If you work as developer on this project run
-```
-uv run task dev-env
-```
-This command will enable pre-commit checks on your work, if a check step fail the commit is aborted. Remember that such checks will be run in the CI/CD pipeline anyway, so don't waste github processing resources uselessly.
 
 ### 4. Format, Validate and Test the project
 
