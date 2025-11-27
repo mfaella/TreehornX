@@ -1,5 +1,3 @@
-# ruff: noqa: N802
-
 from unittest import TestCase
 
 from ir.expressions import Add, And, Eq, Field, Not, PtrIsNil, Sub, Var

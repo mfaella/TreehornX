@@ -1,4 +1,3 @@
-# ruff: noqa: N802
 from unittest import TestCase
 
 from ir.enviroment import Enviroment
