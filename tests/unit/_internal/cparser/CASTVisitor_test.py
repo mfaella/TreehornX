@@ -73,12 +73,88 @@ class TestCASTVisitor(TestCase):
             visitor = CASTVisitor()
             visitor.visit(ast)
 
+    def test_struct_with_int_ptr_field(self):
+        code = """
+        struct MyStruct {
+            int *a;
+            struct MyStruct* next;
+        };
+        """
+
+        with self.assertRaises(UnsupportedFeatureError):
+            ast = CASTVisitor.produce_ast_from_src(code)
+            visitor = CASTVisitor()
+            visitor.visit(ast)
+
+    def test_other_struct_ptr_field(self):
+        code = """
+        struct OtherStruct {
+            int value;
+            struct OtherStruct* next;
+        };
+
+        struct MyStruct {
+            struct OtherStruct* other;
+            struct MyStruct* next;
+        };
+        """
+
+        with self.assertRaises(UnsupportedFeatureError):
+            ast = CASTVisitor.produce_ast_from_src(code)
+            visitor = CASTVisitor()
+            visitor.visit(ast)
+
+    def test_unknown_type_in_struct_field(self):
+        code = """
+        struct MyStruct {
+            float x;
+            unsigned int y;
+            struct MyStruct* next;
+        };
+        """
+        with self.assertRaises(UnknownTypeError):
+            ast = CASTVisitor.produce_ast_from_src(code)
+            visitor = CASTVisitor()
+            visitor.visit(ast)
+
+    def test_empty_struct(self):
+        code = """
+        struct EmptyStruct {};
+        """
+
+        with self.assertRaises(UnsupportedFeatureError):
+            ast = CASTVisitor.produce_ast_from_src(code)
+            visitor = CASTVisitor()
+            visitor.visit(ast)
+
+    def test_no_struct_ptr_struct(self):
+        code = """
+        struct NoPtrStruct {
+            int a;
+            float b;
+        };
+        """
+        with self.assertRaises(UnsupportedFeatureError):
+            ast = CASTVisitor.produce_ast_from_src(code)
+            visitor = CASTVisitor()
+            visitor.visit(ast)
+
     def test_parse_anonymous_struct(self):
         code = """
         struct {
             int x;
             int y;
         } point;
+        """
+
+        with self.assertRaises(UnsupportedFeatureError):
+            ast = CASTVisitor.produce_ast_from_src(code)
+            visitor = CASTVisitor()
+            visitor.visit(ast)
+
+    def test_struct_with_no_fields(self):
+        code = """
+        struct Empty;
         """
 
         with self.assertRaises(UnsupportedFeatureError):
@@ -104,7 +180,7 @@ class TestCASTVisitor(TestCase):
         struct LL {
             int value;
             struct LL* next;
-        }
+        };
 
         struct BST {
             struct LL* nums;
@@ -118,7 +194,7 @@ class TestCASTVisitor(TestCase):
             visitor = CASTVisitor()
             visitor.visit(ast)
 
-    def test_inner_struct_field(self):
+    def test_struct_instance_decl_field(self):
         code = """
         struct LL {
             int value;
@@ -309,3 +385,56 @@ class TestCASTVisitor(TestCase):
         self.assertIsInstance(RBTree, Struct)
         self.assertEqual(RBTree.fields["left"], Var("left", Pointer(RBTree)))
         self.assertEqual(RBTree.fields["right"], Var("right", Pointer(RBTree)))
+
+    def test_struct_with_anonymous_enum_field(self):
+        code = """
+        struct MyStruct {
+            enum {
+                RED, GREEN, BLUE
+            } color;
+            struct MyStruct* next;
+        };
+        """
+        with self.assertRaises(UnsupportedFeatureError):
+            ast = CASTVisitor.produce_ast_from_src(code)
+            visitor = CASTVisitor()
+            visitor.visit(ast)
+
+    def test_float_enum_values(self):
+        code = """
+        enum Color {
+            RED = 0.0,
+            GREEN,
+            BLUE
+        };
+        """
+        with self.assertRaises(UnsupportedFeatureError):
+            ast = CASTVisitor.produce_ast_from_src(code)
+            visitor = CASTVisitor()
+            visitor.visit(ast)
+
+    def test_string_enum_values(self):
+        code = """
+        enum Color {
+            RED = "RED",
+            GREEN,
+            BLUE
+        };
+        """
+        with self.assertRaises(UnsupportedFeatureError):
+            ast = CASTVisitor.produce_ast_from_src(code)
+            visitor = CASTVisitor()
+            visitor.visit(ast)
+
+    def test_char_enum_values(self):
+        code = """
+        enum Color {
+            RED = 'r',
+            GREEN,
+            BLUE
+        };
+        """
+        with self.assertRaises(UnsupportedFeatureError):
+            ast = CASTVisitor.produce_ast_from_src(code)
+            visitor = CASTVisitor()
+            visitor.visit(ast)

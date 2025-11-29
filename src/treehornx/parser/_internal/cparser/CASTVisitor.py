@@ -3,7 +3,7 @@ import subprocess
 from cmath import isinf
 from dataclasses import dataclass, field
 from io import StringIO
-from typing import Any, Iterable, TextIO
+from typing import Any, Iterable, TextIO, cast
 
 from ir.enviroment import Enviroment
 from ir.expressions import Var
@@ -64,21 +64,19 @@ class CASTVisitor(c_ast.NodeVisitor):
         return cls.produce_ast_from_src(code)
 
     def parse_struct_field(self, field_node: c_ast.Decl, struct_name: str) -> Var | str:
-        if field_node.name is None:
-            raise UnsupportedFeatureError(field_node.coord.line, "Anonymous fields are not supported.")
-        if field_node.init is not None:
-            raise UnsupportedFeatureError(field_node.coord.line, "Field initializers are not supported.")
+        line = cast(int, field_node.coord.line)
 
-        field_name = field_node.name
+        assert field_node.name is not None, "Struct field must have a name."
+        assert field_node.init is None, "Struct field declarations with initializers are not supported."
+
+        field_name = cast(str, field_node.name)
         if isinstance(field_node.type, c_ast.PtrDecl):
             pointee = field_node.type.type.type
             if not isinstance(pointee, c_ast.Struct):
-                raise UnsupportedFeatureError(
-                    field_node.coord.line, f"Pointer to non-struct type '{pointee}' is not supported."
-                )
+                raise UnsupportedFeatureError(line, f"Pointer to non-struct type '{pointee}' is not supported.")
             elif pointee.name != struct_name:
                 raise UnsupportedFeatureError(
-                    field_node.coord.line,
+                    line,
                     f"Pointer to struct type '{pointee.name}' is not supported in struct '{struct_name}'.",
                 )
             return field_name  # Indicate this is a pointer to the same struct
@@ -87,36 +85,43 @@ class CASTVisitor(c_ast.NodeVisitor):
             id_type_node = field_node.type.type
             type_name = " ".join(id_type_node.names)
             if type_name not in self.sorts:
-                raise UnknownTypeError(id_type_node.coord.line, f"Unknown type '{type_name}' for variable '{name}'.")
+                raise UnknownTypeError(
+                    id_type_node.coord.line, f"Unknown type '{type_name}' for variable '{type_name}'."
+                )
 
             return Var(field_name, self.sorts[type_name])
-
-        elif isinstance(field_node.type.type, c_ast.Struct):
-            struct_node = field_node.type.type
-            if struct_node.name is None:
-                raise UnsupportedFeatureError(
-                    struct_node.coord.line, "Anonymous struct variable declarations are not supported."
-                )
-            if struct_node.decls is not None:
-                raise UnsupportedFeatureError(
-                    node.coord.line, "Inline struct definitions in variable declarations are not supported."
-                )
-            struct_sort = self.sorts[struct_node.name]
-            return Var(field_name, struct_sort)
 
         elif isinstance(field_node.type.type, c_ast.Enum):
             enum_node = field_node.type.type
             if enum_node.name is None:
-                raise UnsupportedFeatureError(
-                    field_node.coord.line, "Anonymous enum variable declarations are not supported."
-                )
+                raise UnsupportedFeatureError(line, "Anonymous enum variable declarations are not supported.")
             enum_name = enum_node.name
-            if enum_name not in self.sorts:
-                raise UnknownTypeError(
-                    enum_node.coord.line, f"Enum type '{enum_name}' for variable '{name}' is not defined."
-                )
+            assert enum_name in self.sorts, "Enum type must be defined before use."
             enum_sort = self.sorts[enum_name]
             return Var(field_name, enum_sort)
+
+        else:
+            raise UnsupportedFeatureError(
+                line, f"Struct field of type '{type(field_node.type.type).__name__}' is not supported."
+            )
+
+    def visit_FileAST(self, node: c_ast.FileAST):
+        for ext in node.ext:
+            if not isinstance(ext, (c_ast.Decl, c_ast.FuncDef)):
+                raise UnsupportedFeatureError(
+                    ext.coord.line, f"Top-level construct '{type(ext).__name__}' is not supported."
+                )
+            self.visit(ext)
+
+    def visit_Decl(self, node: c_ast.Decl):
+        if isinstance(node.type, c_ast.Struct):
+            self.visit_Struct(node.type)
+        elif isinstance(node.type, c_ast.Enum):
+            self.visit_Enum(node.type)
+        else:
+            raise UnsupportedFeatureError(
+                node.coord.line, f"Declaration of type '{type(node.type).__name__}' is not supported."
+            )
 
     def visit_Struct(self, node: c_ast.Struct):
         if node.name is None:
@@ -150,18 +155,17 @@ class CASTVisitor(c_ast.NodeVisitor):
                         )
                     struct_ptrs.add(name)
 
+        if not struct_ptrs:
+            raise UnsupportedFeatureError(
+                node.coord.line, f"Struct '{struct_name}' must have at least one pointer field to itself."
+            )
         struct = Struct(struct_name, struct_ptrs=struct_ptrs, struct_vars=struct_vars.values())
         self.sorts[struct.name] = struct
 
-    def visit_TypeDecl(self, node: c_ast.TypeDecl):
-        raise UnsupportedFeatureError(node.coord.line, "unsupported feature")
-
     def visit_Enum(self, node: c_ast.Enum):
-        if node.name is None:
-            raise UnsupportedFeatureError(node.coord.line, "Anonymous enums are not supported.")
+        assert node.name is not None, "Anonymous enums are not supported."
 
-        if node.values is None:
-            raise UnsupportedFeatureError(node.coord.line, "Enums with no values are not supported.")
+        assert node.values is not None, "Enums with no values are not supported."
 
         enum_name: str = node.name
         if enum_name in self.sorts:
@@ -194,92 +198,4 @@ class CASTVisitor(c_ast.NodeVisitor):
         self.sorts[enum_name] = enum_sort
 
 
-# def read_functions(ast: FileAST) -> Iterable[Function]:
-#     sorts: dict[str, Sort] = {
-#         "int": INT,
-#         "bool": BOOL,
-#         "float": REAL,
-#         "double": REAL,
-#         "void": UNIT,
-#     }
-#     for child in ast.ext:
-#         match child:
-#             case Decl():
-#                 match child.type:
-#                     case TypeDecl():
-
-#             case FuncDef():
-
-
-# def parse_file(cursor: Cursor) -> Iterable[Function]:
-#     tu = cursor.translation_unit
-#     for child in tu.cursor.get_children():
-#         if child.kind == child.kind.FUNCTION_DECL and child.is_definition():
-#             yield parse_function_definition(child, CParserContext(tu))
-
-# class CParserContext:
-#     def __init__(self, tu: TranslationUnit):
-#         self.sorts: dict[str, Sort] = {}
-#         self.macros: dict[Any, str] = {}
-#         root_macro_found = False
-#         for c in tu.cursor.walk_preorder():
-#             if c.kind == c.kind.MACRO_INSTANTIATION:
-#                 c_loc = c.location
-#                 self.macros[c_loc] = c.spelling
-
-#     def is_root(self, cursor: Cursor) -> bool:
-#         assert cursor.kind == cursor.kind.VAR_DECL
-#         return cursor.location in self.macros and self.macros[cursor.location] == TREEHORNX_ROOT_MACRO
-
-#     def find_root(self, cursor: Cursor) -> Var | None:
-#         assert cursor.kind == cursor.kind.FUNCTION_DECL
-#         for args in cursor.get_arguments():
-#             if args.location in self.macros and self.macros[args.location] == TREEHORNX_ROOT_MACRO:
-#                 return Var(args.spelling, args.type)
-#         return None
-
-#     def add_sort(self, sort: Sort) -> None:
-#         if sort.name in self.sorts:
-#             raise ValueError("sort.name in self.sorts")
-#         self.sorts[sort.name] = sort
-
-#     def get_sort(self, name: str) -> Sort:
-#         if name not in self.sorts:
-#             raise ValueError("name not in self.sorts")
-#         return self.sorts[name]
-
-
-# @dataclass
-# class FunctionContext:
-#     parameters: dict[str, Sort]
-#     local_vars: dict[str, Sort]
-#     instructions: tuple[Instruction, ...]
-#     root: Var | None = None
-
-
-# def parse_function_definition(cursor: Cursor, ctx: CParserContext) -> Function:
-#     assert cursor is not None
-#     assert cursor.kind == cursor.kind.FUNCTION_DECL
-#     assert cursor.is_definition()
-
-#     name = cursor.spelling
-#     ret_sort = ctx.get_sort(cursor.result_type.spelling)
-#     body = next(child for child in cursor.get_children() if child.kind == cursor.kind.COMPOUND_STMT)
-
-#     var_declarations = chain(
-#         cursor.get_arguments(),
-#         filter(lambda child: child.kind == child.kind.VAR_DECL, body.get_children()),  # ty pe: ignore
-#     )
-
-#     stmts = filter(lambda child: child.kind != child.kind.VAR_DECL, body.get_children())  # ty pe: ignore
-
-#     root = ctx.find_root(cursor)
-
-#     local_vars, instructions = parse_function_body(var_declarations, ctx)
-
-#     return Function(name, ret_sort, arguments, local_vars, instructions)
-
-
-# @dataclass
-# class CParser(Parser):
-#     args: tuple[str, ...] = ("-x", "c", "-std=c11")
+# ArrayDecl,
