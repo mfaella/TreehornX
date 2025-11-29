@@ -5,9 +5,9 @@ from ir.expressions import Var
 from ir.sorts import INT, REAL, Pointer, Struct
 
 
-class EnviromentTest(TestCase):
+class TestEnviroment(TestCase):
     def test_Enviroment_validation(self):
-        node_struct = Struct("BSTNode", {Var("value", INT)}, {"left", "right"})
+        node_struct = Struct("BSTNode", {"left", "right"}, {Var("value", INT)})
 
         # Valid environments
 
@@ -165,7 +165,7 @@ class EnviromentTest(TestCase):
 
         # Invalid environment: root sort is not struct pointer of the node struct
         with self.assertRaises(ValueError):
-            list_node_struct = Struct("ListNode", {Var("value", INT)}, {"next"})
+            list_node_struct = Struct("ListNode", {"next"}, {Var("value", INT)})
             Enviroment(
                 node_struct,
                 root=Var("root", Pointer(list_node_struct)),

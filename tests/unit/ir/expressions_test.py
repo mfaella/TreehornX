@@ -27,17 +27,15 @@ from ir.expressions import (
 )
 from ir.sorts import BOOL, INT, REAL, UNIT, Pointer, Struct
 
-
 birfc_struct_ptr = Pointer(
     Struct(
         "birfc",
+        {"c"},
         {
-            Var("f", Pointer(INT)),
             Var("i", INT),
             Var("r", REAL),
             Var("b", BOOL),
         },
-        {"c"},
     )
 )
 
@@ -46,12 +44,10 @@ class TestExpressions(TestCase):
     def test_Var_validation(self):
         self.assertRaises(ValueError, lambda: Var("u", UNIT))
 
-        p = Var("p", Pointer(INT))
         i = Var("i", INT)
         r = Var("r", REAL)
         b = Var("b", BOOL)
 
-        self.assertIs(sort_of(p), Pointer(INT))
         self.assertIs(sort_of(i), INT)
         self.assertIs(sort_of(r), REAL)
         self.assertIs(sort_of(b), BOOL)
@@ -63,23 +59,15 @@ class TestExpressions(TestCase):
         r = Var("r", REAL)
         b = Var("b", BOOL)
 
-        pf = Field(p, "f")
         pi = Field(p, "i")
         pr = Field(p, "r")
         pb = Field(p, "b")
 
         self.assertRaises(ValueError, lambda: Field(p, "a"))
 
-        self.assertIs(sort_of(pf), Pointer(INT))
         self.assertIs(sort_of(pi), INT)
         self.assertIs(sort_of(pr), REAL)
         self.assertIs(sort_of(pb), BOOL)
-
-        self.assertRaises(ValueError, lambda: Field(Var("p", Pointer(INT)), "f"))
-        self.assertRaises(ValueError, lambda: Field(Var("p", Pointer(REAL)), "f"))
-        self.assertRaises(ValueError, lambda: Field(Var("p", Pointer(Pointer(INT))), "f"))
-        self.assertRaises(ValueError, lambda: Field(Var("p", Pointer(BOOL)), "f"))
-        self.assertRaises(ValueError, lambda: Field(Var("p", Pointer(UNIT)), "f"))
 
         self.assertRaises(ValueError, lambda: Field(i, "f"))
         self.assertRaises(ValueError, lambda: Field(i, "i"))
@@ -106,10 +94,8 @@ class TestExpressions(TestCase):
         fi = Field(p, "i")
         fr = Field(p, "r")
         fb = Field(p, "b")
-        fp = Field(p, "f")
 
         self.assertIs(sort_of(PtrIsNil(p)), BOOL)
-        self.assertRaises(ValueError, lambda: PtrIsNil(fp))
         self.assertRaises(ValueError, lambda: PtrIsNil(i))
         self.assertRaises(ValueError, lambda: PtrIsNil(r))
         self.assertRaises(ValueError, lambda: PtrIsNil(b))
@@ -125,13 +111,9 @@ class TestExpressions(TestCase):
         fi = Field(p, "i")
         fr = Field(p, "r")
         fb = Field(p, "b")
-        fp = Field(p, "f")
 
         self.assertIs(sort_of(PtrIsPtr(p, q)), BOOL)
-        self.assertRaises(ValueError, lambda: PtrIsPtr(fp, fp))
-        self.assertRaises(ValueError, lambda: PtrIsPtr(fp, i))
         self.assertRaises(ValueError, lambda: PtrIsPtr(r, q))
-        self.assertRaises(ValueError, lambda: PtrIsPtr(p, fp))
         self.assertRaises(ValueError, lambda: PtrIsPtr(p, fr))
         self.assertRaises(ValueError, lambda: PtrIsPtr(p, r))
         self.assertRaises(ValueError, lambda: PtrIsPtr(fb, fb))
@@ -176,21 +158,17 @@ class TestExpressions(TestCase):
     def test_Not_validation(self):
         p = Var("p", birfc_struct_ptr)
         b = Var("b", BOOL)
-        fp = Field(p, "f")
 
         self.assertIs(sort_of(Not(b)), BOOL)
         self.assertIs(sort_of(Not(PtrIsNil(p))), BOOL)
 
         self.assertRaises(ValueError, lambda: Not(p))
-        self.assertRaises(ValueError, lambda: Not(fp))
 
     def test_Eq_validation(self):
         p = Var("p", birfc_struct_ptr)
-        q = Var("q", Pointer(INT))
         i = Var("i", INT)
         r = Var("r", REAL)
         b = Var("b", BOOL)
-        fp = Field(p, "f")
         fi = Field(p, "i")
         fr = Field(p, "r")
         fb = Field(p, "b")
@@ -202,14 +180,10 @@ class TestExpressions(TestCase):
         self.assertRaises(ValueError, lambda: Eq(i, fi))
         self.assertRaises(ValueError, lambda: Eq(r, fr))
         self.assertRaises(ValueError, lambda: Eq(b, fb))
-        self.assertRaises(ValueError, lambda: Eq(p, q))
-        self.assertRaises(ValueError, lambda: Eq(fp, fp))
         self.assertRaises(ValueError, lambda: Eq(p, i))
         self.assertRaises(ValueError, lambda: Eq(p, fi))
         self.assertRaises(ValueError, lambda: Eq(i, r))
         self.assertRaises(ValueError, lambda: Eq(r, b))
-        self.assertRaises(ValueError, lambda: Eq(b, fp))
-        self.assertRaises(ValueError, lambda: Eq(fp, p))
 
     def test_Ne_validation(self):
         p = Var("p", birfc_struct_ptr)
@@ -217,7 +191,6 @@ class TestExpressions(TestCase):
         i = Var("i", INT)
         r = Var("r", REAL)
         b = Var("b", BOOL)
-        fp = Field(p, "f")
         fi = Field(p, "i")
         fr = Field(p, "r")
         fb = Field(p, "b")
@@ -230,13 +203,10 @@ class TestExpressions(TestCase):
         self.assertRaises(ValueError, lambda: Ne(r, fr))
         self.assertRaises(ValueError, lambda: Ne(b, fb))
         self.assertRaises(ValueError, lambda: Ne(p, q))
-        self.assertRaises(ValueError, lambda: Ne(fp, fp))
         self.assertRaises(ValueError, lambda: Ne(p, i))
         self.assertRaises(ValueError, lambda: Ne(p, fi))
         self.assertRaises(ValueError, lambda: Ne(i, r))
         self.assertRaises(ValueError, lambda: Ne(r, b))
-        self.assertRaises(ValueError, lambda: Ne(b, fp))
-        self.assertRaises(ValueError, lambda: Ne(fp, p))
 
     def test_Le_validation(self):
         p = Var("p", birfc_struct_ptr)

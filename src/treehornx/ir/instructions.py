@@ -98,7 +98,7 @@ class PtrAssignPtr(_Labeled):
             raise ValueError("sort_of(self.left) is not POINTER")
         if not sort_of(self.right).is_ptr():
             raise ValueError("sort_of(self.right) is not POINTER")
-        if self.left.sort.sort is not self.right.sort.sort:  # type: ignore
+        if self.left.sort is not self.right.sort:
             raise ValueError("self.left and self.right must have the same pointer sort")
 
     @override
