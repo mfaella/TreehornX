@@ -49,5 +49,5 @@ class Struct(Sort):
             A frozendict mapping field names to their corresponding Vars.
         """
         all_fields = {name: Var(name, Pointer(self)) for name in self._struct_ptrs}
-        all_fields.update(self._struct_vars)
+        all_fields |= self._struct_vars
         return frozendict(all_fields)

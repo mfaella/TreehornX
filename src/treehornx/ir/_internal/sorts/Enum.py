@@ -29,8 +29,6 @@ class Enum(Sort):
 
     def __init__(self, name: str, flags: dict[str, int]):
         super().__init__(name=name)
-        if len(flags) != len(set(flags.values())):
-            raise ValueError("len(flags) != len(set(flags.values()))")
         object.__setattr__(self, "flags", frozendict(flags))
 
     def exists(self, flag: str) -> bool:

@@ -1,7 +1,7 @@
 from unittest import TestCase
 
-from _internal.cparser.ScopeStack import ScopeStack
 from ir.sorts import BOOL, INT, REAL, UNIT, Sort, Struct
+from parser._internal.cparser.ScopeStack import ScopeStack
 
 
 class ScopeStackTest(TestCase):
