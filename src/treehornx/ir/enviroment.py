@@ -28,13 +28,15 @@ class Enviroment:
         # no name duplication between root and local vars
         if any(self.root.name == var.name for var in self.local_vars):
             raise ValueError("any(self.root.name == var.name for var in self.local_vars)")
-        local_vars_names_list = list(map(lambda v: v.name, self.local_vars))
-        local_vars_names = set(local_vars_names_list)
-        if len(local_vars_names) != len(local_vars_names_list):
+        vars_names_list = [self.root.name, *(v.name for v in self.local_vars)]
+        vars_names_set = set(vars_names_list)
+        if len(vars_names_set) != len(vars_names_list):
             raise ValueError("len(local_vars_names) != len(local_vars_names_list)")
 
         # all pointer-typed parameters must point to node_sort
-        if any(var.sort.is_ptr() and var.sort.sort is not self.node_sort for var in self.local_vars):  # type: ignore
+        if any(var.sort.is_struct() for var in self.local_vars):
+            raise ValueError("any(var.sort.is_struct() for var in self.local_vars)")
+        if any(var.sort.is_ptr() and var.sort.pointee is not self.node_sort for var in self.local_vars):  # type: ignore
             raise ValueError(
                 "any(var.sort.is_ptr() and var.sort.sort is not self.node_sort for var in self.local_vars)"
             )

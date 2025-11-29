@@ -12,7 +12,9 @@ from typing import (
     runtime_checkable,
 )
 
-from ._internal.sorts import BOOL, INT, REAL, Enum, Sort
+from ._internal.sorts.Enum import BOOL, Enum
+from ._internal.sorts.natives import INT, REAL
+from ._internal.sorts.Sort import Sort
 
 
 # Variables classes
@@ -50,9 +52,9 @@ class Field:
     def __post_init__(self):
         if not self.ptr.sort.is_ptr():
             raise ValueError("not self.ptr.is_ptr()")
-        if not self.ptr.sort.sort.is_struct():  # type: ignore
+        if not self.ptr.sort.pointee.is_struct():  # type: ignore
             raise ValueError("not self.ptr.sort.is_struct()")
-        if self.name not in self.ptr.sort.sort.fields:  # type: ignore
+        if self.name not in self.ptr.sort.pointee.fields:  # type: ignore
             raise ValueError("self.name not in self.ptr.sort.fields")
 
     @override
@@ -81,7 +83,7 @@ class EnumConst:
         return cls._pool[instance]
 
     def __post_init__(self):
-        if not self.sort.contains(self.value):
+        if not self.sort.exists(self.value):
             raise ValueError(f"value '{self.value}' not in enum sort {self.sort}")
 
 
@@ -489,7 +491,7 @@ def sort_of(expr: Expr) -> Sort:
         case Var(_, sort):
             return sort
         case Field(Var(_, sort), name):
-            return sort.sort.fields[name].sort  # type: ignore
+            return sort.pointee.fields[name].sort  # type: ignore
         case EnumConst(sort, _):
             return sort
         case int():

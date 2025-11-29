@@ -7,19 +7,22 @@ from ir.function import Function
 from ir.instructions import *
 from ir.sorts import INT, UNIT, Pointer, Struct
 
+outsider_struct = Struct(name="Outsider", struct_vars={Var("data", INT)}, struct_ptrs={"outsider_next"})
 
-class FunctionTest(TestCase):
+
+class TestFunction(TestCase):
     def test_Function_validation(self):
         node_struct = Struct(
             name="BSTNode",
-            fields={Var("value", INT)},
+            struct_vars={Var("value", INT)},
             struct_ptrs={"left", "right"},
         )
         value = Var("value", INT)
         key = Var("key", INT)
         root = Var("root", Pointer(node_struct))
         int_root = Var("int_root", INT)
-        int_ptr = Var("int_ptr", Pointer(INT))
+        outsider_object = Var("outsider_object", outsider_struct)
+        ousider_ptr = Var("outsider_ptr", Pointer(outsider_struct))
         curr = Var("curr", Pointer(node_struct))
 
         function = Function(
@@ -58,11 +61,20 @@ class FunctionTest(TestCase):
                 instructions=(Return(),),
             )
 
+        # local vars of struct type
+        with self.assertRaises(ValueError):
+            Function(
+                name="f",
+                env=Enviroment(node_struct, root=root, local_vars={outsider_object}),
+                return_type=UNIT,
+                instructions=(Return(),),
+            )
+
         # non-node_struct pointer in local_vars
         with self.assertRaises(ValueError):
             Function(
                 name="f",
-                env=Enviroment(node_struct, root=root, local_vars={int_ptr}),
+                env=Enviroment(node_struct, root=root, local_vars={ousider_ptr}),
                 return_type=UNIT,
                 instructions=(Return(),),
             )

@@ -109,12 +109,10 @@ class Function:
                 if not sort_op.is_ptr():
                     return
                 sort_op = cast(Pointer, sort_op)
-                if sort_op.sort is not self.env.node_sort:
+                if sort_op.pointee is not self.env.node_sort:
                     raise ValueError(f"Variable {op} has invalid sort")
-            case Field(ptr, field):
+            case Field(ptr, _):
                 self._validate_expression(ptr)
-                if field not in self.env.node_sort.fields:
-                    raise ValueError(f"Field {field} not in environment")
             case Operator():
                 all(self._validate_expression(arg) for arg in op.args())
             case _:

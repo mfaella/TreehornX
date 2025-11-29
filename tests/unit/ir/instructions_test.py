@@ -17,17 +17,15 @@ from ir.instructions import (
 )
 from ir.sorts import BOOL, INT, REAL, Pointer, Struct
 
-
 birfc_struct_ptr = Pointer(
     Struct(
         "birfc",
+        {"c"},
         {
-            Var("f", Pointer(INT)),
             Var("i", INT),
             Var("r", REAL),
             Var("b", BOOL),
         },
-        {"c"},
     )
 )
 
@@ -35,7 +33,7 @@ birfc_struct_ptr = Pointer(
 class TestInstructions(TestCase):
     def test_IfGoto_validation(self):
         i = Var("i", INT)
-        p = Var("p", Pointer(INT))
+        p = Var("p", birfc_struct_ptr)
         condition = And(Eq(i, 0), PtrIsNil(p))
 
         IfGoto(condition, "label1")
@@ -45,7 +43,7 @@ class TestInstructions(TestCase):
         self.assertRaises(ValueError, lambda: IfGoto(Add(i, 1), "label2"))
 
     def test_PtrAssignNil_validation(self):
-        p = Var("p", Pointer(INT))
+        p = Var("p", birfc_struct_ptr)
         i = Var("i", INT)
         r = Var("r", REAL)
         b = Var("b", BOOL)
@@ -59,14 +57,12 @@ class TestInstructions(TestCase):
     def test_PtrAssignPtr_validation(self):
         p = Var("p", birfc_struct_ptr)
         p2 = Var("p2", birfc_struct_ptr)
-        q = Var("q", Pointer(INT))
         i = Var("i", INT)
         r = Var("r", REAL)
         b = Var("b", BOOL)
 
         PtrAssignPtr(p, p2)
 
-        self.assertRaises(ValueError, lambda: PtrAssignPtr(p, q))
         self.assertRaises(ValueError, lambda: PtrAssignPtr(p, i))
         self.assertRaises(ValueError, lambda: PtrAssignPtr(p, r))
         self.assertRaises(ValueError, lambda: PtrAssignPtr(p, b))
@@ -79,7 +75,6 @@ class TestInstructions(TestCase):
         i = Var("i", INT)
         r = Var("r", REAL)
         b = Var("b", BOOL)
-        ff = Field(p, "f")
         fi = Field(p, "i")
         fr = Field(p, "r")
         fb = Field(p, "b")
@@ -87,22 +82,19 @@ class TestInstructions(TestCase):
 
         PtrAssignField(p, fc)
 
-        self.assertRaises(ValueError, lambda: PtrAssignField(i, ff))
-        self.assertRaises(ValueError, lambda: PtrAssignField(r, ff))
-        self.assertRaises(ValueError, lambda: PtrAssignField(b, ff))
         self.assertRaises(ValueError, lambda: PtrAssignField(p, fi))
         self.assertRaises(ValueError, lambda: PtrAssignField(p, fr))
         self.assertRaises(ValueError, lambda: PtrAssignField(p, fb))
-        self.assertRaises(ValueError, lambda: PtrAssignField(p, ff))
 
     def test_FieldAssignNil_validation(self):
         p = Var("p", birfc_struct_ptr)
-        fq = Field(p, "f")
+        q = Var("p", birfc_struct_ptr)
+        qc = Field(q, "c")
         fi = Field(p, "i")
         fr = Field(p, "r")
         fb = Field(p, "b")
 
-        FieldAssignNil(fq)
+        FieldAssignNil(qc)
 
         self.assertRaises(ValueError, lambda: FieldAssignNil(fi))
         self.assertRaises(ValueError, lambda: FieldAssignNil(fr))
@@ -110,22 +102,20 @@ class TestInstructions(TestCase):
 
     def test_FieldAssignPtr_validation(self):
         p = Var("p", birfc_struct_ptr)
+        q = Var("p", birfc_struct_ptr)
+        qc = Field(q, "c")
         i = Var("i", INT)
         r = Var("r", REAL)
         b = Var("b", BOOL)
-        fq = Field(p, "f")
         fi = Field(p, "i")
         fr = Field(p, "r")
         fb = Field(p, "b")
 
-        FieldAssignPtr(fq, p)
+        FieldAssignPtr(qc, p)
 
         self.assertRaises(ValueError, lambda: FieldAssignPtr(fi, i))
         self.assertRaises(ValueError, lambda: FieldAssignPtr(fr, r))
         self.assertRaises(ValueError, lambda: FieldAssignPtr(fb, b))
-        self.assertRaises(ValueError, lambda: FieldAssignPtr(fq, i))
-        self.assertRaises(ValueError, lambda: FieldAssignPtr(fq, r))
-        self.assertRaises(ValueError, lambda: FieldAssignPtr(fq, b))
 
     def test_VarAssignExpr_validation(self):
         p = Var("p", birfc_struct_ptr)
@@ -188,14 +178,8 @@ class TestInstructions(TestCase):
         i = Var("i", INT)
         r = Var("r", REAL)
         b = Var("b", BOOL)
-        i_ptr = Var("i_ptr", Pointer(INT))
-        r_ptr = Var("r_ptr", Pointer(REAL))
-        b_ptr = Var("b_ptr", Pointer(BOOL))
 
         New(p)
-        New(i_ptr)
-        New(r_ptr)
-        New(b_ptr)
 
         self.assertRaises(ValueError, lambda: New(i))
         self.assertRaises(ValueError, lambda: New(r))
@@ -206,14 +190,8 @@ class TestInstructions(TestCase):
         i = Var("i", INT)
         r = Var("r", REAL)
         b = Var("b", BOOL)
-        i_ptr = Var("i_ptr", Pointer(INT))
-        r_ptr = Var("r_ptr", Pointer(REAL))
-        b_ptr = Var("b_ptr", Pointer(BOOL))
 
         Free(p)
-        Free(i_ptr)
-        Free(r_ptr)
-        Free(b_ptr)
 
         self.assertRaises(ValueError, lambda: Free(i))
         self.assertRaises(ValueError, lambda: Free(r))
