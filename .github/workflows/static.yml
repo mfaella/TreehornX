@@ -44,9 +44,9 @@ jobs:
         run: |
           uv sync  # installs dependencies from pyproject.toml
 
-      - name: Test
+      - name: Build Docs
         run: |
-          uv run task verify
+          uv run task docs
       - name: Setup Pages
         uses: actions/configure-pages@v5
       - name: Upload artifact
