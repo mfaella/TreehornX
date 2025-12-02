@@ -1,2 +1,2 @@
 def ci() -> str:
-    return "CI"
+    return "C I"
