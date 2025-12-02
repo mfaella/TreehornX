@@ -25,3 +25,10 @@ class DuplicateDefinitionError(CParserError):
 
     def __init__(self, line: int, name: str):
         super().__init__(line, f"Duplicate definition encountered: {name}")
+
+
+class UndefinedSymbolError(CParserError):
+    """Raised when an undefined symbol is encountered."""
+
+    def __init__(self, line: int, name: str):
+        super().__init__(line, f"Undefined symbol encountered: {name}")

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import override
 
@@ -19,6 +20,19 @@ class _Labeled:
     """
 
     label: str | None = field(kw_only=True, default=None)
+
+    def with_label(self, label: str) -> _Labeled:
+        """Return a copy of this instruction with the given label.
+
+        Args:
+            label: Label string to attach to the instruction.
+
+        Returns:
+            A copy of this instruction with the specified label.
+        """
+        instr_copy = deepcopy(self)
+        object.__setattr__(instr_copy, "label", label)
+        return instr_copy
 
 
 @dataclass(frozen=True, slots=True)
@@ -283,6 +297,18 @@ class Return(_Labeled):
         label_str = "" if self.label is None else f"{self.label}: "
         value_str = "" if self.value is None else f" {self.value}"
         return f"{label_str} return {value_str}"
+
+
+class Skip(_Labeled):
+    """No-operation instruction.
+
+    This instruction does nothing and is used as a placeholder.
+    """
+
+    @override
+    def __str__(self) -> str:
+        label_str = "" if self.label is None else f"{self.label}: "
+        return f"{label_str} skip"
 
 
 Instruction = (

@@ -1,10 +1,10 @@
 from unittest import TestCase
 
-from ir.enviroment import Enviroment
+from ir.errors import IncompatibleReturnTypeError
 from ir.expressions import *
 from ir.function import Function
 from ir.instructions import *
-from ir.sorts import INT, UNIT, Pointer, Struct
+from ir.sorts import INT, REAL, UNIT, Pointer, Struct
 
 outsider_struct = Struct(name="Outsider", struct_vars={Var("data", INT)}, struct_ptrs={"outsider_next"})
 
@@ -26,7 +26,7 @@ class TestFunction(TestCase):
 
         function = Function(
             name="bsearch",
-            env=Enviroment(node_struct, root=root, local_vars={key, value, curr}),
+            vars={key, value, curr, root},
             return_type=UNIT,
             instructions=(
                 PtrAssignPtr(curr, root),
@@ -51,74 +51,56 @@ class TestFunction(TestCase):
         self.assertEqual(function.info_at(7), InstructionInfo(pc=7, next_pc=1))
         self.assertEqual(function.info_at(8), InstructionInfo(pc=8, next_pc=9))
 
-        # root is not of POINTER sort
-        with self.assertRaises(ValueError):
-            Function(
-                name="f",
-                env=Enviroment(node_struct, root=int_root, local_vars=set()),
-                return_type=UNIT,
-                instructions=(Return(),),
-            )
-
-        # local vars of struct type
-        with self.assertRaises(ValueError):
-            Function(
-                name="f",
-                env=Enviroment(node_struct, root=root, local_vars={outsider_object}),
-                return_type=UNIT,
-                instructions=(Return(),),
-            )
-
-        # non-node_struct pointer in local_vars
-        with self.assertRaises(ValueError):
-            Function(
-                name="f",
-                env=Enviroment(node_struct, root=root, local_vars={ousider_ptr}),
-                return_type=UNIT,
-                instructions=(Return(),),
-            )
-
+    def test_return_type_unit_with_value_raises(self):
         # return type is UNIT but Return has a value
-        with self.assertRaises(ValueError):
+        with self.assertRaises(IncompatibleReturnTypeError):
             Function(
                 name="f",
-                env=Enviroment(node_struct, root=root, local_vars=set()),
+                vars=set(),
                 return_type=UNIT,
                 instructions=(Return(1),),
             )
 
+    def test_return_value_unknown_variable_raises(self):
         # return value is an unknown variable
+        value = Var("value", INT)
         with self.assertRaises(ValueError):
             Function(
                 name="f",
-                env=Enviroment(node_struct, root=root, local_vars=set()),
+                vars=set(),
                 return_type=INT,
                 instructions=(Return(value),),
             )
 
+    def test_return_value_incorrect_sort_raises(self):
         # return value has incorrect sort
-        with self.assertRaises(ValueError):
+        value = Var("value", INT)
+        with self.assertRaises(IncompatibleReturnTypeError):
             Function(
                 name="f",
-                env=Enviroment(node_struct, root=root, local_vars={value}),
+                vars={value},
                 return_type=REAL,
                 instructions=(Return(value),),
             )
 
+    def test_new_instruction_incorrect_pointer_sort_raises(self):
         # New instruction with incorrect pointer sort
+        int_root = Var("int_root", INT)
         with self.assertRaises(ValueError):
             Function(
                 name="f",
-                env=Enviroment(node_struct, root=root, local_vars={int_root}),
+                vars={int_root},
                 return_type=INT,
                 instructions=(New(int_root),),
             )
 
+    def test_free_instruction_incorrect_pointer_sort_raises(self):
         # Free instruction with incorrect pointer sort
+        int_root = Var("int_root", INT)
         with self.assertRaises(ValueError):
             Function(
                 name="f",
-                env=Enviroment(node_struct, root=root, local_vars={int_root}),
+                vars={int_root},
                 return_type=INT,
                 instructions=(Free(int_root),),
             )

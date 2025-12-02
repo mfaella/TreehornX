@@ -7,6 +7,16 @@ from parser._internal.cparser.errors import DuplicateDefinitionError, UnknownTyp
 
 
 class TestCASTVisitor(TestCase):
+    def visit(self, code: str) -> CASTVisitor:
+        ast = CASTVisitor.produce_ast_from_src(code)
+        visitor = CASTVisitor()
+        visitor.visit(ast)
+        return visitor
+
+    def visit_raises(self, code: str, exc: type[Exception]) -> None:
+        with self.assertRaises(exc):
+            return self.visit(code)
+
     # valid structure
     def test_parse_Point_struct(self):
         code = """
@@ -17,9 +27,7 @@ class TestCASTVisitor(TestCase):
         };
         """
 
-        ast = CASTVisitor.produce_ast_from_src(code)
-        visitor = CASTVisitor()
-        visitor.visit(ast)
+        visitor = self.visit(code)
 
         self.assertIn("Point", visitor.sorts)
 
@@ -42,9 +50,7 @@ class TestCASTVisitor(TestCase):
         };
         """
 
-        ast = CASTVisitor.produce_ast_from_src(code)
-        visitor = CASTVisitor()
-        visitor.visit(ast)
+        visitor = self.visit(code)
 
         self.assertIn("RBTree", visitor.sorts)
 
@@ -68,10 +74,7 @@ class TestCASTVisitor(TestCase):
             struct Point* next;
         };
         """
-        with self.assertRaises(DuplicateDefinitionError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, DuplicateDefinitionError)
 
     def test_struct_with_int_ptr_field(self):
         code = """
@@ -81,10 +84,7 @@ class TestCASTVisitor(TestCase):
         };
         """
 
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_other_struct_ptr_field(self):
         code = """
@@ -99,10 +99,7 @@ class TestCASTVisitor(TestCase):
         };
         """
 
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_unknown_type_in_struct_field(self):
         code = """
@@ -112,20 +109,14 @@ class TestCASTVisitor(TestCase):
             struct MyStruct* next;
         };
         """
-        with self.assertRaises(UnknownTypeError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnknownTypeError)
 
     def test_empty_struct(self):
         code = """
         struct EmptyStruct {};
         """
 
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_no_struct_ptr_struct(self):
         code = """
@@ -134,10 +125,7 @@ class TestCASTVisitor(TestCase):
             float b;
         };
         """
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_parse_anonymous_struct(self):
         code = """
@@ -147,20 +135,14 @@ class TestCASTVisitor(TestCase):
         } point;
         """
 
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_struct_with_no_fields(self):
         code = """
         struct Empty;
         """
 
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_inner_anonyomous_struct_field(self):
         code = """
@@ -170,10 +152,7 @@ class TestCASTVisitor(TestCase):
         };
         """
 
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_inner_struct_field(self):
         code = """
@@ -189,10 +168,7 @@ class TestCASTVisitor(TestCase):
         };
         """
 
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_struct_instance_decl_field(self):
         code = """
@@ -202,10 +178,7 @@ class TestCASTVisitor(TestCase):
         } l;
         """
 
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_non_struct_ptr_field(self):
         code = """
@@ -215,10 +188,7 @@ class TestCASTVisitor(TestCase):
         };
         """
 
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_field_name_duplication(self):
         code = """
@@ -228,10 +198,7 @@ class TestCASTVisitor(TestCase):
         };
         """
 
-        with self.assertRaises(DuplicateDefinitionError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, DuplicateDefinitionError)
 
     def test_field_name_duplication_with_pointer(self):
         code = """
@@ -241,10 +208,7 @@ class TestCASTVisitor(TestCase):
         };
         """
 
-        with self.assertRaises(DuplicateDefinitionError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, DuplicateDefinitionError)
 
     def test_unvalued_enum(self):
         code = """
@@ -254,9 +218,7 @@ class TestCASTVisitor(TestCase):
             BLUE
         };
         """
-        ast = CASTVisitor.produce_ast_from_src(code)
-        visitor = CASTVisitor()
-        visitor.visit(ast)
+        visitor = self.visit(code)
 
         enum = visitor.sorts["Color"]
         self.assertIsInstance(enum, Enum)
@@ -274,9 +236,7 @@ class TestCASTVisitor(TestCase):
             BLUE = 10000
         };
         """
-        ast = CASTVisitor.produce_ast_from_src(code)
-        visitor = CASTVisitor()
-        visitor.visit(ast)
+        visitor = self.visit(code)
 
         enum = visitor.sorts["Color"]
         self.assertIsInstance(enum, Enum)
@@ -297,9 +257,7 @@ class TestCASTVisitor(TestCase):
             BLUE
         };
         """
-        ast = CASTVisitor.produce_ast_from_src(code)
-        visitor = CASTVisitor()
-        visitor.visit(ast)
+        visitor = self.visit(code)
 
         enum = visitor.sorts["Color"]
         self.assertIsInstance(enum, Enum)
@@ -326,10 +284,7 @@ class TestCASTVisitor(TestCase):
         };
         """
 
-        with self.assertRaises(DuplicateDefinitionError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, DuplicateDefinitionError)
 
     def test_enum_value_duplication(self):
         code = """
@@ -340,10 +295,7 @@ class TestCASTVisitor(TestCase):
         };
         """
 
-        with self.assertRaises(DuplicateDefinitionError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, DuplicateDefinitionError)
 
     def test_anonymous_enum(self):
         code = """
@@ -354,10 +306,7 @@ class TestCASTVisitor(TestCase):
         } Color;
         """
 
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_struct_with_enum_field(self):
         code = """
@@ -372,9 +321,7 @@ class TestCASTVisitor(TestCase):
         };
         """
 
-        ast = CASTVisitor.produce_ast_from_src(code)
-        visitor = CASTVisitor()
-        visitor.visit(ast)
+        visitor = self.visit(code)
 
         Color = visitor.sorts["Color"]
         RBTree = visitor.sorts["RBTree"]
@@ -395,10 +342,7 @@ class TestCASTVisitor(TestCase):
             struct MyStruct* next;
         };
         """
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_float_enum_values(self):
         code = """
@@ -408,10 +352,7 @@ class TestCASTVisitor(TestCase):
             BLUE
         };
         """
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_string_enum_values(self):
         code = """
@@ -421,10 +362,7 @@ class TestCASTVisitor(TestCase):
             BLUE
         };
         """
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_char_enum_values(self):
         code = """
@@ -434,7 +372,129 @@ class TestCASTVisitor(TestCase):
             BLUE
         };
         """
-        with self.assertRaises(UnsupportedFeatureError):
-            ast = CASTVisitor.produce_ast_from_src(code)
-            visitor = CASTVisitor()
-            visitor.visit(ast)
+        self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_int_global_variable(self):
+        code = """
+        int x;
+        """
+
+        self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_enum_global_variable(self):
+        code = """
+        enum Color {
+            RED,
+            GREEN,
+            BLUE
+        };
+
+        enum Color favorite_color;
+        """
+
+        self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_struct_global_variable(self):
+        code = """
+        struct Color {
+            int red;
+            int green;
+            int blue;
+        };
+
+        struct Color favorite_color;
+        """
+
+        self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_struct_ptr_global_variable(self):
+        code = """
+        struct Color {
+            int red;
+            int green;
+            int blue;
+        };
+
+        struct Color* favorite_color;
+        """
+
+        self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_typedef_int(self):
+        code = """
+        typedef int my_int;
+        """
+
+        self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_typedef_struct(self):
+        code = """
+        typedef struct Point {
+            float x;
+            float y;
+        } Point;
+        """
+        self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_function_declaration(self):
+        code = """
+        int add(int a, int b);
+        """
+
+        self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_union_definition(self):
+        code = """
+        union Data {
+            int i;
+            float f;
+        } u;
+        """
+        self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_variable_initialization(self):
+        code = "int add2(int x) { int a = 2; return x + a; }"
+        self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_variable_wrong_expr_assignment(self):
+        code = "int add2(int x) { int a; a = 2.5; return a; }"
+        self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_wrong_return_type(self):
+        code = "int add2(int x) { return 2.5; }"
+        self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_valid_sum_function(self):
+        code = """
+        int sum(int a, int b) {
+            return a + b;
+        }
+        """
+
+        self.visit(code)
+
+    def test_incompatible_type_operands(self):
+        code = """
+        int compare(int a, float b) {
+            return a < b;
+        }
+        """
+
+        self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_incompatible_return_type(self):
+        code = """
+        _Bool is_positive(int a) {
+            return a + 1;
+        }
+        """
+
+        self.visit_raises(code, UnsupportedFeatureError)
+
+        code = """
+        void do_nothing() {
+            return 42;
+        }
+        """
+
+        self.visit_raises(code, UnsupportedFeatureError)

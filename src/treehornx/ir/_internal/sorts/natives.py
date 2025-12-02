@@ -62,8 +62,6 @@ class Pointer(Sort):
 
     def __init__(self, pointee: Sort):
         super().__init__(name=f"pointer[{pointee}]")
-        if not pointee.is_struct():
-            raise ValueError("not pointee.is_struct()")
         object.__setattr__(self, "pointee", pointee)
         object.__setattr__(self, "_pointee_id", id(pointee))
 

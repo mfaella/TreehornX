@@ -296,6 +296,44 @@ class PtrIsPtr(_BinaryOperator):
         return "is"
 
 
+# deleted because hard to map into the knitted tree framwors
+# @dataclass(frozen=True, slots=True)
+# @_validate(_only_pointers)
+# class FieldIsNil(_UnaryOperator):
+#     """Check whether a field expression is nil.
+
+#     Accepts a single field expression and returns a boolean-like operator.
+#     """
+
+#     def __post_init__(self):
+#         if not isinstance(self.argument, Field):
+#             raise ValueError("not isinstance(self.argument, Field)")
+
+#     @override
+#     def name(self) -> str:
+#         return "isnil"
+
+
+# @dataclass(frozen=True, slots=True)
+# @_validate(_only_pointers)
+# class FieldIsPtr(_BinaryOperator):
+#     """Check pointer identity between a pointer expression and a field expression.
+
+#     Used to compare a pointer-typed expression and a field-typed expression for pointer equality.
+#     """
+
+#     def __post_init__(self):
+#         if not isinstance(self.left, Field):
+#             raise ValueError("not isinstance(self.left, Field)")
+
+#         if not isinstance(self.right, Var):
+#             raise ValueError("not isinstance(self.right, Var)")
+
+#     @override
+#     def name(self) -> str:
+#         return "is"
+
+
 @dataclass(frozen=True, slots=True, init=False)
 @_validate(_boolean, _no_fields)
 class And(_AssociativeOperator):

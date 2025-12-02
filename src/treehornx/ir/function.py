@@ -4,7 +4,8 @@ from collections.abc import Sequence
 from dataclasses import dataclass, field
 from typing import cast
 
-from .enviroment import Enviroment
+from ir.errors import IncompatibleReturnTypeError
+
 from .expressions import Expr, Field, Operator, Var, sort_of
 from .instructions import (
     FieldAssignExpr,
@@ -31,13 +32,12 @@ class Function:
 
     Attributes:
         name: The function name.
-        env: The `Enviroment` describing parameters, locals and fields.
         return_type: The function return `Sort`.
         instructions: A sequence of `Instruction` objects forming the function body.
     """
 
     name: str
-    env: Enviroment
+    vars: set[Var]
     return_type: Sort
     instructions: Sequence[Instruction]
 
@@ -103,14 +103,8 @@ class Function:
     def _validate_expression(self, op: Expr) -> None:
         match op:
             case Var(_, _):
-                if op not in self.env.vars:
-                    raise ValueError(f"Variable {op} not in environment")
-                sort_op = sort_of(op)
-                if not sort_op.is_ptr():
-                    return
-                sort_op = cast(Pointer, sort_op)
-                if sort_op.pointee is not self.env.node_sort:
-                    raise ValueError(f"Variable {op} has invalid sort")
+                if op not in self.vars:
+                    raise ValueError(f"Variable {op} not declared in function scope")
             case Field(ptr, _):
                 self._validate_expression(ptr)
             case Operator():
@@ -126,14 +120,11 @@ class Function:
         for instr in self.instructions:
             self._validate_instruction(instr)
 
-        if not sort_of(self.env.root).is_ptr():
-            raise ValueError("sort_of(self.env.root) is not POINTER")
-
         for instr in self.instructions:
             if isinstance(instr, Return):
                 sort = UNIT if instr.value is None else sort_of(instr.value)
                 if sort is not self.return_type:
-                    raise ValueError(f"sort_of(instr.value) is not self.return_type")
+                    raise IncompatibleReturnTypeError(f"sort is not self.return_type")
 
     def info_of(self, instr: Instruction) -> InstructionInfo:
         return self._info[id(instr)]

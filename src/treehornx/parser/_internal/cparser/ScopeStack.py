@@ -37,3 +37,14 @@ class ScopeStack:
         var = Var(name=mangled_name, sort=sort)
         current_scope[name] = var
         self.vars.add(var)
+
+    def is_variable_declared(self, name: str) -> bool:
+        for scope in reversed(self.stack):
+            if name in scope:
+                return True
+        return False
+
+    def clear(self) -> None:
+        self.stack.clear()
+        self.vars_counters.clear()
+        self.vars.clear()
