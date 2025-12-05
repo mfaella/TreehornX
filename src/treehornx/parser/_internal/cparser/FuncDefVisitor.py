@@ -7,7 +7,7 @@ from ir.instructions import *
 from ir.sorts import *
 from pycparser import c_ast
 
-from .errors import UnsupportedFeatureError
+from .errors import UndefinedSymbolError, UnknownTypeError, UnsupportedFeatureError
 from .ExprVisitor import ExprVisitor
 from .ScopeStack import ScopeStack
 
@@ -212,7 +212,7 @@ class FuncDefVisitor(c_ast.NodeVisitor):
 
         whilebody_first, *whilebody_tail = self.visit(node.stmt)
         whilebody_label = (
-            iftrue_first.name if isinstance(iftrue_first, c_ast.Label) else f"#WHILE_BODY_{self.cond_counter}"
+            whilebody_first.name if isinstance(whilebody_first, c_ast.Label) else f"#WHILE_BODY_{self.cond_counter}"
         )
         whilecond_label = f"#WHILE_COND_{self.cond_counter}"
 
@@ -237,3 +237,15 @@ class FuncDefVisitor(c_ast.NodeVisitor):
             yield Return()
         else:
             yield Return(value=ret_expr)
+
+    def visit_Label(self, node: c_ast.Label) -> Iterable[Instruction]:
+        label_name = node.name
+        stmt = node.stmt
+        if stmt is None:
+            yield Skip(label=label_name)
+        else:
+            inst = next(self.visit(stmt))
+            yield inst.with_label(label_name)
+
+    def visit_Goto(self, node: c_ast.Goto) -> Iterable[Instruction]:
+        yield Goto(target=node.name)

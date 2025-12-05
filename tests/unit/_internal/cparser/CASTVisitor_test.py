@@ -651,3 +651,66 @@ class TestCASTVisitor(TestCase):
                 Skip(label="#ENDIF_0"),
             ),
         )
+
+    def test_while(self):
+        code = """
+        void countdown() {
+            int n;
+            n = 10;
+            while (n > 0) {
+                int x;
+                x = 1;
+                n = n - 1;
+            }
+        }
+        """
+        visitor = self.visit(code)
+        self.assertIn("countdown", visitor.functions)
+        f = visitor.functions["countdown"]
+        n = Var("n_0", INT)
+        x = Var("x_0", INT)
+        self.assertEqual(f.vars, {n, x})
+        self.assertIs(f.return_type, UNIT)
+        self.assertEqual(len(f.instructions), 5)
+        self.assertEqual(
+            f.instructions,
+            (
+                VarAssignExpr(n, 10),
+                Goto("#WHILE_COND_0"),
+                VarAssignExpr(x, 1, label="#WHILE_BODY_0"),
+                VarAssignExpr(n, Sub(n, 1)),
+                IfGoto(Gt(n, 0), "#WHILE_BODY_0", label="#WHILE_COND_0"),
+            ),
+        )
+
+    def test_nested_goto(self):
+        code = """
+        void nested_goto(int x) {
+            if (x > 0) {
+                x = x + 1;
+                goto end;
+            }
+            x = x - 1;
+        end:
+            return;
+        }
+        """
+        visitor = self.visit(code)
+        self.assertIn("nested_goto", visitor.functions)
+        f = visitor.functions["nested_goto"]
+        x = Var("x_0", INT)
+        self.assertEqual(f.vars, {x})
+        self.assertIs(f.return_type, UNIT)
+        self.assertEqual(len(f.instructions), 7)
+        self.assertEqual(
+            f.instructions,
+            (
+                IfGoto(Gt(x, 0), "#IFTRUE_0"),
+                Goto("#ENDIF_0"),
+                VarAssignExpr(x, Add(x, 1), label="#IFTRUE_0"),
+                Goto("end"),
+                Skip(label="#ENDIF_0"),
+                VarAssignExpr(x, Sub(x, 1)),
+                Return(label="end"),
+            ),
+        )
