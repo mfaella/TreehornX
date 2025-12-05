@@ -1,11 +1,12 @@
+from cmath import isinf
 from dataclasses import dataclass, field
-from parser._internal.cparser.errors import UndefinedSymbolError, UnsupportedFeatureError
 from typing import override
 
-from ir.expressions import Add, And, Div, Eq, Expr, Ge, Gt, Le, Lt, Mod, Mul, Ne, Not, Or, PtrIsNil, Sub, Var
+from ir.expressions import Add, And, Div, Eq, Expr, Ge, Gt, Le, Lt, Mod, Mul, Ne, Not, Or, PtrIsNil, PtrIsPtr, Sub, Var
 from ir.instructions import Instruction
-from ir.sorts import Int, Real, Sort
+from ir.sorts import BOOL, Int, Real, Sort
 from ir.utils import *
+from parser._internal.cparser.errors import UndefinedSymbolError, UnsupportedFeatureError
 from pycparser import c_ast
 
 from .ScopeStack import ScopeStack
@@ -52,7 +53,10 @@ class ExprVisitor(c_ast.NodeVisitor):
         match node.op:
             case "!":
                 expr = self.visit(node.expr)
-                return Not(expr)
+                if isinstance(expr, Var) and sort_of(expr).is_ptr():
+                    return PtrIsNil(expr)
+                else:
+                    return Not(expr)
             case _:
                 raise UnsupportedFeatureError(node.coord.line, f"Unary operator '{node.op}' is not supported.")
 
@@ -62,7 +66,7 @@ class ExprVisitor(c_ast.NodeVisitor):
         right = self.visit(node.right)
 
         type_safe_arith_expr = lambda l, r: is_same_sort(l, r) and is_arithmetic_expression(l)
-        type_safe_bool_expr = lambda l, r: is_same_sort(l, r) and sort_of(l) is Bool
+        type_safe_bool_expr = lambda l, r: is_same_sort(l, r) and sort_of(l) is BOOL
 
         match node.op:
             case "!=" | "==" if not is_same_sort(left, right):
@@ -75,11 +79,16 @@ class ExprVisitor(c_ast.NodeVisitor):
                     node.coord.line,
                     f"Operator '{node.op}' requires both operands to be of the same arithmetic sort (Int or Real).",
                 )
-            case "&&" | "||" if not type_safe_bool_expr(left, right):
-                raise UnsupportedFeatureError(
-                    node.coord.line,
-                    f"Operator '{node.op}' requires both operands to be of the same Boolean sort.",
-                )
+            case "&&" | "||":
+                if isinstance(left, Var) and sort_of(left).is_ptr():
+                    left = Not(PtrIsNil(left))
+                if isinstance(right, Var) and sort_of(right).is_ptr():
+                    right = Not(PtrIsNil(right))
+                if not type_safe_bool_expr(left, right):
+                    raise UnsupportedFeatureError(
+                        node.coord.line,
+                        f"Operator '{node.op}' requires both operands to be of the same Boolean sort.",
+                    )
 
         match node.op:
             case "+":

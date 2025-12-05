@@ -108,7 +108,7 @@ class Operator(Protocol):
 
     @override
     def __str__(self) -> str:
-        args: tuple[Expr, ...] = getattr(self, "args")
+        args: tuple[Expr, ...] = self.args()
         name = self.name()
         return f"({name} {' '.join(map(str, args))})"
 

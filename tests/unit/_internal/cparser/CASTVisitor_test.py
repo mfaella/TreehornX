@@ -1,15 +1,16 @@
 from unittest import TestCase
 
-from ir.expressions import Var
-from ir.sorts import BOOL, INT, REAL, Enum, Pointer, Struct
-from parser._internal.cparser.CASTVisitor import CASTVisitor
+from ir.expressions import Add, And, Div, Eq, Ge, Gt, Le, Lt, Mod, Mul, Ne, Not, Or, PtrIsNil, PtrIsPtr, Sub, Var
+from ir.instructions import Goto, IfGoto, Return, Skip, VarAssignExpr
+from ir.sorts import BOOL, INT, REAL, UNIT, Enum, Pointer, Struct
 from parser._internal.cparser.errors import DuplicateDefinitionError, UnknownTypeError, UnsupportedFeatureError
+from parser._internal.cparser.FileVisitor import FileVisitor
 
 
 class TestCASTVisitor(TestCase):
-    def visit(self, code: str) -> CASTVisitor:
-        ast = CASTVisitor.produce_ast_from_src(code)
-        visitor = CASTVisitor()
+    def visit(self, code: str) -> FileVisitor:
+        ast = FileVisitor.produce_ast_from_src(code)
+        visitor = FileVisitor()
         visitor.visit(ast)
         return visitor
 
@@ -236,15 +237,7 @@ class TestCASTVisitor(TestCase):
             BLUE = 10000
         };
         """
-        visitor = self.visit(code)
-
-        enum = visitor.sorts["Color"]
-        self.assertIsInstance(enum, Enum)
-        self.assertEqual(enum.name, "Color")
-        self.assertEqual(len(enum.flags), 3)
-        self.assertEqual(enum.flags["RED"], 12)
-        self.assertEqual(enum.flags["GREEN"], 7)
-        self.assertEqual(enum.flags["BLUE"], 10_000)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_partially_valued_enum(self):
         code = """
@@ -257,18 +250,7 @@ class TestCASTVisitor(TestCase):
             BLUE
         };
         """
-        visitor = self.visit(code)
-
-        enum = visitor.sorts["Color"]
-        self.assertIsInstance(enum, Enum)
-        self.assertEqual(enum.name, "Color")
-        self.assertEqual(len(enum.flags), 6)
-        self.assertEqual(enum.flags["RED"], 0)
-        self.assertEqual(enum.flags["ORANGE"], 32)
-        self.assertEqual(enum.flags["YELLOW"], 33)
-        self.assertEqual(enum.flags["GREEN"], 33)
-        self.assertEqual(enum.flags["CYAN"], 45)
-        self.assertEqual(enum.flags["BLUE"], 46)
+        self.visit_raises(code, UnsupportedFeatureError)
 
     def test_enum_name_duplication(self):
         code = """
@@ -289,9 +271,9 @@ class TestCASTVisitor(TestCase):
     def test_enum_value_duplication(self):
         code = """
         enum Color {
-            RED = 1,
-            RED = 2,
-            BLUE = 3
+            RED,
+            RED,
+            BLUE
         };
         """
 
@@ -300,9 +282,9 @@ class TestCASTVisitor(TestCase):
     def test_anonymous_enum(self):
         code = """
         enum {
-            RED = 1,
-            GREEN = 2,
-            BLUE = 3
+            RED,
+            GREEN,
+            BLUE
         } Color;
         """
 
@@ -498,3 +480,174 @@ class TestCASTVisitor(TestCase):
         """
 
         self.visit_raises(code, UnsupportedFeatureError)
+
+    def test_composed_expressions(self):
+        code = """
+        int complex_operation(int a, int b, int c) {
+            return (a + b) * (b - c) / (a % (c + 1));
+        }
+        """
+
+        visitor = self.visit(code)
+        self.assertIn("complex_operation", visitor.functions)
+        f = visitor.functions["complex_operation"]
+        a = Var("a_0", INT)
+        b = Var("b_0", INT)
+        c = Var("c_0", INT)
+        self.assertEqual(f.vars, {a, b, c})
+        self.assertIs(f.return_type, INT)
+        self.assertEqual(len(f.instructions), 1)
+        self.assertEqual(f.instructions[0], Return(Div(Mul(Add(a, b), Sub(b, c)), Mod(a, Add(c, 1)))))
+
+    def test_bool_complex_expression(self):
+        code = """
+        _Bool complex_bool(_Bool x, _Bool y, _Bool z) {
+            return (x && y) || (!z);
+        }
+        """
+
+        visitor = self.visit(code)
+        self.assertIn("complex_bool", visitor.functions)
+        f = visitor.functions["complex_bool"]
+        x = Var("x_0", BOOL)
+        y = Var("y_0", BOOL)
+        z = Var("z_0", BOOL)
+        self.assertEqual(f.vars, {x, y, z})
+        self.assertIs(f.return_type, BOOL)
+        self.assertEqual(len(f.instructions), 1)
+        self.assertEqual(f.instructions[0], Return(Or(And(x, y), Not(z))))
+
+    def test_pointer_equality(self):
+        code = """
+        struct Node {
+            int value;
+            struct Node* next;
+        };
+
+        _Bool are_same_pointers(struct Node* p1, struct Node* p2) {
+            return p1 == p2;
+        }
+        """
+
+        visitor = self.visit(code)
+        self.assertIn("are_same_pointers", visitor.functions)
+        f = visitor.functions["are_same_pointers"]
+        p1 = Var("p1_0", Pointer(visitor.sorts["Node"]))
+        p2 = Var("p2_0", Pointer(visitor.sorts["Node"]))
+        self.assertEqual(f.vars, {p1, p2})
+        self.assertIs(f.return_type, BOOL)
+        self.assertEqual(len(f.instructions), 1)
+        self.assertEqual(f.instructions[0], Return(PtrIsPtr(p1, p2)))
+
+    def test_pointer_inequality(self):
+        code = """
+        struct Node {
+            int value;
+            struct Node* next;
+        };
+        _Bool are_different_pointers(struct Node* p1, struct Node* p2) {
+            return p1 != p2;
+        }
+        """
+        visitor = self.visit(code)
+        self.assertIn("are_different_pointers", visitor.functions)
+        f = visitor.functions["are_different_pointers"]
+        p1 = Var("p1_0", Pointer(visitor.sorts["Node"]))
+        p2 = Var("p2_0", Pointer(visitor.sorts["Node"]))
+        self.assertEqual(f.vars, {p1, p2})
+        self.assertIs(f.return_type, BOOL)
+        self.assertEqual(len(f.instructions), 1)
+        self.assertEqual(f.instructions[0], Return(Not(PtrIsPtr(p1, p2))))
+
+    def test_pointer_is_nil(self):
+        code = """
+        struct Node {
+            int value;
+            struct Node* next;
+        };
+        _Bool is_nil(struct Node* p) {
+            return p;
+        }
+        """
+        visitor = self.visit(code)
+        self.assertIn("is_nil", visitor.functions)
+        f = visitor.functions["is_nil"]
+        p = Var("p_0", Pointer(visitor.sorts["Node"]))
+        self.assertEqual(f.vars, {p})
+        self.assertIs(f.return_type, BOOL)
+        self.assertEqual(len(f.instructions), 1)
+        self.assertEqual(f.instructions[0], Return(Not(PtrIsNil(p))))
+
+    def test_pointer_is_not_nil(self):
+        code = """
+        struct Node {
+            int value;
+            struct Node* next;
+        };
+        _Bool is_not_nil(struct Node* p) {
+            return !p;
+        }
+        """
+        visitor = self.visit(code)
+        self.assertIn("is_not_nil", visitor.functions)
+        f = visitor.functions["is_not_nil"]
+        p = Var("p_0", Pointer(visitor.sorts["Node"]))
+        self.assertEqual(f.vars, {p})
+        self.assertIs(f.return_type, BOOL)
+        self.assertEqual(len(f.instructions), 1)
+        self.assertEqual(f.instructions[0], Return(PtrIsNil(p)))
+
+    def test_if(self):
+        code = """
+        void max(int a, int b) {
+            if (a > b) {
+                a = a + b;
+            }
+        }
+        """
+        visitor = self.visit(code)
+        self.assertIn("max", visitor.functions)
+        f = visitor.functions["max"]
+        a = Var("a_0", INT)
+        b = Var("b_0", INT)
+        self.assertEqual(f.vars, {a, b})
+        self.assertIs(f.return_type, UNIT)
+        self.assertEqual(len(f.instructions), 4)
+        self.assertEqual(
+            f.instructions,
+            (
+                IfGoto(Gt(a, b), "#IFTRUE_0"),
+                Goto("#ENDIF_0"),
+                VarAssignExpr(a, Add(a, b), label="#IFTRUE_0"),
+                Skip(label="#ENDIF_0"),
+            ),
+        )
+
+    def test_if_else(self):
+        code = """
+        void max(int a, int b) {
+            if (a > b) {
+                a = a + b;
+            } else {
+                b = a + b;
+            }
+        }
+        """
+        visitor = self.visit(code)
+        self.assertIn("max", visitor.functions)
+        f = visitor.functions["max"]
+        a = Var("a_0", INT)
+        b = Var("b_0", INT)
+        self.assertEqual(f.vars, {a, b})
+        self.assertIs(f.return_type, UNIT)
+        self.assertEqual(len(f.instructions), 5)
+        self.assertEqual(
+            f.instructions,
+            (
+                IfGoto(Gt(a, b), "#IFTRUE_0"),
+                VarAssignExpr(b, Add(a, b)),
+                Goto("#ENDIF_0"),
+                VarAssignExpr(a, Add(a, b), label="#IFTRUE_0"),
+                Skip(label="#ENDIF_0"),
+            ),
+        )

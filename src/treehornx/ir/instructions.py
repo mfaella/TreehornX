@@ -296,7 +296,7 @@ class Return(_Labeled):
     def __str__(self) -> str:
         label_str = "" if self.label is None else f"{self.label}: "
         value_str = "" if self.value is None else f" {self.value}"
-        return f"{label_str} return {value_str}"
+        return f"{label_str}return{value_str}"
 
 
 class Skip(_Labeled):
