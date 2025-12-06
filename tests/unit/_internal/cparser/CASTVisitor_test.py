@@ -1,7 +1,7 @@
 from unittest import TestCase
 
-from ir.expressions import Add, And, Div, Eq, Ge, Gt, Le, Lt, Mod, Mul, Ne, Not, Or, PtrIsNil, PtrIsPtr, Sub, Var
-from ir.instructions import Goto, IfGoto, Return, Skip, VarAssignExpr
+from ir.expressions import Add, And, Div, Eq, Field, Ge, Gt, Le, Lt, Mod, Mul, Ne, Not, Or, PtrIsNil, PtrIsPtr, Sub, Var
+from ir.instructions import FieldAssignExpr, Free, Goto, IfGoto, New, Return, Skip, VarAssignExpr
 from ir.sorts import BOOL, INT, REAL, UNIT, Enum, Pointer, Struct
 from parser._internal.cparser.errors import DuplicateDefinitionError, UnknownTypeError, UnsupportedFeatureError
 from parser._internal.cparser.FileVisitor import FileVisitor
@@ -713,4 +713,55 @@ class TestCASTVisitor(TestCase):
                 VarAssignExpr(x, Sub(x, 1)),
                 Return(label="end"),
             ),
+        )
+
+    def test_malloc_usage(self):
+        code = """
+        struct Node {
+            int value;
+            struct Node* next;
+        };
+        void create_node(int val) {
+            struct Node* new_node;
+            new_node = malloc(sizeof(struct Node));
+            new_node->value = val;
+        }
+        """
+
+        visitor = self.visit(code)
+        self.assertIn("create_node", visitor.functions)
+        f = visitor.functions["create_node"]
+        new_node = Var("new_node_0", Pointer(visitor.sorts["Node"]))
+        val = Var("val_0", INT)
+        self.assertEqual(f.vars, {new_node, val})
+        self.assertIs(f.return_type, UNIT)
+        self.assertEqual(len(f.instructions), 2)
+        self.assertEqual(
+            f.instructions,
+            (
+                New(new_node),
+                FieldAssignExpr(Field(new_node, "value"), val),
+            ),
+        )
+
+    def test_free_usage(self):
+        code = """
+        struct Node {
+            int value;
+            struct Node* next;
+        };
+        void delete_node(struct Node* node) {
+            free(node);
+        }
+        """
+        visitor = self.visit(code)
+        self.assertIn("delete_node", visitor.functions)
+        f = visitor.functions["delete_node"]
+        node = Var("node_0", Pointer(visitor.sorts["Node"]))
+        self.assertEqual(f.vars, {node})
+        self.assertIs(f.return_type, UNIT)
+        self.assertEqual(len(f.instructions), 1)
+        self.assertEqual(
+            f.instructions,
+            (Free(node),),
         )

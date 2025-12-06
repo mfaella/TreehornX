@@ -90,11 +90,6 @@ class Function:
             case FieldAssignExpr(field, expr):
                 self._validate_expression(field)
                 self._validate_expression(expr)
-            case Return(value) if value is not None:
-                self._validate_expression(value)
-            case Free(pointer) | New(pointer):
-                if pointer.sort.sort is not self.env.node_sort:  # type: ignore
-                    raise ValueError(f"pointer.sort.sort is not self.env.node_sort")
             case Return(expr) if expr is not None:
                 self._validate_expression(expr)
             case _:

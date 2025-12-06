@@ -123,55 +123,65 @@ class FuncDefVisitor(c_ast.NodeVisitor):
         return expr_visitor.visit(node)
 
     def visit_Assignment(self, node: c_ast.Assignment) -> Iterable[Instruction]:
-        if not self.scopes.is_variable_declared(node.lvalue.name):
-            raise UndefinedSymbolError(node.coord.line, f"Variable '{node.lvalue.name}' is not defined.")
+        expr_visitor = ExprVisitor(self.scopes)
 
         match node.lvalue:
-            case c_ast.ID():
-                lvalue_name = node.lvalue.name
-                lvalue = self.scopes.get_variable(lvalue_name)
-            case c_ast.StructRef():
-                lvalue = self.visit(node.lvalue)
+            case c_ast.ID() | c_ast.StructRef():
+                lvalue = expr_visitor.visit(node.lvalue)
             case _:
                 raise UnsupportedFeatureError(node.coord.line, "Only simple variable assignments are supported.")
 
-        rvalue = self.visit_expr(node.rvalue)
-
-        match node.op:
-            case "=":
-                if sort_of(lvalue) is not sort_of(rvalue):
-                    raise UnsupportedFeatureError(
-                        node.coord.line,
-                        "Type mismatch between left-hand side and right-hand side of assignment.",
-                    )
-                if sort_of(lvalue).is_ptr():
-                    match lvalue, rvalue:
-                        case Var(), 0:
-                            yield PtrAssignNil(pointer=lvalue)
-                        case Var(), Var():
-                            yield PtrAssignPtr(left=lvalue, right=rvalue)
-                        case Var(), Field():
-                            yield PtrAssignField(left=lvalue, right=rvalue)
-                        case Field(), 0:
-                            yield FieldAssignNil(field=lvalue)
-                        case Field(), Var():
-                            yield FieldAssignPtr(field=lvalue, pointer=rvalue)
-                        case _:
-                            raise UnsupportedFeatureError(
-                                node.coord.line,
-                                "Unsupported assignment operation for pointer types.",
-                            )
-                else:
-                    match lvalue, rvalue:
-                        case Var(), _:
-                            yield VarAssignExpr(left=lvalue, right=rvalue)
-                        case Field(), _:
-                            yield FieldAssignExpr(left=lvalue, right=rvalue)
-            case _:
+        if isinstance(node.rvalue, c_ast.FuncCall):
+            if node.rvalue.name.name != "malloc":
                 raise UnsupportedFeatureError(
                     node.coord.line,
-                    f"Unsupported assignment operator '{node.op}'.",
+                    "Only 'malloc' function calls are supported on the right-hand side of assignments.",
                 )
+            sort = self.visit(node.rvalue)
+            if Pointer(sort) is not sort_of(lvalue):
+                raise UnsupportedFeatureError(
+                    node.coord.line,
+                    "Type mismatch between left-hand side and right-hand side of assignment.",
+                )
+            yield New(lvalue)
+        else:
+            rvalue = self.visit_expr(node.rvalue)
+
+            match node.op:
+                case "=":
+                    if sort_of(lvalue) is not sort_of(rvalue):
+                        raise UnsupportedFeatureError(
+                            node.coord.line,
+                            "Type mismatch between left-hand side and right-hand side of assignment.",
+                        )
+                    if sort_of(lvalue).is_ptr():
+                        match lvalue, rvalue:
+                            case Var(), 0:
+                                yield PtrAssignNil(pointer=lvalue)
+                            case Var(), Var():
+                                yield PtrAssignPtr(left=lvalue, right=rvalue)
+                            case Var(), Field():
+                                yield PtrAssignField(left=lvalue, right=rvalue)
+                            case Field(), 0:
+                                yield FieldAssignNil(field=lvalue)
+                            case Field(), Var():
+                                yield FieldAssignPtr(field=lvalue, pointer=rvalue)
+                            case _:
+                                raise UnsupportedFeatureError(
+                                    node.coord.line,
+                                    "Unsupported assignment operation for pointer types.",
+                                )
+                    else:
+                        match lvalue, rvalue:
+                            case Var(), _:
+                                yield VarAssignExpr(left=lvalue, right=rvalue)
+                            case Field(), _:
+                                yield FieldAssignExpr(left=lvalue, right=rvalue)
+                case _:
+                    raise UnsupportedFeatureError(
+                        node.coord.line,
+                        f"Unsupported assignment operator '{node.op}'.",
+                    )
 
     def visit_condition(self, node: c_ast.Node) -> Expr:
         cond = self.visit_expr(node)
@@ -249,3 +259,46 @@ class FuncDefVisitor(c_ast.NodeVisitor):
 
     def visit_Goto(self, node: c_ast.Goto) -> Iterable[Instruction]:
         yield Goto(target=node.name)
+
+    def visit_FuncCall(self, node: c_ast.FuncCall) -> Sort | Iterable[Instruction]:
+        match node.name.name:
+            case "malloc":
+                if len(node.args.exprs) != 1:
+                    raise UnsupportedFeatureError(node.coord.line, "Function 'malloc' requires exactly one argument.")
+                arg = node.args.exprs[0]
+                if not isinstance(arg, c_ast.UnaryOp) and arg.op != "sizeof":
+                    raise UnsupportedFeatureError(node.coord.line, "Function 'malloc' requires a 'sizeof' argument.")
+                return self.visit(arg)
+
+            case "free":
+                if len(node.args.exprs) != 1:
+                    raise UnsupportedFeatureError(node.coord.line, "Function 'free' requires exactly one argument.")
+                arg = node.args.exprs[0]
+                ptr = self.visit_expr(arg)
+                if not isinstance(ptr, Var):
+                    raise UnsupportedFeatureError(node.coord.line, "Function 'free' requires a variable argument.")
+                if not sort_of(ptr).is_ptr():
+                    raise UnsupportedFeatureError(node.coord.line, "Function 'free' requires a pointer argument.")
+                return (Free(pointer=ptr),)
+            case "sizeof":
+                if len(node.args.exprs) != 1:
+                    raise UnsupportedFeatureError(node.coord.line, "Function 'sizeof' requires exactly one argument.")
+                arg = node.args.exprs[0]
+                match arg:
+                    case c_ast.TypeDecl():
+                        sort = self.visit(arg)
+                        return sort
+                    case _:
+                        raise UnsupportedFeatureError(node.coord.line, "Function 'sizeof' requires a type as argument.")
+
+            case _:
+                raise UnsupportedFeatureError(node.coord.line, f"Function call to '{node.name.name}' is not supported.")
+
+    def visit_UnaryOp(self, node: c_ast.UnaryOp) -> Sort:
+        match node.op:
+            case "sizeof":
+                return self.visit(node.expr.type)
+            case _:
+                raise UnsupportedFeatureError(
+                    node.coord.line, f"Unary operator '{node.op}' is not accepted as statement."
+                )

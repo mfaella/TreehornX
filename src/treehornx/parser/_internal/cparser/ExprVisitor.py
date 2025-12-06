@@ -2,7 +2,27 @@ from cmath import isinf
 from dataclasses import dataclass, field
 from typing import override
 
-from ir.expressions import Add, And, Div, Eq, Expr, Ge, Gt, Le, Lt, Mod, Mul, Ne, Not, Or, PtrIsNil, PtrIsPtr, Sub, Var
+from ir.expressions import (
+    Add,
+    And,
+    Div,
+    Eq,
+    Expr,
+    Field,
+    Ge,
+    Gt,
+    Le,
+    Lt,
+    Mod,
+    Mul,
+    Ne,
+    Not,
+    Or,
+    PtrIsNil,
+    PtrIsPtr,
+    Sub,
+    Var,
+)
 from ir.instructions import Instruction
 from ir.sorts import BOOL, Int, Real, Sort
 from ir.utils import *
@@ -44,9 +64,9 @@ class ExprVisitor(c_ast.NodeVisitor):
                 "Struct field access is not supported within sub-expressions.",
             )
 
-        base_expr = self.visit(node.name)
+        ptr = self.visit(node.name)
         field_name = node.field.name
-        return Field(base=base_expr, field_name=field_name)
+        return Field(ptr=ptr, name=field_name)
 
     def visit_UnaryOp(self, node: c_ast.UnaryOp) -> Expr:
         self.is_sub_expr = True
