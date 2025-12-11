@@ -324,6 +324,7 @@ Instruction = (
     | FieldAssignExpr
     | New
     | Free
+    | Skip
 )
 
 

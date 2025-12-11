@@ -16,15 +16,22 @@ class OOM:
     pass
 
 
+@dataclass(frozen=True)
+class LOF:
+    """label overflow"""
+
+    pass
+
+
 @dataclass(slots=True, frozen=True)
 class FieldAssignP:
-    pfield: int
-    p: int | None
+    pfield: str
+    p: str | None
 
 
 @dataclass(slots=True, frozen=True)
 class Here:
-    p: int
+    p: str
 
 
 @dataclass(slots=True, frozen=True)
@@ -35,7 +42,7 @@ class Rewind:
 @dataclass(slots=True, frozen=True)
 class Rewind2:
     i: int
-    p: int
+    p: str
 
 
 @dataclass(frozen=True)
@@ -43,4 +50,4 @@ class Exit:
     pass
 
 
-Event = NOP | OOM | ERR | FieldAssignP | Here | Rewind | Rewind2 | Exit
+Event = NOP | OOM | ERR | FieldAssignP | Here | Rewind | Rewind2 | Exit | LOF

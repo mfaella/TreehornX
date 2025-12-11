@@ -1,7 +1,6 @@
 from typing import Iterable
 
-from .Label import Label
-from .Pair import Pair
+from .core import Label, Pair
 
 
 class PairDB:
@@ -19,6 +18,6 @@ class PairDB:
                 continue
             if follower is not None and pair.follower() != follower:
                 continue
-            if child_index is not None and pair.child_index != child_index:
+            if child_index is not None and pair.child_key != child_index:
                 continue
             yield pair

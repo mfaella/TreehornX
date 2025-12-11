@@ -55,7 +55,7 @@ select = [
     "PL",   # Pylint
     "RUF",  # Ruff-specific rules
 ]
-ignore = ["N999"]
+ignore = ["N999", "PLR0913", "PLR0912", "PLR0911"]
 per-file-ignores = { "tests/*" = ["N802"] }
 
 [tool.ruff.format]

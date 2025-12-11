@@ -1,0 +1,3 @@
+simplify and precisely define IR
+remove base from FrameBuilder and add check for fields integrity
+enum fields and enum vars default value

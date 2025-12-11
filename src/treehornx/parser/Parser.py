@@ -2,6 +2,8 @@ from typing import Iterable, Protocol, TextIO
 
 from ir.function import Function
 
+from ._internal.cparser.errors import *
+
 
 class Parser(Protocol):
     def parse_src(self, input_text: str) -> Iterable[Function]: ...
