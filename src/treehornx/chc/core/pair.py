@@ -5,6 +5,7 @@ from enum import Enum
 from typing import override
 
 from .dir import Dir, Down, Up
+from .frame import Frame
 from .label import Label
 
 
@@ -49,3 +50,25 @@ class Pair:
             return Up()
         else:
             return Down(self.child_key)
+
+    def extend_with_internal_frame(self, frame: Frame) -> Pair:
+        if self.leadership == LeadershipKind.PARENT:
+            new_parent = self.parent.extended_with(frame)
+            return Pair(new_parent, self.child, self.child_key, self.leadership)
+        else:
+            new_child = self.child.extended_with(frame)
+            return Pair(self.parent, new_child, self.child_key, self.leadership)
+
+    def extend_with_external_frame(self, frame: Frame) -> Pair:
+        if self.leadership == LeadershipKind.PARENT:
+            new_child = self.child.extended_with(frame)
+            return Pair(self.parent, new_child, self.child_key, LeadershipKind.CHILD)
+        else:
+            new_parent = self.parent.extended_with(frame)
+            return Pair(new_parent, self.child, self.child_key, LeadershipKind.PARENT)
+
+    def updated_with_leader(self, new_leader: Label) -> Pair:
+        if self.leadership == LeadershipKind.PARENT:
+            return Pair(new_leader, self.child, self.child_key, self.leadership)
+        else:
+            return Pair(self.parent, new_leader, self.child_key, self.leadership)

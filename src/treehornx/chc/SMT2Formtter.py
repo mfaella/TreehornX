@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import cached_property
-from itertools import product
+from itertools import chain
 from typing import Any, Iterable
 
 import ir.sorts as irs
@@ -114,7 +114,7 @@ class ChcBuilder:
             case _:
                 raise RuntimeError(f"Unsupported expression type: {expr}")
 
-    def internal(self, tau: Label, stmt: Instruction) -> FNode:
+    def assert_internal_step(self, tau: Label, stmt: Instruction) -> FNode:
         constraints = []
         match stmt:
             case IfGoto(cond, _):
@@ -173,7 +173,7 @@ class ChcBuilder:
         )
 
 
-    def external(self, pair: Pair) -> FNode:
+    def assert_external_step(self, pair: Pair) -> FNode:
         sigma = pair.follower()
         tau = pair.leader()
         constraints = []
@@ -232,12 +232,23 @@ class ChcBuilder:
             )
         )
 
-    def assertion(self, lab: Label) -> FNode:
+    def assert_fact(self, lab: Label) -> FNode:
         pred = Symbol(f"Lab{lab.id}", self.predicate_signature(lab))
         variables = [*self.tau_vars_symbols(lab[-1].index), *self.tau_fields_symbols(lab[-1].index)]
         args = variables
         return ForAll(
             variables,
+            Function(
+                pred,
+                args
+            )
+        )
+
+    def query(self, lab: Label) -> FNode:
+        pred = Symbol(f"Lab{lab.id}", self.predicate_signature(lab))
+        variables = chain(self.tau_vars_symbols(lab[-1].index), self.tau_fields_symbols(lab[-1].index))
+        args = variables
+        return Not(
             Function(
                 pred,
                 args

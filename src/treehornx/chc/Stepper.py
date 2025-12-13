@@ -118,15 +118,29 @@ class Stepper:
         f2.pc = next_pc
         return f2
 
-    def step_var_assign_exp(self, f1: Frame, f2: FrameBuilder, d: Var, exp: Expr) -> FrameBuilder:
+    def step_var_assign_exp(
+        self, f1: Frame, f2: FrameBuilder, d: Var, exp: Expr
+    ) -> tuple[FrameBuilder, FrameBuilder | None]:
         f2 = default(f1, f1, f2)
         next_pc = self.function.info_at(f1.pc).next_pc
         assert isinstance(next_pc, int)
         f2.pc = next_pc
-        if sort_of(d).is_enum():
+        if isinstance(exp, ire.EnumConst):
             assert isinstance(exp, ire.EnumConst)
             f2.enum_values[d.name] = exp.value
-        return f2
+            return f2, None
+        elif isinstance(exp, ire.Var) and sort_of(exp).is_enum():
+            flag_name = f1.enum_values[exp.name]
+            f2.enum_values[d.name] = flag_name
+            return f2, None
+        elif sort_of(d) is BOOL:
+            f2_true = f2
+            f2_false = deepcopy(f2)
+            f2_true.enum_values[d.name] = "TRUE"
+            f2_false.enum_values[d.name] = "FALSE"
+            return f2_true, f2_false
+        else:
+            return f2, None
 
     def step_new(self, pair: Pair, f__: FrameBuilder, p: str) -> tuple[FrameBuilder, StepKind]:
         f = pair.leader()[-1]
