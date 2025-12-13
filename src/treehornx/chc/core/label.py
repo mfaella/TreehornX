@@ -5,8 +5,6 @@ from functools import cache
 from itertools import count
 from typing import Any, ClassVar, Iterable
 
-from pysmt.fnode import FNode  # type: ignore
-
 from .frame import Frame
 
 next_label_id = count().__next__

@@ -5,13 +5,12 @@ from itertools import chain, count, product
 from typing import Iterable
 
 from chc.core.dir import Down
-from chc.SMT2Formtter import ChcBuilder
+from chc.SMT2FileBuilder import SMT2FileBuilder
 from frozendict import frozendict
 from ir.expressions import Var
 from ir.function import Function
 from ir.instructions import *
 from ir.sorts import Enum, Struct
-from pysmt.fnode import FNode
 
 from .core import Frame, FrameBuilder, Label, Pair
 from .core.event import NOP, Here
@@ -27,6 +26,7 @@ class ChcGenerator:
     n: int
     k: int = field(init=False)
     db: PairDB = field(default_factory=PairDB)
+    _generated: bool = field(default=False, init=False)
 
     def __post_init__(self):
         root_sort = self.root.sort
@@ -125,24 +125,13 @@ class ChcGenerator:
                 pair = Pair(parent=parent_lab, child=child_lab, child_key=child_key)
                 yield pair
 
-    def update_after_internal_step(self, pair: Pair, frame: FrameBuilder) -> Iterable[Pair]:
-        for p in self.pointers:
-            frame.upd[p.name] = False
-        for pair in self.db.find_by(leader=pair.leader()):
-            new_pair = pair.extend_with_internal_frame(frame.build())
-            self.db.add(new_pair)
-            yield new_pair
+    def update_after_internal_step(self, pair: Pair, frame: Frame) -> Iterable[Pair]:
+        for p in self.db.find_by(leader=pair.leader()):
+            new_p = p.extend_with_internal_frame(frame)
+            self.db.add(new_p)
+            yield new_p
 
-    def update_after_external_step(self, pair: Pair, frameb: FrameBuilder) -> Iterable[Pair]:
-        if pair.leader()[-1].index <= 1:
-            for p in self.pointers:
-                frameb.upd[p.name] = False
-        else:
-            a_ = max(f.index for f in pair.leader().frames[1:] if f.prev[0] == pair.dir())  # type: ignore
-            for p in self.pointers:
-                frameb.upd[p.name] = any(f.event == Here(p.name) or f.upd[p.name] for f in pair.leader().frames[a_:])
-
-        frame = frameb.build()
+    def update_after_external_step(self, pair: Pair, frame: Frame) -> Iterable[Pair]:
         new_pair = pair.extend_with_external_frame(frame)
         self.db.add(new_pair)
         yield new_pair
@@ -153,23 +142,59 @@ class ChcGenerator:
                 self.db.add(new_p)
                 yield new_p
 
-    @cache
-    def step(self, pair: Pair) -> tuple[FrameBuilder, FrameBuilder | None, StepKind] | None:
+    def _step(self, pair: Pair) -> tuple[FrameBuilder, FrameBuilder | None, StepKind] | None:
         return Stepper(self.function, self.k, self.m, self.n).step(pair)
+
+    def psi_internal(self, frameb: FrameBuilder) -> Frame:
+        for ptr in self.pointers:
+            frameb.upd[ptr.name] = False
+        return frameb.build()
+
+    def psi_external(self, pair: Pair, frameb: FrameBuilder) -> Frame:
+        if pair.leader()[-1].index <= 1:
+            for p in self.pointers:
+                frameb.upd[p.name] = False
+        else:
+            a_ = max(f.index for f in pair.leader().frames[1:] if f.prev[0] == pair.dir())  # type: ignore
+            for p in self.pointers:
+                frameb.upd[p.name] = any(f.event == Here(p.name) or f.upd[p.name] for f in pair.leader().frames[a_:])
+
+        return frameb.build()
+
+    @cache
+    def step(self, pair: Pair) -> tuple[Frame, Frame | None, StepKind] | None:
+        step_result = self._step(pair)
+        if step_result is None:
+            return None
+        tau_b_builder, tau_b_false_builder, step_kind = step_result
+        if step_kind == StepKind.INTERNAL:
+            if tau_b_false_builder is None:
+                frame = self.psi_internal(tau_b_builder)
+                return frame, None, step_kind
+            else:
+                frame_true = self.psi_internal(tau_b_builder)
+                frame_false = self.psi_internal(tau_b_false_builder)
+                return frame_true, frame_false, step_kind
+        else:
+            tau_b = self.psi_external(pair, tau_b_builder)
+            tau_b_false = None
+            if tau_b_false_builder is not None:
+                tau_b_false = self.psi_external(pair, tau_b_false_builder)
+            return tau_b, tau_b_false, step_kind
 
     def is_continuity_pair(self, pair: Pair) -> bool:
         return self.step(pair) is not None
 
-    def generate(self) -> Iterable[FNode]:
-        chcbuilder = ChcBuilder(self.function.vars, self.root.sort.fields)  # type: ignore
+    def generate(self) -> SMT2FileBuilder:
+        smt2file = SMT2FileBuilder(self.function.vars, self.root.sort.fields)  # type: ignore
         processed: set[Pair] = set()
         queue: deque[Pair] = deque()
 
         # yielding assertion of first and start frames
         for f in self.start_frames():
-            yield chcbuilder.assertion(Label.make(*f))
+            smt2file.assert_fact(Label.make(*f))
         for f in self.first_frames():
-            yield chcbuilder.assertion(Label.make(f))
+            smt2file.assert_fact(Label.make(f))
 
         for pair in self.inital_pairs():
             self.db.add(pair)
@@ -184,9 +209,22 @@ class ChcGenerator:
             if step_result is None:
                 continue
             tau_b, tau_b_false, step_kind = step_result
+            new_frames = (tau_b,) if tau_b_false is None else (tau_b, tau_b_false)
             if step_kind == StepKind.INTERNAL:
-                queue.extend(self.update_after_internal_step(pair, tau_b))
-                if tau_b_false:
-                    queue.extend(self.update_after_internal_step(pair, tau_b_false))
+                for frame in new_frames:
+                    # update pairs db
+                    queue.extend(self.update_after_internal_step(pair, frame))
+                    # assert internal step
+                    label = pair.leader().extended_with(frame)
+                    inst = self.function.instructions[label[-2].pc]
+                    smt2file.assert_internal_step(label, inst)
             else:
+                # update pairs db
                 queue.extend(self.update_after_external_step(pair, tau_b))
+
+                # assert external step for tau_b
+
+                new_pair = pair.extend_with_external_frame(tau_b)
+                smt2file.assert_external_step(pair)
+
+        return smt2file
