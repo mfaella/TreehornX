@@ -1,9 +1,9 @@
 from typing import cast, override
 
-from ir.expressions import Var
-from ir.sorts import *
-from ir.sorts import Pointer, Sort, Struct
 from pycparser import c_ast
+from treehornx.ir.expressions import Var
+from treehornx.ir.sorts import *
+from treehornx.ir.sorts import Pointer, Sort, Struct
 
 from .errors import DuplicateDefinitionError, UndefinedSymbolError, UnknownTypeError, UnsupportedFeatureError
 

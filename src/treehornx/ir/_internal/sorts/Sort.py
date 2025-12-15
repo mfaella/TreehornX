@@ -18,23 +18,6 @@ class Sort:
 
     _pool: ClassVar[dict[Sort, Sort]] = {}
 
-    def __new__(cls, *args: Any, **kwargs: dict[str, Any]) -> Sort:
-        """Create or retrieve an interned Enum instance.
-
-        Args:
-            name: The name of the enumeration.
-            values: Tuple of allowed values.
-
-        Returns:
-            An Enum instance, reusing existing instances with the same
-            name and values.
-        """
-        instance = object.__new__(cls)
-        cls.__init__(instance, *args, **kwargs)
-        if instance not in cls._pool:
-            cls._pool[instance] = instance
-        return cls._pool[instance]
-
     @override
     def __str__(self) -> str:
         """Return the sort's name as its string representation."""

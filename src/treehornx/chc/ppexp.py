@@ -1,6 +1,21 @@
-from chc.core import Label
-from ir.expressions import FALSE, TRUE, And, EnumConst, Eq, Expr, Ne, Not, Or, PtrIsNil, PtrIsPtr, Var, sort_of
-from ir.sorts import Sort
+from treehornx.ir.expressions import (
+    FALSE,
+    TRUE,
+    And,
+    EnumConst,
+    Eq,
+    Expr,
+    Ne,
+    Not,
+    Or,
+    PtrIsNil,
+    PtrIsPtr,
+    Var,
+    sort_of,
+)
+from treehornx.ir.sorts import Sort
+
+from .core import Label
 
 
 def ppexp(expr: Expr, lab: Label) -> Expr:  # noqa: PLR0915

@@ -3,7 +3,7 @@ from functools import cache, cached_property
 from typing import Iterable, override
 
 from frozendict import frozendict
-from ir.expressions import Var
+from treehornx.ir.expressions import Var
 
 from .natives import INT, Int, Pointer
 from .Sort import Sort

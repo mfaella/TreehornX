@@ -2,10 +2,9 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import cast
+from typing import cast, override
 
-from ir.errors import IncompatibleReturnTypeError
-
+from .errors import IncompatibleReturnTypeError
 from .expressions import Expr, Field, Operator, Var, sort_of
 from .instructions import (
     FieldAssignExpr,
@@ -66,7 +65,6 @@ class Function:
                 info[id(instr)] = InstructionInfo(idx, idx + 1)
         return info
 
-    # ruff: noqa: PLR0912
     def _validate_instruction(self, instr: Instruction) -> None:
         match instr:
             case IfGoto(condition, _):
@@ -93,8 +91,8 @@ class Function:
             case Return(value) if value is not None:
                 self._validate_expression(value)
             case Free(pointer) | New(pointer):
-                if pointer.sort.sort is not self.env.node_sort:  # type: ignore
-                    raise ValueError(f"pointer.sort.sort is not self.env.node_sort")
+                if not pointer.sort.is_ptr():
+                    raise ValueError(f"not pointer.sort.is_ptr()")
             case Return(expr) if expr is not None:
                 self._validate_expression(expr)
             case _:
@@ -132,3 +130,8 @@ class Function:
     def info_at(self, pc: int) -> InstructionInfo:
         instr = self.instructions[pc]
         return self.info_of(instr)
+
+    @override
+    def __str__(self) -> str:
+        s = f"Function {self.name}:\n" + "\n".join(f"{idx}: {instr}" for idx, instr in enumerate(self.instructions))
+        return s

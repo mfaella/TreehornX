@@ -1,6 +1,6 @@
 from typing import Iterable, Protocol, TextIO
 
-from ir.function import Function
+from treehornx.ir.function import Function
 
 from ._internal.cparser.errors import *
 

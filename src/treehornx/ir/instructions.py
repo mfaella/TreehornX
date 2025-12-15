@@ -48,7 +48,7 @@ class IfGoto(_Labeled):
     target: str
 
     def __post_init__(self):
-        if sort_of(self.condition) is not BOOL:
+        if sort_of(self.condition) != BOOL:
             raise ValueError("Condition of IfElse must be of BOOL sort")
 
     @override
@@ -112,7 +112,7 @@ class PtrAssignPtr(_Labeled):
             raise ValueError("sort_of(self.left) is not POINTER")
         if not sort_of(self.right).is_ptr():
             raise ValueError("sort_of(self.right) is not POINTER")
-        if self.left.sort is not self.right.sort:
+        if self.left.sort != self.right.sort:
             raise ValueError("self.left and self.right must have the same pointer sort")
 
     @override
@@ -138,7 +138,7 @@ class PtrAssignField(_Labeled):
             raise ValueError("not sort_of(self.left).is_ptr()")
         if not sort_of(self.right).is_ptr():
             raise ValueError("not sort_of(self.right).is_ptr()")
-        if sort_of(self.left) is not sort_of(self.right):
+        if sort_of(self.left) != sort_of(self.right):
             raise ValueError("sort_of(self.left) is not sort_of(self.right)")
 
     @override
@@ -206,7 +206,7 @@ class VarAssignExpr(_Labeled):
     def __post_init__(self):
         if sort_of(self.left).is_ptr():
             raise ValueError("sort_of(self.left).is_ptr()")
-        if sort_of(self.left) is not sort_of(self.right):
+        if sort_of(self.left) != sort_of(self.right):
             raise ValueError("sort_of(self.left) is not sort_of(self.right)")
 
     @override
@@ -232,7 +232,7 @@ class FieldAssignExpr(_Labeled):
             raise ValueError("sort_of(self.left).is_ptr()")
         if isinstance(self.right, Field):
             raise ValueError("isinstance(self.right, Field)")
-        if sort_of(self.left) is not sort_of(self.right):
+        if sort_of(self.left) != sort_of(self.right):
             raise ValueError("sort_of(self.left) is not sort_of(self.right)")
 
     @override

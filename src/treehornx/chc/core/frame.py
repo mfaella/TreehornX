@@ -5,6 +5,8 @@ from itertools import count
 
 from frozendict import frozendict
 
+from treehornx.chc.core.cache_hash import cache_hash
+
 from .dir import Dir
 from .event import NOP, Event
 
@@ -38,9 +40,6 @@ class FrameBuilder:
     enum_values: dict[str, str] = field(default_factory=lambda: {})
     enum_fields: dict[str, str] = field(default_factory=lambda: {})
     prev: tuple[Dir, int] | None = None
-
-    def __init__(self, base: Frame):
-        self.base = base
 
     def build(self) -> Frame:
         assert self.active is not None

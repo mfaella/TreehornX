@@ -1,11 +1,11 @@
 from typing import Iterable, cast
 
-from ir.errors import IncompatibleReturnTypeError
-from ir.expressions import *
-from ir.function import *
-from ir.instructions import *
-from ir.sorts import *
 from pycparser import c_ast
+from treehornx.ir.errors import IncompatibleReturnTypeError
+from treehornx.ir.expressions import *
+from treehornx.ir.function import *
+from treehornx.ir.instructions import *
+from treehornx.ir.sorts import *
 
 from .errors import UndefinedSymbolError, UnknownTypeError, UnsupportedFeatureError
 from .ExprVisitor import ExprVisitor
@@ -114,6 +114,9 @@ class FuncDefVisitor(c_ast.NodeVisitor):
             raise UnsupportedFeatureError(line, f"Pointer to non-struct type '{pointee_sort}' is not supported.")
         return Pointer(pointee_sort)
 
+    def visit_EmptyStatement(self, node: c_ast.EmptyStatement) -> Iterable[Instruction]:
+        yield Skip()
+
     def visit_Compound(self, node: c_ast.Compound) -> Iterable[Instruction]:
         for stmt in node.block_items or []:
             yield from self.visit(stmt)
@@ -123,23 +126,41 @@ class FuncDefVisitor(c_ast.NodeVisitor):
         return expr_visitor.visit(node)
 
     def visit_Assignment(self, node: c_ast.Assignment) -> Iterable[Instruction]:
-        if not self.scopes.is_variable_declared(node.lvalue.name):
+        assert isinstance(node.lvalue, (c_ast.ID, c_ast.StructRef))
+
+        if isinstance(node.lvalue, c_ast.ID) and not self.scopes.is_variable_declared(node.lvalue.name):
             raise UndefinedSymbolError(node.coord.line, f"Variable '{node.lvalue.name}' is not defined.")
+
+        if isinstance(node.lvalue, c_ast.StructRef) and not self.scopes.is_variable_declared(node.lvalue.name.name):
+            raise UndefinedSymbolError(
+                node.coord.line,
+                f"Variable '{node.lvalue.name.name}' is not defined.",
+            )
 
         match node.lvalue:
             case c_ast.ID():
                 lvalue_name = node.lvalue.name
                 lvalue = self.scopes.get_variable(lvalue_name)
             case c_ast.StructRef():
-                lvalue = self.visit(node.lvalue)
+                lvalue = self.visit_expr(node.lvalue)
+                assert isinstance(lvalue, Field)
             case _:
                 raise UnsupportedFeatureError(node.coord.line, "Only simple variable assignments are supported.")
+
+        if isinstance(node.rvalue, c_ast.FuncCall):
+            if node.rvalue.name.name != "malloc":
+                raise UnsupportedFeatureError(
+                    node.coord.line,
+                    "Only 'malloc' function calls are supported in right-hand side of assignments.",
+                )
+            assert isinstance(lvalue, Var)
+            return New(pointer=lvalue)
 
         rvalue = self.visit_expr(node.rvalue)
 
         match node.op:
             case "=":
-                if sort_of(lvalue) is not sort_of(rvalue):
+                if sort_of(lvalue) != sort_of(rvalue):
                     raise UnsupportedFeatureError(
                         node.coord.line,
                         "Type mismatch between left-hand side and right-hand side of assignment.",
@@ -155,7 +176,7 @@ class FuncDefVisitor(c_ast.NodeVisitor):
                         case Field(), 0:
                             yield FieldAssignNil(field=lvalue)
                         case Field(), Var():
-                            yield FieldAssignPtr(field=lvalue, pointer=rvalue)
+                            yield FieldAssignPtr(left=lvalue, right=rvalue)
                         case _:
                             raise UnsupportedFeatureError(
                                 node.coord.line,
@@ -182,7 +203,7 @@ class FuncDefVisitor(c_ast.NodeVisitor):
             case Var(_, Bool()):
                 return Eq(cond, TRUE)
             case _:
-                if sort_of(cond) is BOOL:
+                if sort_of(cond) == BOOL:
                     return cond
                 else:
                     raise UnsupportedFeatureError(
@@ -225,7 +246,7 @@ class FuncDefVisitor(c_ast.NodeVisitor):
 
     def visit_Return(self, node: c_ast.Return) -> Iterable[Instruction]:
         ret_expr = None if node.expr is None else self.visit_expr(node.expr)
-        if self.return_sort is BOOL and isinstance(ret_expr, Var) and sort_of(ret_expr).is_ptr():
+        if self.return_sort == BOOL and isinstance(ret_expr, Var) and sort_of(ret_expr).is_ptr():
             ret_expr = Not(PtrIsNil(ret_expr))
         ret_sort = UNIT if ret_expr is None else sort_of(ret_expr)
         if ret_sort is not self.return_sort:
@@ -249,3 +270,22 @@ class FuncDefVisitor(c_ast.NodeVisitor):
 
     def visit_Goto(self, node: c_ast.Goto) -> Iterable[Instruction]:
         yield Goto(target=node.name)
+
+    def visit_FuncCall(self, node: c_ast.FuncCall) -> Expr:
+        line = cast(int, node.coord.line)
+        func_name = ""
+        match node.name:
+            case c_ast.ID():
+                func_name = node.name.name
+            case _:
+                raise UnsupportedFeatureError(line, "Only direct function calls are supported.")
+
+        if func_name != "free":
+            raise UnsupportedFeatureError(line, f"Function '{func_name}' is not supported.")
+
+        if not node.args or len(node.args.exprs) != 1:
+            raise UnsupportedFeatureError(line, "Function 'free' requires exactly one argument.")
+        arg_expr = self.visit_expr(node.args.exprs[0])
+        if not (isinstance(arg_expr, Var) and sort_of(arg_expr).is_ptr()):
+            raise UnsupportedFeatureError(line, "Argument to 'free' must be a pointer variable.")
+        yield Free(arg_expr)

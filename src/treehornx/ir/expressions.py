@@ -220,7 +220,7 @@ def _all_args_same_sort(self: Operator):
     for arg in args_tail:
         first_arg_sort = sort_of(first_arg)
         arg_sort = sort_of(arg)
-        if first_arg_sort is not arg_sort:
+        if first_arg_sort != arg_sort:
             raise ValueError(f"All arguments must be of the same type: expected {first_arg_sort}, found {arg_sort}")
 
 
@@ -523,7 +523,6 @@ Expr: TypeAlias = (
 )
 
 
-# ruff: noqa: PLR0911
 def sort_of(expr: Expr) -> Sort:
     match expr:
         case Var(_, sort):

@@ -1,8 +1,8 @@
 from collections import defaultdict, deque
 from dataclasses import dataclass, field
 
-from ir.expressions import Var
-from ir.sorts import Sort
+from treehornx.ir.expressions import Var
+from treehornx.ir.sorts import Sort
 
 
 @dataclass

@@ -2,13 +2,33 @@ from cmath import isinf
 from dataclasses import dataclass, field
 from typing import override
 
-from ir.expressions import Add, And, Div, Eq, Expr, Ge, Gt, Le, Lt, Mod, Mul, Ne, Not, Or, PtrIsNil, PtrIsPtr, Sub, Var
-from ir.instructions import Instruction
-from ir.sorts import BOOL, Int, Real, Sort
-from ir.utils import *
-from parser._internal.cparser.errors import UndefinedSymbolError, UnsupportedFeatureError
 from pycparser import c_ast
+from treehornx.ir.expressions import (
+    Add,
+    And,
+    Div,
+    Eq,
+    Expr,
+    Field,
+    Ge,
+    Gt,
+    Le,
+    Lt,
+    Mod,
+    Mul,
+    Ne,
+    Not,
+    Or,
+    PtrIsNil,
+    PtrIsPtr,
+    Sub,
+    Var,
+)
+from treehornx.ir.instructions import Instruction
+from treehornx.ir.sorts import BOOL, Int, Real, Sort
+from treehornx.ir.utils import *
 
+from .errors import UndefinedSymbolError, UnsupportedFeatureError
 from .ScopeStack import ScopeStack
 
 
@@ -46,7 +66,7 @@ class ExprVisitor(c_ast.NodeVisitor):
 
         base_expr = self.visit(node.name)
         field_name = node.field.name
-        return Field(base=base_expr, field_name=field_name)
+        return Field(ptr=base_expr, name=field_name)
 
     def visit_UnaryOp(self, node: c_ast.UnaryOp) -> Expr:
         self.is_sub_expr = True
@@ -66,7 +86,7 @@ class ExprVisitor(c_ast.NodeVisitor):
         right = self.visit(node.right)
 
         type_safe_arith_expr = lambda l, r: is_same_sort(l, r) and is_arithmetic_expression(l)
-        type_safe_bool_expr = lambda l, r: is_same_sort(l, r) and sort_of(l) is BOOL
+        type_safe_bool_expr = lambda l, r: is_same_sort(l, r) and sort_of(l) == BOOL
 
         match node.op:
             case "!=" | "==" if not is_same_sort(left, right):

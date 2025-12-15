@@ -3,10 +3,11 @@ from dataclasses import dataclass, field
 from io import StringIO
 from typing import Any, Iterable, Sequence, TextIO, cast
 
-from ir.errors import IncompatibleReturnTypeError
-from ir.expressions import TRUE, EnumConst, Eq, Expr, Field, Not, PtrIsNil, Var, sort_of
-from ir.function import Function
-from ir.instructions import (
+from pycparser import CParser, c_ast
+from treehornx.ir.errors import IncompatibleReturnTypeError
+from treehornx.ir.expressions import TRUE, EnumConst, Eq, Expr, Field, Not, PtrIsNil, Var, sort_of
+from treehornx.ir.function import Function
+from treehornx.ir.instructions import (
     FieldAssignExpr,
     FieldAssignNil,
     FieldAssignPtr,
@@ -20,9 +21,8 @@ from ir.instructions import (
     Skip,
     VarAssignExpr,
 )
-from ir.sorts import BOOL, INT, REAL, UNIT, Enum, Pointer, Sort, Struct
-from parser.Parser import Parser
-from pycparser import CParser, c_ast
+from treehornx.ir.sorts import BOOL, INT, REAL, UNIT, Enum, Pointer, Sort, Struct
+from treehornx.parser.Parser import Parser
 
 from .EnumDeclVisitor import EnumDeclVisitor
 from .errors import *
@@ -36,6 +36,7 @@ def preprocess(code: str) -> str:
     # remove preprocessor directives (e.g. #define, #include, #if/endif, etc.)
     # including any continuation lines that end with a backslash
     preprocessed_code = re.sub(r"(?m)^[ \t]*#(?:.*(?:\\\n.*)*)\n?", "", code)
+    preprocessed_code = re.sub(r"//.*", "", preprocessed_code)  # handle line continuations
     return preprocessed_code
 
 
@@ -65,7 +66,6 @@ class FileVisitor(c_ast.NodeVisitor):
         Parse C code provided as a string and return a pycparser AST.
         """
         preprocessed_code = preprocess(src)
-        print(preprocessed_code)
         return parser.parse(preprocessed_code)
 
     @classmethod

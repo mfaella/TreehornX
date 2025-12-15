@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import override
 
+from treehornx.chc.core.cache_hash import cache_hash
+
 from .dir import Dir, Down, Up
 from .frame import Frame
 from .label import Label
@@ -51,7 +53,7 @@ class Pair:
         else:
             return Down(self.child_key)
 
-    def extend_with_internal_frame(self, frame: Frame) -> Pair:
+    def extended_with_internal_frame(self, frame: Frame) -> Pair:
         if self.leadership == LeadershipKind.PARENT:
             new_parent = self.parent.extended_with(frame)
             return Pair(new_parent, self.child, self.child_key, self.leadership)
@@ -59,7 +61,7 @@ class Pair:
             new_child = self.child.extended_with(frame)
             return Pair(self.parent, new_child, self.child_key, self.leadership)
 
-    def extend_with_external_frame(self, frame: Frame) -> Pair:
+    def extended_with_external_frame(self, frame: Frame) -> Pair:
         if self.leadership == LeadershipKind.PARENT:
             new_child = self.child.extended_with(frame)
             return Pair(self.parent, new_child, self.child_key, LeadershipKind.CHILD)

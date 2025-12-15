@@ -1,7 +1,6 @@
 from . import expressions as expr
 from . import sorts
 
-
 sort_of = expr.sort_of
 
 
@@ -14,7 +13,7 @@ def is_same_sort(left: expr.Expr, right: expr.Expr) -> bool:
     Returns:
         True if both expressions have the same sort, False otherwise.
     """
-    return sort_of(left) is sort_of(right)
+    return sort_of(left) == sort_of(right)
 
 
 def is_arithmetic_expression(expression: expr.Expr) -> bool:

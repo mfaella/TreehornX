@@ -2,14 +2,16 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Iterable
 
-import ir.expressions as ire
-from chc.core import *
-from chc.core.dir import *
-from chc.core.event import *
-from chc.core.pair import LeadershipKind
-from ir.function import Function
-from ir.instructions import *
+from loguru import logger
 
+import treehornx.ir.expressions as ire
+from treehornx.ir.function import Function
+from treehornx.ir.instructions import *
+
+from .core import *
+from .core.dir import *
+from .core.event import *
+from .core.pair import LeadershipKind
 from .helpers import *
 from .ppexp import ppexp
 
@@ -47,7 +49,7 @@ class Stepper:
             raise NonContinuosPairError()
         assert isinstance(b_, int)
         tau_b = FrameBuilder(tau[-1])
-        tau_b.prev = (pair.rev_dir(), len(sigma.frames) - 1)
+        tau_b.prev = (pair.rev_dir(), len(sigma) - 1)
         tau_b = default(sigma[-1], tau[-1], tau_b)
         tau_b.event = Rewind(b_)
         return tau_b
@@ -78,7 +80,7 @@ class Stepper:
     def error(self, sigma: Label) -> FrameBuilder:
         f1 = sigma[-1]
         f2 = FrameBuilder(f1)
-        f2.prev = (Internal(), len(sigma.frames) - 1)
+        f2.prev = (Internal(), len(sigma) - 1)
         f2 = default(f1, f1, f2)
         f2.event = ERR()
         return f2
@@ -86,31 +88,31 @@ class Stepper:
     def oom(self, f1: Frame, f2: FrameBuilder) -> FrameBuilder:
         f2 = default(f1, f1, f2)
         f2.event = OOM()
-        f2.prev = (Internal(), f1.index)
+        f2.prev = (Internal(), f1.index + 1)
         return f2
 
     def label_overflow(self, sigma: Label) -> FrameBuilder:
         f1 = sigma[-1]
         f2 = FrameBuilder(f1)
-        f2.prev = (Internal(), len(sigma.frames) - 1)
+        f2.prev = (Internal(), len(sigma) - 1)
         f2 = default(f1, f1, f2)
         f2.event = LOF()
         return f2
 
     def step_skip(self, sigma: Label) -> FrameBuilder:
-        f1 = sigma.frames[-1]
+        f1 = sigma.frame
         next_pc = self.function.info_at(f1.pc).next_pc
         assert isinstance(next_pc, int)
         f2 = FrameBuilder(f1)
-        f2.prev = (Internal(), len(sigma.frames) - 1)
+        f2.prev = (Internal(), len(sigma) - 1)
         f2 = default(f1, f1, f2)
         f2.pc = next_pc
         return f2
 
     def step_assign_nil(self, sigma: Label, p: str) -> FrameBuilder:
-        f1 = sigma.frames[-1]
+        f1 = sigma.frame
         f2 = FrameBuilder(f1)
-        f2.prev = (Internal(), len(sigma.frames) - 1)
+        f2.prev = (Internal(), len(sigma) - 1)
         f2 = default(f1, f1, f2)
         f2.isnil[p] = True
         next_pc = self.function.info_at(f1.pc).next_pc
@@ -121,6 +123,7 @@ class Stepper:
     def step_var_assign_exp(
         self, f1: Frame, f2: FrameBuilder, d: Var, exp: Expr
     ) -> tuple[FrameBuilder, FrameBuilder | None]:
+        f2.prev = (Internal(), f1.index)
         f2 = default(f1, f1, f2)
         next_pc = self.function.info_at(f1.pc).next_pc
         assert isinstance(next_pc, int)
@@ -133,7 +136,7 @@ class Stepper:
             flag_name = f1.enum_values[exp.name]
             f2.enum_values[d.name] = flag_name
             return f2, None
-        elif sort_of(d) is BOOL:
+        elif sort_of(d) == BOOL:
             f2_true = f2
             f2_false = deepcopy(f2)
             f2_true.enum_values[d.name] = "TRUE"
@@ -175,12 +178,12 @@ class Stepper:
         ftrue, ffalse = None, None
         if expr == ire.TRUE or expr != ire.FALSE:
             ftrue = FrameBuilder(f1)
-            ftrue.prev = (Internal(), len(sigma.frames) - 1)
+            ftrue.prev = (Internal(), len(sigma) - 1)
             ftrue = default(f1, f1, ftrue)
             ftrue.pc = next_pc[0]
         if expr == ire.FALSE or expr != ire.TRUE:
             ffalse = FrameBuilder(f1)
-            ffalse.prev = (Internal(), len(sigma.frames) - 1)
+            ffalse.prev = (Internal(), len(sigma) - 1)
             ffalse = default(f1, f1, ffalse)
             ffalse.pc = next_pc[1]
         return ftrue, ffalse
@@ -188,13 +191,13 @@ class Stepper:
     def step_assign_cond(self, sigma: Label, tau: Label, p: str, q: str) -> tuple[FrameBuilder, StepKind]:
         raise NotImplementedError("step_assign_cond not implemented yet")
 
-    def step_assign_ptr(self, pair: Pair, p: str, q: str) -> tuple[FrameBuilder, StepKind]:
+    def step_ptr_assign_ptr(self, pair: Pair, p: str, q: str) -> tuple[FrameBuilder, StepKind]:
         sigma = pair.leader()
         if sigma[-1].isnil[q]:
             return self.step_assign_nil(sigma, p), StepKind.INTERNAL
         elif stop_rewind(sigma, q):
             sigma_a = FrameBuilder(sigma[-1])
-            sigma_a.prev = (Internal(), len(sigma.frames) - 1)
+            sigma_a.prev = (Internal(), len(sigma) - 1)
             sigma_a = set_ptr_here(sigma[-1], sigma_a, p)
             return sigma_a, StepKind.INTERNAL
         else:
@@ -210,7 +213,7 @@ class Stepper:
             next_pc = self.function.info_at(sigma[-1].pc).next_pc
             assert isinstance(next_pc, int)
             sigma_a = FrameBuilder(sigma[-1])
-            sigma_a.prev = (Internal(), len(sigma.frames) - 1)
+            sigma_a.prev = (Internal(), len(sigma) - 1)
             sigma_a = default(sigma[-1], sigma[-1], sigma_a)
             sigma_a.pc = next_pc
             sigma_a.event = FieldAssignP(pfield, None if sigma[-1].isnil[q] else q)
@@ -234,7 +237,7 @@ class Stepper:
             assert isinstance(inst, FieldAssignExpr)
             exp = ppexp(exp, sigma)
             tau_b = FrameBuilder(tau[-1])
-            tau_b.prev = (Internal(), len(sigma.frames) - 1)
+            tau_b.prev = (Internal(), len(sigma) - 1)
             tau_b = default(sigma[-1], tau[-1], tau_b)
             tau_b.pc = next_pc
             if isinstance(exp, ire.EnumConst):
@@ -242,7 +245,7 @@ class Stepper:
             elif isinstance(exp, ire.Var) and sort_of(exp).is_enum():
                 flag_name = sigma[-1].enum_fields[exp.name]
                 tau_b.enum_fields[pfield] = flag_name
-            elif sort_of(exp) is BOOL:
+            elif sort_of(exp) == BOOL:
                 tau_b_true = tau_b
                 tau_b_false = deepcopy(tau_b)
                 tau_b_true.enum_fields[pfield] = "TRUE"
@@ -261,7 +264,7 @@ class Stepper:
             next_pc = self.function.info_at(sigma[-1].pc).next_pc
             assert isinstance(next_pc, int)
             tau_b = FrameBuilder(sigma[-1])
-            tau_b.prev = (Internal(), len(sigma.frames) - 1)
+            tau_b.prev = (Internal(), len(sigma) - 1)
             tau_b = default(sigma[-1], sigma[-1], tau_b)
             tau_b.pc = next_pc
             if var in sigma[-1].enum_values:
@@ -279,11 +282,11 @@ class Stepper:
             next_pc = self.function.info_at(sigma[-1].pc).next_pc
             assert isinstance(next_pc, int)
             tau_b = FrameBuilder(sigma[-1])
-            tau_b.prev = (Internal(), len(sigma.frames) - 1)
+            tau_b.prev = (Internal(), len(sigma) - 1)
             tau_b = default(sigma[-1], sigma[-1], tau_b)
             tau_b.pc = next_pc
             for q in self.pointers():
-                if points_here(sigma, len(sigma.frames) - 1, q):
+                if points_here(sigma, len(sigma) - 1, q):
                     tau_b.isnil[q] = True
                 else:
                     tau_b.isnil[q] = sigma[-1].isnil[q]
@@ -314,30 +317,34 @@ class Stepper:
                 ):
                     return self.step_assign_nil(sigma, p), StepKind.INTERNAL
                 elif is_pfield_implicit(sigma, pfield) and sigma[-1].active_child[pfield]:
+                    if pfield != pair.child_key or pair.dir() != Down(pfield):
+                        raise NonContinuosPairError()
                     tau_b = FrameBuilder(tau[-1])
+                    tau_b.prev = (Up(), len(sigma) - 1)
                     tau_b = default(sigma[-1], tau[-1], tau_b)
                     next_pc = self.function.info_at(sigma[-1].pc).next_pc
                     assert isinstance(next_pc, int)
                     tau_b.pc = next_pc
                     tau_b.event = Here(p)
-                    return tau_b, StepKind.INTERNAL
+                    return tau_b, StepKind.EXTERNAL
+                else:
+                    for r in self.pointers():
+                        for i in range(1, len(sigma)):
+                            if not is_pfield_ptr(sigma, len(sigma), pfield, r, i):
+                                continue
+                            if points_here(sigma, i, r):
+                                sigma_a = sigma[-1]
+                                tau_b = FrameBuilder(sigma_a)
+                                return set_ptr_here(sigma_a, tau_b, p), StepKind.INTERNAL
+                            else:
+                                return self.rewind_special(pair, r, i), StepKind.EXTERNAL
             case _:
-                for r in self.pointers():
-                    for i in range(1, len(sigma)):
-                        if not is_pfield_ptr(sigma, len(sigma), pfield, r, i):
-                            continue
-                        if points_here(sigma, i, r):
-                            sigma_a = sigma[-1]
-                            tau_b = FrameBuilder(sigma_a)
-                            return set_ptr_here(sigma_a, tau_b, p), StepKind.INTERNAL
-                        else:
-                            return self.rewind_special(pair, r, i), StepKind.EXTERNAL
-        raise RuntimeError("Unreachable code in step_ptr_assign_field")
+                return self.rewind(pair, q), StepKind.EXTERNAL
 
     def step_exit(self, sigma: Label) -> FrameBuilder:
         f1 = sigma[-1]
         f2 = FrameBuilder(f1)
-        f2.prev = (Internal(), len(sigma.frames) - 1)
+        f2.prev = (Internal(), len(sigma) - 1)
         f2 = default(f1, f1, f2)
         f2.event = Exit()
         return f2
@@ -345,9 +352,12 @@ class Stepper:
     def step(self, pair: Pair) -> tuple[FrameBuilder, FrameBuilder | None, StepKind] | None:
         try:
             pc = pair.leader()[-1].pc
+            if pc >= len(self.function.instructions):
+                return self.step_exit(pair.leader()), None, StepKind.INTERNAL
             inst = self.function.instructions[pc]
-            if len(pair.leader()) >= self.k + self.m:
+            if len(pair.leader()) >= self.n:
                 return self.label_overflow(pair.leader()), None, StepKind.INTERNAL
+            logger.debug(f"step: {inst} (pc={pc})")
             match inst:
                 case IfGoto():
                     ftrue, ffalse = self.step_local_branch(pair.leader())
@@ -361,13 +371,12 @@ class Stepper:
                         raise RuntimeError("No valid branch in step_local_branch")
                 case Goto():
                     frame = self.step_skip(pair.leader())
-                    frame.pc = self.function.info_at(pc).next_pc  # type: ignore
                     return frame, None, StepKind.INTERNAL
                 case PtrAssignNil(p):
                     frame = self.step_assign_nil(pair.leader(), p.name)
                     return frame, None, StepKind.INTERNAL
                 case PtrAssignPtr(p, q):
-                    frame, kind = self.step_assign_ptr(pair, p.name, q.name)
+                    frame, kind = self.step_ptr_assign_ptr(pair, p.name, q.name)
                     return frame, None, kind
                 case PtrAssignField(p, qfield):
                     frame, kind = self.step_ptr_assign_field(pair, p.name, qfield.name, qfield.ptr.name)
@@ -377,8 +386,8 @@ class Stepper:
                     return frame, None, kind
                 case VarAssignExpr(d, exp):
                     frame = FrameBuilder(pair.follower()[-1])
-                    frame = self.step_var_assign_exp(pair.leader()[-1], frame, d, exp)
-                    return frame, None, StepKind.INTERNAL
+                    frame, frame_false = self.step_var_assign_exp(pair.leader()[-1], frame, d, exp)
+                    return frame, frame_false, StepKind.INTERNAL
                 case FieldAssignExpr(pfield, exp):
                     frame, frame2, kind = self.step_field_assign_exp(pair, pfield.ptr.name, pfield.name, exp)
                     return frame, frame2, kind
