@@ -1,17 +1,29 @@
-from collections import defaultdict
-from typing import Iterable
+from collections import defaultdict, deque
+from dataclasses import dataclass, field
+from typing import Iterable, TextIO
 
-from .core import Label, Pair
+from loguru import logger
+
+from .core import Frame, Label, Pair
+from .core.dir import Internal
 
 
 class PairDB:
     def __init__(self):
-        self.pair_db: set[Pair] = set()
+        self.pairs_db: set[Pair] = set()
         self.leader_index: defaultdict[Label, set[Pair]] = defaultdict(set)
+        # self.added_pairs: set[tuple[int, int]] = set()
+
+    def __len__(self) -> int:
+        return len(self.pairs_db)
 
     def add(self, pair: Pair):
-        self.pair_db.add(pair)
-        self.leader_index[pair.leader()].add(pair)
+        if pair not in self.pairs_db:
+            logger.debug(
+                f"Adding pair: {{ leader.id: {pair.leader().id}, follower.id: {pair.follower().id}, child_key: {pair.child_key}, leadership: {pair.leadership} }}"
+            )
+            self.pairs_db.add(pair)
+            self.leader_index[pair.leader()].add(pair)
 
     def find_by_leader(self, leader: Label) -> Iterable[Pair]:
         return self.leader_index[leader]

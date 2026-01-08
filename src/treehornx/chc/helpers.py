@@ -67,7 +67,7 @@ def are_equal_after_rewind(sigma: Label, p: str, q: str) -> bool:
 
 
 def last_upd(sigma: Label, a: int, q: str) -> int:
-    upd_q_indices = {index for index, f in enumerate(sigma.slice(1, a + 1), start=1) if f.upd[q]}
+    upd_q_indices = {f.index for f in sigma.slice(1, a + 1) if f.upd[q]}
     return max(upd_q_indices) if upd_q_indices else 1
 
 
@@ -77,7 +77,7 @@ def stop_rewind(sigma: Label, q: str) -> bool:
 
 
 def stop_rewind2(sigma: Label, q1: str, q2: str) -> bool:
-    return stop_rewind(sigma, q1) and stop_rewind(sigma, q2)
+    return stop_rewind(sigma, q1) or stop_rewind(sigma, q2)
 
 
 def default_active_child(fprev: Frame, fbelow: Frame, f: FrameBuilder) -> FrameBuilder:

@@ -1,10 +1,10 @@
 import io
+import json
+import subprocess
 import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
-
-from z3 import Solver
 
 from .chc.ChcGenerator import ChcGenerator
 from .chc.SMT2FileBuilder import ExitCodeKind
@@ -37,6 +37,23 @@ def parse_functions(file_name: str) -> Iterable[Function]:
     return parser.parse_file(file_name)
 
 
+def solvesmt2(smt2_string: str) -> str:
+    result = subprocess.run(
+        "z3 -in",
+        shell=True,
+        input=smt2_string,
+        capture_output=True,
+        text=True,
+        timeout=30,  # Adjust based on your needs
+    )
+
+    return result.stdout.strip()
+    # if result.returncode == 0:
+    #     return result.stdout.strip()
+    # else:
+    #     return "unknown"
+
+
 def main(args: list[str]):
     file_name = args[-1]
     if not Path(file_name).exists():
@@ -52,16 +69,22 @@ def main(args: list[str]):
         config.n,
     )
     smt2file_builder = chcgen.generate()
+    output_path = Path("report")
+    output_path.mkdir(parents=True, exist_ok=True)
+    with open(f"report/{function.name}.dot", "w") as f:
+        f.write(chcgen.dependency_graph.source)
+    with open(f"report/{function.name}_LABELS.json", "w") as labels_file:
+        chcgen.labels_db.dump(labels_file)
     for exit_code in (ExitCodeKind.ERR, ExitCodeKind.OOM, ExitCodeKind.LABEL_OVERFLOW):
-        buffer = io.StringIO()
-        smt2file_builder.dump(buffer, exit_code)
-        solver = Solver()
-        # with open(f"{file_name}_{exit_code.name}.smt2", "w") as f:
-        #     print(buffer.getvalue(), file=f)
-        # print(buffer.getvalue())
-        solver.from_string(buffer.getvalue())
-        res = solver.check()
-        print(f"Function {function.name} with exit code {exit_code.name}: \t {res}")
+        if smt2file_builder.is_trivially_sat_for(exit_code):
+            result = "sat"
+        else:
+            buffer = io.StringIO()
+            with open(f"{function.name}_{exit_code.name}.smt2", "w") as f:
+                smt2file_builder.dump(buffer, exit_code, check_sat=True)
+                smt2file_builder.dump(f, exit_code, check_sat=True)
+            result = solvesmt2(buffer.getvalue())
+        print(f"Function {function.name} with exit code {exit_code.name}: \t {result}")
 
 
 if __name__ == "__main__":

@@ -7,6 +7,7 @@ from typing import Iterable, override
 
 from treehornx.chc.core.cache_hash import cache_hash
 
+from .dir import Down
 from .frame import Frame
 
 next_label_id = count().__next__
@@ -18,6 +19,9 @@ def _extended_label(label: Label | None, frame: Frame) -> Label:
     object.__setattr__(instance, "frame", frame)
     object.__setattr__(instance, "origin", label)
     object.__setattr__(instance, "id", next_label_id())
+
+    if getattr(instance, "id") == 217:
+        pass
 
     return instance
 
@@ -31,14 +35,11 @@ def _make_label(*frames: Frame) -> Label:
     return lab
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class Label:
+    id: int
     frame: Frame
     origin: Label | None = field(default=None)
-    id: int = field(repr=False, compare=False, hash=False)
-
-    def __init__(self):
-        raise NotImplementedError("Use Label.make() to create Label instances.")
 
     def extended_with(self, frame: Frame) -> Label:
         return _extended_label(self, frame)
@@ -70,12 +71,16 @@ class Label:
         return islice(self.iter(), start, end)
 
     @cached_property
-    def hash_value(self) -> int:
-        return hash((self.origin, self.frame))
+    def __cache_hash__(self) -> int:
+        return hash((self.frame, self.origin))
 
     @override
     def __hash__(self) -> int:
-        return self.hash_value
+        return self.__cache_hash__
+
+    @cached_property
+    def name(self) -> str:
+        return f"Lab{self.id}"
 
     @classmethod
     def make(cls, *frames: Frame) -> Label:

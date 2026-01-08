@@ -253,7 +253,7 @@ def _no_fields(op: Operator):
         match arg:
             case Field():
                 raise ValueError("Fields are not allowed as arguments")
-            case Operator():
+            case _ if isinstance(arg, Operator):
                 _no_fields(arg)
             case _:
                 pass

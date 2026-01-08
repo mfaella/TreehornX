@@ -12,7 +12,9 @@ dependencies = [
     "frozendict",
     "z3-solver",
     "pycparser",
-    "loguru"
+    "loguru",
+    "graphviz",
+    "attrs"
 ]
 
 [dependency-groups]

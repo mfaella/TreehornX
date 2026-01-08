@@ -6,6 +6,7 @@ from typing import Any, Callable, ClassVar, Iterable, Sequence, TextIO, cast
 
 import treehornx.ir.sorts as irs
 from treehornx.ir.expressions import (
+    FALSE,
     TRUE,
     Add,
     And,
@@ -24,6 +25,7 @@ from treehornx.ir.expressions import (
     Negate,
     Not,
     Or,
+    PtrIsPtr,
     Sub,
     Var,
 )
@@ -253,101 +255,100 @@ class SMT2FileBuilder:
         self.decls.add(decl)
 
     def assert_internal_step(self, tau: Label, stmt: Instruction):
-        if tau.id == 358:
+        if tau.id == 37:
             pass
         self.declare_predicate(tau)
         constraints = []
-
-        if isinstance(tau[-1].event, (OOM, ERR, LOF)):
-            variable_decls = chain.from_iterable(
+        variable_decls = list(
+            chain.from_iterable(
                 chain(self.tau_vars_decl(f.index), self.tau_fields_decl(f.index)) for f in tau.backward_iter()
             )
-            args = chain.from_iterable(
+        )
+        tau_args = list(
+            chain.from_iterable(
                 chain(self.tau_vars_id(f.index), self.tau_fields_id(f.index)) for f in tau.backward_iter()
             )
+        )
+
+        if isinstance(tau.frame.event, (OOM, ERR, LOF)):
             pred = f"Lab{tau.id}"
-            query = smt2assert(smt2forall(variable_decls, smt2implies(smt2predicate(pred, args), smt2false())))
-            match tau[-1].event:
+            query = smt2assert(smt2forall(variable_decls, smt2implies(smt2predicate(pred, tau_args), smt2false())))
+            match tau.frame.event:
                 case OOM():
                     self.oom_queries.add(query)
                 case ERR():
                     self.err_qeueries.add(query)
                 case LOF():
                     self.lof_queries.add(query)
+        b = tau.frame.index
 
-        else:
+        def var_id_maker(v: str):
+            return self.tau_var_id(v, b - 1)
 
-            def var_id_maker(v: str):
-                return self.tau_var_id(v, tau[-1].index)
+        def field_id_maker(f: str):
+            return self.tau_field_id(f, b - 1)
 
-            def field_id_maker(f: str):
-                return self.tau_field_id(f, tau[-1].index)
-
-            match stmt:
-                case IfGoto(cond, _):
-                    cond = ppexp(cond, tau)
+        match stmt:
+            case IfGoto(cond, _) if not isinstance(cond, PtrIsPtr):
+                cond = ppexp(cond, tau)
+                constraints = []
+                if cond not in {TRUE, FALSE}:
                     cond_smt2 = self.expr_to_smt2(
                         cond,
                         var_id_maker,
                         field_id_maker,
                     )
-                    constraints = [cond_smt2]
-                    b = tau[-1].index
-                    for left, right in zip(self.tau_vars_id(b), self.tau_vars_id(b - 1)):
-                        constraints.append(smt2equals(left, right))
-                    for left, right in zip(self.tau_fields_id(b), self.tau_fields_id(b - 1)):
-                        constraints.append(smt2equals(left, right))
-                case VarAssignExpr(var, expr):
-                    b = tau[-1].index
-                    expr = ppexp(expr, tau)
+                    constraints.append(cond_smt2)
+                for left, right in zip(self.tau_vars_id(b), self.tau_vars_id(b - 1)):
+                    constraints.append(smt2equals(left, right))
+                for left, right in zip(self.tau_fields_id(b), self.tau_fields_id(b - 1)):
+                    constraints.append(smt2equals(left, right))
+            case VarAssignExpr(var, expr):
+                expr = ppexp(expr, tau)
+                if isinstance(expr, Field):
+                    expr_smt2 = field_id_maker(expr.name)
+                else:
                     expr_smt2 = self.expr_to_smt2(expr, var_id_maker, field_id_maker)
-                    constraints = [smt2equals(self.tau_var_id(var.name, b), expr_smt2)]
-                    for left, right in zip(self.tau_vars_id(b), self.tau_vars_id(b - 1)):
-                        if left != self.tau_var_id(var.name, b):
-                            constraints.append(smt2equals(left, right))
-                    for left, right in zip(self.tau_fields_id(b), self.tau_fields_id(b - 1)):
+                constraints = [smt2equals(self.tau_var_id(var.name, b), expr_smt2)]
+                for left, right in zip(self.tau_vars_id(b), self.tau_vars_id(b - 1)):
+                    if left != self.tau_var_id(var.name, b):
                         constraints.append(smt2equals(left, right))
-                case FieldAssignExpr(field, expr):
-                    expr = ppexp(expr, tau)
-                    var: Var = field.ptr.sort.fields[field.name]  # type: ignore
-                    assert isinstance(var, Var)
-                    b = tau[-1].index
-                    expr_smt2 = self.expr_to_smt2(expr, var_id_maker, field_id_maker)
-                    constraints = [smt2equals(self.tau_field_id(var.name, b), expr_smt2)]
-                    for left, right in zip(self.tau_vars_id(b), self.tau_vars_id(b - 1)):
+                for left, right in zip(self.tau_fields_id(b), self.tau_fields_id(b - 1)):
+                    constraints.append(smt2equals(left, right))
+            case FieldAssignExpr(field, expr):
+                expr = ppexp(expr, tau)
+                var: Var = field.ptr.sort.pointee.fields[field.name]  # type: ignore
+                assert isinstance(var, Var)
+                expr_smt2 = self.expr_to_smt2(expr, var_id_maker, field_id_maker)
+                constraints = [smt2equals(self.tau_field_id(var.name, b), expr_smt2)]
+                for left, right in zip(self.tau_vars_id(b), self.tau_vars_id(b - 1)):
+                    constraints.append(smt2equals(left, right))
+                for left, right in zip(self.tau_fields_id(b), self.tau_fields_id(b - 1)):
+                    if left != self.tau_field_id(var.name, b):
                         constraints.append(smt2equals(left, right))
-                    for left, right in zip(self.tau_fields_id(b), self.tau_fields_id(b - 1)):
-                        if left != self.tau_field_id(var.name, b):
-                            constraints.append(smt2equals(left, right))
-                case _:
-                    b = tau[-1].index
-                    constraints: list[str] = []
-                    for left, right in zip(self.tau_vars_id(b), self.tau_vars_id(b - 1)):
-                        constraints.append(smt2equals(left, right))
-                    for left, right in zip(self.tau_fields_id(b), self.tau_fields_id(b - 1)):
-                        constraints.append(smt2equals(left, right))
-            label_below = tau.origin
-            pred_below = f"Lab{label_below.id}"
-            pred_tau = f"Lab{tau.id}"
-            variable_decls = chain.from_iterable(
-                chain(self.tau_vars_decl(f.index), self.tau_fields_decl(f.index)) for f in tau.backward_iter()
+            case _:
+                constraints: list[str] = []
+                for left, right in zip(self.tau_vars_id(b), self.tau_vars_id(b - 1)):
+                    constraints.append(smt2equals(left, right))
+                for left, right in zip(self.tau_fields_id(b), self.tau_fields_id(b - 1)):
+                    constraints.append(smt2equals(left, right))
+        label_below = tau.origin
+        assert label_below is not None
+        pred_below = f"Lab{label_below.id}"
+        pred_tau = f"Lab{tau.id}"
+        below_args = chain.from_iterable(
+            chain(self.tau_vars_id(f.index), self.tau_fields_id(f.index)) for f in tau.origin.backward_iter()
+        )
+        clause = smt2assert(
+            smt2forall(
+                variable_decls,
+                smt2implies(
+                    smt2and(smt2predicate(pred_below, below_args), *constraints),
+                    smt2predicate(pred_tau, tau_args),
+                ),
             )
-            tau_args = chain.from_iterable(
-                chain(self.tau_vars_id(f.index), self.tau_fields_id(f.index)) for f in tau.backward_iter()
-            )
-            below_args = chain.from_iterable(
-                chain(self.tau_vars_id(f.index), self.tau_fields_id(f.index)) for f in tau.origin.backward_iter()
-            )
-            clause = smt2assert(
-                smt2forall(
-                    variable_decls,
-                    smt2implies(
-                        smt2and(smt2predicate(pred_below, below_args), *constraints),
-                        smt2predicate(pred_tau, tau_args),
-                    ),
-                )
-            )
-            self.chcs.add(clause)
+        )
+        self.chcs.add(clause)
 
     def assert_external_step(self, pair: Pair):
         if pair.leader().id == 183:
@@ -426,6 +427,14 @@ class SMT2FileBuilder:
         )
         fact = smt2assert(smt2forall(variable_decls, smt2predicate(pred, args)))
         self.chcs.add(fact)
+
+    def is_trivially_sat_for(self, exit_code: ExitCodeKind) -> bool:
+        excode_to_queries = {
+            ExitCodeKind.ERR: self.err_qeueries,
+            ExitCodeKind.OOM: self.oom_queries,
+            ExitCodeKind.LABEL_OVERFLOW: self.lof_queries,
+        }
+        return len(excode_to_queries[exit_code]) == 0
 
     def dump(
         self,

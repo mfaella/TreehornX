@@ -8,9 +8,9 @@ void bst_safe_find_min(struct Node* root) {
     struct Node* curr;
     struct Node* left;
     curr = root;
-    if (curr != 0) {
+    if (curr) {
         left = curr->left;
-        while (left != 0) {
+        while (left) {
             curr = left;
             left = curr->left;
         }

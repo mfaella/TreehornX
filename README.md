@@ -93,3 +93,10 @@ Then navigate to http://localhost:8000
 ``` bash
 uv run task docs-clean
 ```
+
+### Run Example
+To run an example program with TreehornX, use the following command:
+
+``` bash
+uv run python3 <path-to-file>
+```

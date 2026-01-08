@@ -238,7 +238,7 @@ class FieldAssignExpr(_Labeled):
     @override
     def __str__(self) -> str:
         label_str = "" if self.label is None else f"{self.label}: "
-        return f"{label_str} {self.right} := {self.left}"
+        return f"{label_str} {self.left} := {self.right}"
 
 
 @dataclass(frozen=True, slots=True)

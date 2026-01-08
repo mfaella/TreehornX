@@ -19,7 +19,7 @@ class Down:
 Dir = Up | Internal | Down
 
 
-def is_opposite(dir1: Dir, dir2: Dir) -> bool:
+def are_opposite_directions(dir1: Dir, dir2: Dir) -> bool:
     return (
         (isinstance(dir1, Up) and isinstance(dir2, Down))
         or (isinstance(dir1, Down) and isinstance(dir2, Up))

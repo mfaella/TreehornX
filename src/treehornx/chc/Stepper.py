@@ -63,10 +63,10 @@ class Stepper:
         prewind.event = Rewind(i)
         return prewind
 
-    def rewind_special(self, pair: Pair, r: str, i: int) -> FrameBuilder:
+    def rewind_special(self, pair: Pair, r: str, a_: int) -> FrameBuilder:
         sigma = pair.leader()
         tau = pair.follower()
-        a__ = last_upd(sigma, i, r)
+        a__ = last_upd(sigma, a_, r)
         dir, b_ = sigma[a__].prev  # type: ignore
         if dir != pair.dir():
             raise NonContinuosPairError()
@@ -146,8 +146,8 @@ class Stepper:
             return f2, None
 
     def step_new(self, pair: Pair, f__: FrameBuilder, p: str) -> tuple[FrameBuilder, StepKind]:
-        f = pair.leader()[-1]
-        f_ = pair.follower()[-1]
+        f = pair.leader().frame
+        f_ = pair.follower().frame
         # OOM
         if all(f.active_child[j] for j in range(self.k, self.k + self.m)):
             return self.oom(f, f__), StepKind.INTERNAL
@@ -157,13 +157,14 @@ class Stepper:
         assert isinstance(next_pc, int)
         f__.pc = next_pc
 
-        j = min(filter(lambda j: not f.active_child[j], range(self.k, self.k + self.m)))
-        if j == pair.child_key:
+        j = min(j for j in range(self.k, self.k + self.m) if not f.active_child[j])
+        if pair.dir() != Down(j):
             raise NonContinuosPairError()
-        f__.prev = (Down(j), f.index)
+        f__.prev = (Up(), f.index)
         f__ = default(f, f_, f__)
         f__.isnil[p] = False
         f__.event = Here(p)
+        f__.active = True
         f__.pc = next_pc
         return f__, StepKind.EXTERNAL
 
@@ -193,6 +194,8 @@ class Stepper:
 
     def step_ptr_assign_ptr(self, pair: Pair, p: str, q: str) -> tuple[FrameBuilder, StepKind]:
         sigma = pair.leader()
+        if sigma.id == 63:
+            pass
         if sigma[-1].isnil[q]:
             return self.step_assign_nil(sigma, p), StepKind.INTERNAL
         elif stop_rewind(sigma, q):
@@ -220,7 +223,7 @@ class Stepper:
             return sigma_a, StepKind.INTERNAL
 
         else:
-            return self.rewind(pair, q), StepKind.EXTERNAL
+            return self.rewind(pair, p), StepKind.EXTERNAL
 
     def step_field_assign_exp(
         self, pair: Pair, p: str, pfield: str, exp: Expr
@@ -276,7 +279,7 @@ class Stepper:
 
     def step_free(self, pair: Pair, p: str) -> tuple[FrameBuilder, StepKind]:
         sigma = pair.leader()
-        if sigma[-1].isnil[p]:
+        if sigma.frame.isnil[p]:
             return self.error(sigma), StepKind.INTERNAL
         elif stop_rewind(sigma, p):
             next_pc = self.function.info_at(sigma[-1].pc).next_pc
@@ -285,27 +288,52 @@ class Stepper:
             tau_b.prev = (Internal(), len(sigma) - 1)
             tau_b = default(sigma[-1], sigma[-1], tau_b)
             tau_b.pc = next_pc
+            tau_b.active = False
             for q in self.pointers():
                 if points_here(sigma, len(sigma) - 1, q):
                     tau_b.isnil[q] = True
                 else:
-                    tau_b.isnil[q] = sigma[-1].isnil[q]
+                    tau_b.isnil[q] = sigma.frame.isnil[q]
             return tau_b, StepKind.INTERNAL
         else:
             return self.rewind(pair, p), StepKind.EXTERNAL
 
-    def step_cmp_ptr(self, sigma: Label, tau: Label, p: str, q: str, dest: str) -> tuple[FrameBuilder, StepKind]:
-        raise NotImplementedError("step_cmp_ptr not implemented yet")
+    def step_cmp_ptr(self, pair: Pair, p: str, q: str) -> tuple[FrameBuilder, StepKind]:
+        sigma = pair.leader()
+        tau = pair.follower()
+        isnil_p = sigma.frame.isnil[p]
+        isnil_q = sigma.frame.isnil[q]
+        if isnil_p or isnil_q:
+            next_pc = self.function.info_at(sigma.frame.pc).next_pc
+            assert isinstance(next_pc, tuple)
+            ftrue = FrameBuilder(sigma.frame)
+            ftrue.prev = (Internal(), len(sigma) - 1)
+            ftrue = default(sigma.frame, sigma.frame, ftrue)
+            ftrue.pc = next_pc[0] if isnil_p == isnil_q else next_pc[1]
+            return ftrue, StepKind.INTERNAL
+        elif stop_rewind2(sigma, p, q):
+            next_pc = self.function.info_at(sigma.frame.pc).next_pc
+            assert isinstance(next_pc, tuple)
+            frame = FrameBuilder(sigma.frame)
+            frame.prev = (Internal(), len(sigma) - 1)
+            frame = default(sigma.frame, sigma.frame, frame)
+            frame.pc = next_pc[0] if are_equal_after_rewind(sigma, p, q) else next_pc[1]
+            return frame, StepKind.INTERNAL
+        else:
+            frame = self.rewind2(pair, p, q)
+            return frame, StepKind.EXTERNAL
 
     def step_ptr_assign_field(self, pair: Pair, p: str, pfield: str, q: str) -> tuple[FrameBuilder, StepKind]:
         """p := q->field"""
         sigma = pair.leader()
         tau = pair.follower()
-        if sigma[-1].isnil[p]:
+        if sigma.id == 570:
+            pass
+        if sigma[-1].isnil[q]:
             return self.error(sigma), StepKind.INTERNAL
 
         match sigma[-1].event:
-            case Rewind2(_, r) if points_here(sigma, len(sigma), r):
+            case Rewind2(i, r) if points_here(sigma, i, r):
                 sigma_a = sigma[-1]
                 tau_b = FrameBuilder(sigma_a)
                 return set_ptr_here(sigma_a, tau_b, p), StepKind.INTERNAL
@@ -316,12 +344,13 @@ class Stepper:
                     is_pfield_implicit(sigma, pfield) and not sigma[-1].active_child[pfield]
                 ):
                     return self.step_assign_nil(sigma, p), StepKind.INTERNAL
-                elif is_pfield_implicit(sigma, pfield) and sigma[-1].active_child[pfield]:
-                    if pfield != pair.child_key or pair.dir() != Down(pfield):
+                elif is_pfield_implicit(sigma, pfield) and sigma.frame.active_child[pfield]:
+                    if pair.dir() != Down(pfield):
                         raise NonContinuosPairError()
                     tau_b = FrameBuilder(tau[-1])
                     tau_b.prev = (Up(), len(sigma) - 1)
                     tau_b = default(sigma[-1], tau[-1], tau_b)
+                    tau_b.isnil[p] = False
                     next_pc = self.function.info_at(sigma[-1].pc).next_pc
                     assert isinstance(next_pc, int)
                     tau_b.pc = next_pc
@@ -338,6 +367,7 @@ class Stepper:
                                 return set_ptr_here(sigma_a, tau_b, p), StepKind.INTERNAL
                             else:
                                 return self.rewind_special(pair, r, i), StepKind.EXTERNAL
+                    assert False, "Unreachable code in step_ptr_assign_field"
             case _:
                 return self.rewind(pair, q), StepKind.EXTERNAL
 
@@ -351,6 +381,8 @@ class Stepper:
 
     def step(self, pair: Pair) -> tuple[FrameBuilder, FrameBuilder | None, StepKind] | None:
         try:
+            if pair.leader().id == 12:
+                pass
             pc = pair.leader()[-1].pc
             if pc >= len(self.function.instructions):
                 return self.step_exit(pair.leader()), None, StepKind.INTERNAL
@@ -359,6 +391,11 @@ class Stepper:
                 return self.label_overflow(pair.leader()), None, StepKind.INTERNAL
             logger.debug(f"step: {inst} (pc={pc})")
             match inst:
+                case IfGoto(ire.PtrIsPtr(p, q), _):
+                    assert isinstance(p, Var)
+                    assert isinstance(q, Var)
+                    frame, kind = self.step_cmp_ptr(pair, p.name, q.name)
+                    return frame, None, kind
                 case IfGoto():
                     ftrue, ffalse = self.step_local_branch(pair.leader())
                     if ftrue and ffalse:
@@ -383,6 +420,9 @@ class Stepper:
                     return frame, None, kind
                 case FieldAssignPtr(pfield, q):
                     frame, kind = self.step_field_assign_ptr(pair, pfield.ptr.name, q.name, pfield.name)
+                    return frame, None, kind
+                case VarAssignExpr(d, Field(ptr, name)):
+                    frame, kind = self.step_var_assign_field(pair, d.name, ptr.name, name)
                     return frame, None, kind
                 case VarAssignExpr(d, exp):
                     frame = FrameBuilder(pair.follower()[-1])

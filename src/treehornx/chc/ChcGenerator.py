@@ -1,14 +1,18 @@
 import sys
-from collections import deque
+from asyncio.unix_events import SelectorEventLoop
+from collections import defaultdict, deque
 from dataclasses import dataclass, field
 from functools import cache, cached_property
 from itertools import chain, count, product
 from typing import Iterable
 
+import graphviz as gv
 from frozendict import frozendict
 from loguru import logger
 
-from treehornx.ir.expressions import Var
+from treehornx.chc.core.dir import Up
+from treehornx.chc.core.pair import LeadershipKind
+from treehornx.ir.expressions import Not, Var
 from treehornx.ir.function import Function
 from treehornx.ir.instructions import *
 from treehornx.ir.sorts import Enum, Pointer, Struct
@@ -16,12 +20,13 @@ from treehornx.ir.sorts import Enum, Pointer, Struct
 from .core import Frame, FrameBuilder, Label, Pair
 from .core.dir import Down, Internal
 from .core.event import ERR, LOF, NOP, OOM, Exit, Here
+from .LabelDB import LabelDB
 from .PairDB import PairDB
 from .SMT2FileBuilder import SMT2FileBuilder
 from .Stepper import StepKind, Stepper
 
-logger.remove(0)
-logger.add(sys.stdout, level="TRACE")
+# logger.remove(0)
+# logger.add(sys.stdout, level=20)
 
 
 @dataclass
@@ -30,8 +35,11 @@ class ChcGenerator:
     root: Var
     m: int
     n: int
+    create_dependency_graph: bool = True
     k: int = field(init=False)
     db: PairDB = field(init=False, default_factory=PairDB)
+    labels_db: LabelDB = field(init=False, default_factory=LabelDB)
+    dependency_graph: gv.Digraph | None = field(init=False, default=None)
     _step_cache: dict[Pair, tuple[Frame, Frame | None, StepKind] | None] = field(init=False, default_factory=lambda: {})
 
     def __post_init__(self):
@@ -40,6 +48,9 @@ class ChcGenerator:
         assert isinstance(root_sort, Struct)
         self.k = sum(1 for f in root_sort.fields.values() if f.sort.is_ptr())
         self.stepper = Stepper(self.function, self.k, self.m, self.n)
+
+        if self.create_dependency_graph:
+            self.dependency_graph = gv.Digraph("dependency graph", strict=True)
 
     @cached_property
     def pointers(self) -> tuple[Var, ...]:
@@ -121,7 +132,7 @@ class ChcGenerator:
             frame_builder = FrameBuilder(base=first_frame)
             frame_builder.index = 1
             frame_builder.active = first_frame.active
-            frame_builder.prev = (Internal(), 0)
+            frame_builder.prev = (Internal(), 1)
             assert all(first_frame.isnil.values())
             if frame_builder.active:
                 frame_builder.event = Here(self.root.name)
@@ -158,11 +169,12 @@ class ChcGenerator:
         for p in pairs:
             new_p = p.extended_with_internal_frame(frame)
             self.db.add(new_p)
+            self.labels_db.add(new_p.leader())
+            self.labels_db.add(new_p.follower())
             yield new_p
 
     def update_after_external_step(self, pair: Pair, frame: Frame) -> Iterable[Pair]:
         new_pair = pair.extended_with_external_frame(frame)
-        yield new_pair
         new_pairs = [new_pair]
         for p in self.db.find_by_leader(leader=pair.follower()):
             if p.dir() != pair.rev_dir() or not self.is_continuity_pair(p):
@@ -172,6 +184,8 @@ class ChcGenerator:
 
         for new_p in new_pairs:
             self.db.add(new_p)
+            self.labels_db.add(new_p.leader())
+            self.labels_db.add(new_p.follower())
 
         return new_pairs
 
@@ -184,14 +198,19 @@ class ChcGenerator:
         return frameb.build()
 
     def psi_external(self, pair: Pair, frameb: FrameBuilder) -> Frame:
-        if pair.follower()[-1].index <= 1:
+        sigma = pair.leader()
+        tau = pair.follower()
+        if tau.frame.index <= 1:
             for p in self.pointers:
                 frameb.upd[p.name] = False
         else:
-            frames = tuple(pair.leader().slice(2))
-            a_ = max(f.index for f in pair.leader().slice(1) if f.prev[0] == pair.dir())  # type: ignore
+            # a_ = max(f.index for f in pair.leader().slice(1) if f.prev[0] == pair.dir())  # type: ignore
+            a_ = next(f.index for f in sigma.slice(1) if f.prev == (pair.dir(), tau.frame.index))
             for p in self.pointers:
-                frameb.upd[p.name] = any(f.event == Here(p.name) or f.upd[p.name] for f in pair.leader().slice(a_))
+                frameb.upd[p.name] = not frameb.isnil[p.name] and (
+                    any(f.event == Here(p.name) for f in sigma.slice(a_))
+                    or any(f.upd[p.name] for f in sigma.slice(a_ + 1))
+                )
 
         return frameb.build()
 
@@ -223,6 +242,24 @@ class ChcGenerator:
     def is_continuity_pair(self, pair: Pair) -> bool:
         return self.step(pair) is not None
 
+    def add_internal_step_dependency(self, sigma: Label, tau: Label):
+        if self.create_dependency_graph:
+            pc = tau.frame.pc
+            instr = self.function.instructions[pc] if pc < len(self.function.instructions) else Return()
+            self.dependency_graph.node(tau.name, label=f"{tau.name}\n{instr}")
+            self.dependency_graph.edge(sigma.name, tau.name, label="I", color="red")
+
+    def add_external_step_dependency(self, pair: Pair):
+        sigma = pair.follower()
+        tau = pair.leader()
+        if sigma == tau:
+            logger.debug(f"adding self dependency for label {sigma.id}")
+        if self.create_dependency_graph:
+            self.dependency_graph.node(tau.name, label=f"{tau.name}\n{self.function.instructions[tau.frame.pc]}")
+            external_step_label = f"{f'D{pair.child_key}' if pair.dir() == Up() else 'U'}"
+            self.dependency_graph.edge(sigma.name, tau.name, label=external_step_label, color="red")
+            self.dependency_graph.edge(tau.origin.name, tau.name, label="I")
+
     def generate(self) -> SMT2FileBuilder:
         smt2file = SMT2FileBuilder(
             {v for v in self.function.vars if not (sort_of(v).is_ptr() or sort_of(v).is_enum())},
@@ -233,44 +270,97 @@ class ChcGenerator:
 
         # yielding assertion of first and start frames
         for f in self.start_frames():
-            smt2file.assert_fact(Label.make(*f))
+            lab = Label.make(*f)
+            smt2file.assert_fact(lab)
+            if self.create_dependency_graph:
+                self.dependency_graph.node(
+                    lab.name, label=f"{lab.name}\n{self.function.instructions[0]}", tooltip="start frame"
+                )
         for f in self.first_frames():
-            smt2file.assert_fact(Label.make(f))
+            lab = Label.make(f)
+            smt2file.assert_fact(lab)
+            if self.create_dependency_graph:
+                self.dependency_graph.node(f"{lab.name}", tooltip="first frame")
 
         for pair in self.start_pairs():
             self.db.add(pair)
+            self.labels_db.add(pair.leader())
+            self.labels_db.add(pair.follower())
             queue.append(pair)
 
         for pair in self.first_pairs():
             self.db.add(pair)
+            self.labels_db.add(pair.leader())
+            self.labels_db.add(pair.follower())
 
         while queue:
             pair = queue.popleft()
             if pair in processed:
                 continue
+            if pair.leader().id == 112:
+                pass
             processed.add(pair)
             step_result = self.step(pair)
-            if step_result is None:
+            if step_result is None:  # non continuos pair
+                new_pairs = tuple(
+                    pair.updated_with_leader(leader) for leader in self.labels_db.find_by_origin(pair.leader())
+                )
+                for new_pair in new_pairs:
+                    self.db.add(new_pair)
+                    queue.append(new_pair)
                 continue
             tau_b, tau_b_false, step_kind = step_result
-            new_frames = (tau_b,) if tau_b_false is None else (tau_b, tau_b_false)
             if step_kind == StepKind.INTERNAL:
-                for pair in self.db.find_by_leader(pair.leader()):
-                    processed.add(pair)
-                for frame in new_frames:
-                    # update pairs db
-                    queue.extend(self.update_after_internal_step(pair, frame))
-                    # assert internal step
-                    label = pair.leader().extended_with(frame)
-                    if not isinstance(frame.event, Exit):
-                        inst = self.function.instructions[label[-2].pc]
-                        smt2file.assert_internal_step(label, inst)
+                for p in self.db.find_by_leader(pair.leader()):
+                    processed.add(p)
+
+                old_leader = pair.leader()
+                new_leader = old_leader.extended_with(tau_b)
+                self.add_internal_step_dependency(old_leader, new_leader)
+
+                if not isinstance(tau_b.event, Exit):
+                    updated_pairs = tuple(self.update_after_internal_step(pair, tau_b))
+                    queue.extend(updated_pairs)
+                    # queue.append(pair.extended_with_internal_frame(tau_b))
+                    inst = self.function.instructions[new_leader[-2].pc]
+                    smt2file.assert_internal_step(new_leader, inst)
+
+                if tau_b_false is None:
+                    continue
+
+                old_leader_false = pair.leader()
+                new_leader_false = old_leader.extended_with(tau_b_false)
+                self.add_internal_step_dependency(old_leader_false, new_leader_false)
+
+                if not isinstance(tau_b_false.event, Exit):
+                    inst = self.function.instructions[new_leader_false[-2].pc]
+                    match inst:
+                        case IfGoto(cond, target, label=label):
+                            inst = IfGoto(Not(cond), target, label=label)
+                        case FieldAssignExpr(field, expr, label=label) if sort_of(field) == BOOL:
+                            inst = FieldAssignExpr(field, Not(expr), label=label)
+                        case VarAssignExpr(var, expr, label=label) if sort_of(var) == BOOL:
+                            inst = VarAssignExpr(var, Not(expr), label=label)
+                        case _:
+                            pass
+                    updated_pairs_false = tuple(self.update_after_internal_step(pair, tau_b_false))
+                    queue.extend(updated_pairs_false)
+                    # queue.append(pair.extended_with_internal_frame(tau_b_false))
+                    smt2file.assert_internal_step(new_leader_false, inst)
             else:
+                new_pair = pair.extended_with_external_frame(tau_b)
+                self.add_external_step_dependency(new_pair)
                 # update pairs db
-                queue.extend(self.update_after_external_step(pair, tau_b))
+                updated_pairs = (
+                    *self.update_after_external_step(pair, tau_b),
+                    *(
+                        new_pair.updated_with_leader(leader)
+                        for leader in self.labels_db.find_by_origin(new_pair.leader())
+                    ),
+                )
+                queue.extend(updated_pairs)
 
                 # assert external step for tau_b
-                new_pair = pair.extended_with_external_frame(tau_b)
                 smt2file.assert_external_step(new_pair)
 
         logger.info("All pair have been generated")

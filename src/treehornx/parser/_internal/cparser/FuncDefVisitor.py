@@ -154,7 +154,8 @@ class FuncDefVisitor(c_ast.NodeVisitor):
                     "Only 'malloc' function calls are supported in right-hand side of assignments.",
                 )
             assert isinstance(lvalue, Var)
-            return New(pointer=lvalue)
+            yield New(pointer=lvalue)
+            return
 
         rvalue = self.visit_expr(node.rvalue)
 

@@ -30,8 +30,11 @@ def ppexp(expr: Expr, lab: Label) -> Expr:  # noqa: PLR0915
                 return FALSE
             elif e == FALSE:
                 return TRUE
-            e = ppexp(e, lab)
-            return ppexp(Not(e), lab)
+            ppe = ppexp(e, lab)
+            if e == ppe:
+                return Not(ppe)
+            else:
+                return ppexp(Not(ppe), lab)
         case And():
             new_args = [ppexp(arg, lab) for arg in expr.args()]
             if FALSE in new_args:
@@ -73,8 +76,16 @@ def ppexp(expr: Expr, lab: Label) -> Expr:  # noqa: PLR0915
         case PtrIsNil(p):
             assert isinstance(p, Var)
             return TRUE if lab[-1].isnil[p.name] else FALSE
-        case PtrIsPtr(_, _):
-            raise NotImplementedError("PtrIsPtr not supported in ppexp")
+        case PtrIsPtr(p, q):
+            assert isinstance(p, Var)
+            assert isinstance(q, Var)
+            if lab.frame.isnil[p.name] != lab.frame.isnil[q.name]:
+                return FALSE
+            elif lab.frame.isnil[p.name]:
+                return TRUE
+            else:
+                return expr
+
         case Ne(lhs, rhs):
             lhs = ppexp(lhs, lab)
             rhs = ppexp(rhs, lab)

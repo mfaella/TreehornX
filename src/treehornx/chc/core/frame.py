@@ -13,7 +13,7 @@ from .event import NOP, Event
 get_lab_id = count(start=0, step=1).__next__
 
 
-@dataclass(slots=True, frozen=True, order=True)
+@dataclass(frozen=True, order=True)
 class Frame:
     index: int
     active: bool

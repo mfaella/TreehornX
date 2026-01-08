@@ -3,12 +3,12 @@ struct Node {
     struct Node *next;
 };
 
-void sll_safe_length(struct Node **head) {
+void sll_safe_length(struct Node *root) {
     struct Node *curr;
     int l;
     l = 0; //0
-    curr = *head; //1
-    while(curr != 0) { //2
+    curr = root; //1
+    while(curr) { //2
         curr = curr->next; //3
         l = l + 1; //4
     }

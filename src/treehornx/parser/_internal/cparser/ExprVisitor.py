@@ -40,7 +40,7 @@ class ExprVisitor(c_ast.NodeVisitor):
 
     def visit_ID(self, node: c_ast.ID) -> Var:
         if not self.scopes.is_variable_declared(node.name):
-            raise UndefinedSymbolError(f"Variable '{node.name}' not found in any scope.")
+            raise UndefinedSymbolError(node.coord.line, node.name)
 
         var = self.scopes.get_variable(node.name)
         return var

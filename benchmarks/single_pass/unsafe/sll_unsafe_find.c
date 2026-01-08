@@ -1,21 +1,23 @@
 struct Node {
     int value;
     struct Node *next;
-};    
+};
 
-void sll_unsafe_find(struct Node **head, int key) {
+void sll_unsafe_find(struct Node *root, int key) {
     struct Node *tmp;
     struct Node *x;
     struct Node *result_node;
+    struct Node *null;
     int result;
 
-    x = *head;
+    x = root;
 
-    while(x != 0) {
+
+    while(x) {
         result = x->value;
         if(result == key) {
             result_node = x;
-            x = 0;
+            x = null;
         }
         else {
             x = x->next;
