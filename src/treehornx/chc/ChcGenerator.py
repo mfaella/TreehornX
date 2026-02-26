@@ -1,3 +1,4 @@
+import json
 import sys
 from asyncio.unix_events import SelectorEventLoop
 from collections import defaultdict, deque
@@ -24,6 +25,7 @@ from .LabelDB import LabelDB
 from .PairDB import PairDB
 from .SMT2FileBuilder import SMT2FileBuilder
 from .Stepper import StepKind, Stepper
+from .verify import CHCVerifier
 
 # logger.remove(0)
 # logger.add(sys.stdout, level=20)
@@ -48,6 +50,8 @@ class ChcGenerator:
         assert isinstance(root_sort, Struct)
         self.k = sum(1 for f in root_sort.fields.values() if f.sort.is_ptr())
         self.stepper = Stepper(self.function, self.k, self.m, self.n)
+
+        self.verifier = CHCVerifier(self.function, self.root, self.m, self.n, self.k)
 
         if self.create_dependency_graph:
             self.dependency_graph = gv.Digraph("dependency graph", strict=True)
@@ -96,36 +100,38 @@ class ChcGenerator:
         upd: frozendict[str, bool] = frozendict({p.name: False for p in self.pointers})
         isnil: frozendict[str, bool] = frozendict({p.name: True for p in self.pointers})
 
-        enum_values_product = self.enums_products(self.enum_vars())
-        enum_fields_product = self.enums_products(self.enum_fields())
-        for enum_values, enum_fields in product(enum_values_product, enum_fields_product):
-            for active_child in self.active_child_products():
-                active_frame = Frame(
-                    index=0,
-                    active=True,
-                    pc=0,
-                    upd=upd,
-                    isnil=isnil,
-                    event=NOP(),
-                    active_child=active_child,
-                    enum_values=enum_values,
-                    enum_fields=enum_fields,
-                    prev=None,
-                )
-                yield active_frame
-            inactive_frame = Frame(
+        # enum_values_product = self.enums_products(self.enum_vars())
+        # enum_fields_product = self.enums_products(self.enum_fields())
+        # for enum_values, enum_fields in product(enum_values_product, enum_fields_product):
+        enum_values = frozendict({v.name: list(v.sort.flags)[0] for v in self.enum_vars()})
+        enum_fields = frozendict({f.name: list(f.sort.flags)[0] for f in self.enum_fields()})
+        for active_child in self.active_child_products():
+            active_frame = Frame(
                 index=0,
-                active=False,
+                active=True,
                 pc=0,
                 upd=upd,
                 isnil=isnil,
                 event=NOP(),
-                active_child=frozendict({key: True for key in self.children_keys}),
-                enum_values=frozendict({}),
-                enum_fields=frozendict({}),
+                active_child=active_child,
+                enum_values=enum_values,
+                enum_fields=enum_fields,
                 prev=None,
             )
-            yield inactive_frame
+            yield active_frame
+        inactive_frame = Frame(
+            index=0,
+            active=False,
+            pc=0,
+            upd=upd,
+            isnil=isnil,
+            event=NOP(),
+            active_child=frozendict({key: True for key in self.children_keys}),
+            enum_values=enum_values,
+            enum_fields=enum_fields,
+            prev=None,
+        )
+        yield inactive_frame
 
     def start_frames(self) -> Iterable[tuple[Frame, Frame]]:
         for first_frame in self.first_frames():
@@ -144,7 +150,7 @@ class ChcGenerator:
 
     def start_pairs(self) -> Iterable[Pair]:
         for parent, child, child_key in product(self.start_frames(), self.first_frames(), self.children_keys):
-            if parent[1].active_child[child_key] == child.active:
+            if parent[1].active_child[child_key] == child.active and not parent[1].active_child["parent"]:
                 parent_lab = Label.make(*parent)
                 child_lab = Label.make(child)
                 pair = Pair(parent=parent_lab, child=child_lab, child_key=child_key)
@@ -169,8 +175,8 @@ class ChcGenerator:
         for p in pairs:
             new_p = p.extended_with_internal_frame(frame)
             self.db.add(new_p)
-            self.labels_db.add(new_p.leader())
-            self.labels_db.add(new_p.follower())
+            self._add_label(new_p.leader())
+            self._add_label(new_p.follower())
             yield new_p
 
     def update_after_external_step(self, pair: Pair, frame: Frame) -> Iterable[Pair]:
@@ -184,8 +190,8 @@ class ChcGenerator:
 
         for new_p in new_pairs:
             self.db.add(new_p)
-            self.labels_db.add(new_p.leader())
-            self.labels_db.add(new_p.follower())
+            self._add_label(new_p.leader())
+            self._add_label(new_p.follower())
 
         return new_pairs
 
@@ -260,6 +266,38 @@ class ChcGenerator:
             self.dependency_graph.edge(sigma.name, tau.name, label=external_step_label, color="red")
             self.dependency_graph.edge(tau.origin.name, tau.name, label="I")
 
+    def _label_to_json(self, label: Label) -> str:
+        frames = []
+        for f in label.iter():
+            prev = None
+            if f.prev is not None:
+                dir, idx = f.prev
+                prev = {"dir": str(dir), "index": idx}
+            frames.append(
+                {
+                    "index": f.index,
+                    "active": f.active,
+                    "pc": f.pc,
+                    "upd": dict(f.upd),
+                    "isnil": dict(f.isnil),
+                    "event": str(f.event),
+                    "active_child": dict(f.active_child),
+                    "enum_values": dict(f.enum_values),
+                    "enum_fields": dict(f.enum_fields),
+                    "prev": prev,
+                }
+            )
+        payload = {
+            "id": label.id,
+            "origin_id": label.origin.id if label.origin is not None else None,
+            "frames": frames,
+        }
+        return json.dumps(payload, separators=(",", ":"), sort_keys=False)
+
+    def _add_label(self, label: Label) -> None:
+        self.labels_db.add(label)
+        # logger.debug(f"LABEL_JSON {self._label_to_json(label)}")
+
     def generate(self) -> SMT2FileBuilder:
         smt2file = SMT2FileBuilder(
             {v for v in self.function.vars if not (sort_of(v).is_ptr() or sort_of(v).is_enum())},
@@ -284,21 +322,19 @@ class ChcGenerator:
 
         for pair in self.start_pairs():
             self.db.add(pair)
-            self.labels_db.add(pair.leader())
-            self.labels_db.add(pair.follower())
+            self._add_label(pair.leader())
+            self._add_label(pair.follower())
             queue.append(pair)
 
         for pair in self.first_pairs():
             self.db.add(pair)
-            self.labels_db.add(pair.leader())
-            self.labels_db.add(pair.follower())
+            self._add_label(pair.leader())
+            self._add_label(pair.follower())
 
         while queue:
             pair = queue.popleft()
             if pair in processed:
                 continue
-            if pair.leader().id == 112:
-                pass
             processed.add(pair)
             step_result = self.step(pair)
             if step_result is None:  # non continuos pair
@@ -306,10 +342,15 @@ class ChcGenerator:
                     pair.updated_with_leader(leader) for leader in self.labels_db.find_by_origin(pair.leader())
                 )
                 for new_pair in new_pairs:
+                    if self.is_continuity_pair(new_pair):
+                        assert self.verifier.verify_pair(pair), f"Invalid pair: {pair}"
                     self.db.add(new_pair)
+                    self._add_label(new_pair.leader())
+                    self._add_label(new_pair.follower())
                     queue.append(new_pair)
                 continue
             tau_b, tau_b_false, step_kind = step_result
+            # assert tau_b_false is None
             if step_kind == StepKind.INTERNAL:
                 for p in self.db.find_by_leader(pair.leader()):
                     processed.add(p)

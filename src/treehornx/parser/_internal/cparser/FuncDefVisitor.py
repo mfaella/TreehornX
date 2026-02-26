@@ -1,3 +1,4 @@
+from functools import cached_property
 from typing import Iterable, cast
 
 from pycparser import c_ast
@@ -18,6 +19,10 @@ class FuncDefVisitor(c_ast.NodeVisitor):
         self.scopes: ScopeStack = ScopeStack()
         self.return_sort: None | Sort = None
         self.cond_counter = 0
+
+    @cached_property
+    def known_enums(self) -> set[Enum]:
+        return {sort for sort in self.known_sorts.values() if isinstance(sort, Enum)}
 
     def visit_FuncDef(self, node: c_ast.FuncDef) -> Function:
         line = cast(int, node.coord.line)
@@ -122,7 +127,7 @@ class FuncDefVisitor(c_ast.NodeVisitor):
             yield from self.visit(stmt)
 
     def visit_expr(self, node: c_ast.Node) -> Expr:
-        expr_visitor = ExprVisitor(self.scopes)
+        expr_visitor = ExprVisitor(self.scopes, self.known_enums)
         return expr_visitor.visit(node)
 
     def visit_Assignment(self, node: c_ast.Assignment) -> Iterable[Instruction]:
@@ -217,7 +222,7 @@ class FuncDefVisitor(c_ast.NodeVisitor):
         iftrue_first, *iftrue_tail = list(self.visit(node.iftrue))
         iffalse_instructions = list(self.visit(node.iffalse)) if node.iffalse else []
 
-        iftrue_label = iftrue_first.name if isinstance(iftrue_first, c_ast.Label) else f"#IFTRUE_{self.cond_counter}"
+        iftrue_label = iftrue_first.label or f"#IFTRUE_{self.cond_counter}"
         endif_label = f"#ENDIF_{self.cond_counter}"
 
         self.cond_counter += 1
@@ -250,7 +255,7 @@ class FuncDefVisitor(c_ast.NodeVisitor):
         if self.return_sort == BOOL and isinstance(ret_expr, Var) and sort_of(ret_expr).is_ptr():
             ret_expr = Not(PtrIsNil(ret_expr))
         ret_sort = UNIT if ret_expr is None else sort_of(ret_expr)
-        if ret_sort is not self.return_sort:
+        if ret_sort != self.return_sort:
             raise UnsupportedFeatureError(
                 node.coord.line,
                 f"Return statement type '{ret_sort.name}' does not match expected type '{self.return_sort.name}'.",
@@ -266,8 +271,9 @@ class FuncDefVisitor(c_ast.NodeVisitor):
         if stmt is None:
             yield Skip(label=label_name)
         else:
-            inst = next(self.visit(stmt))
-            yield inst.with_label(label_name)
+            insts = list(self.visit(stmt))
+            insts[0] = insts[0].with_label(label_name)
+            yield from insts
 
     def visit_Goto(self, node: c_ast.Goto) -> Iterable[Instruction]:
         yield Goto(target=node.name)

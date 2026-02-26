@@ -121,7 +121,7 @@ class Function:
         for instr in self.instructions:
             if isinstance(instr, Return):
                 sort = UNIT if instr.value is None else sort_of(instr.value)
-                if sort is not self.return_type:
+                if sort != self.return_type:
                     raise IncompatibleReturnTypeError(f"sort is not self.return_type")
 
     def info_of(self, instr: Instruction) -> InstructionInfo:

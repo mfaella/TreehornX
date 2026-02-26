@@ -32,7 +32,7 @@ void sum_keys(struct Node *root) {
             // sum_keys(curr->right);
             RIGHT_CALL_LABEL:
             parent = curr; //13
-            parent->pc = RETURN_CALL;;
+            parent->pc = RETURN_CALL;
             curr = curr->right;
             goto START;
         }
@@ -52,3 +52,7 @@ void sum_keys(struct Node *root) {
         }
     }
 }
+
+/*
+ *
+ */

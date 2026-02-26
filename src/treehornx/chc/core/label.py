@@ -7,7 +7,7 @@ from typing import Iterable, override
 
 from treehornx.chc.core.cache_hash import cache_hash
 
-from .dir import Down
+# from .dir import Down
 from .frame import Frame
 
 next_label_id = count().__next__
@@ -19,9 +19,6 @@ def _extended_label(label: Label | None, frame: Frame) -> Label:
     object.__setattr__(instance, "frame", frame)
     object.__setattr__(instance, "origin", label)
     object.__setattr__(instance, "id", next_label_id())
-
-    if getattr(instance, "id") == 217:
-        pass
 
     return instance
 
@@ -37,7 +34,7 @@ def _make_label(*frames: Frame) -> Label:
 
 @dataclass(frozen=True)
 class Label:
-    id: int
+    id: int = field(init=False, compare=False)
     frame: Frame
     origin: Label | None = field(default=None)
 
@@ -77,6 +74,12 @@ class Label:
     @override
     def __hash__(self) -> int:
         return self.__cache_hash__
+
+    @override
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, Label):
+            return NotImplemented
+        return self.frame == other.frame and self.origin == other.origin
 
     @cached_property
     def name(self) -> str:

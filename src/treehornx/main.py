@@ -77,14 +77,14 @@ def main(args: list[str]):
         chcgen.labels_db.dump(labels_file)
     for exit_code in (ExitCodeKind.ERR, ExitCodeKind.OOM, ExitCodeKind.LABEL_OVERFLOW):
         if smt2file_builder.is_trivially_sat_for(exit_code):
-            result = "sat"
+            print(f"trivially sat for {exit_code}")
         else:
             buffer = io.StringIO()
             with open(f"{function.name}_{exit_code.name}.smt2", "w") as f:
                 smt2file_builder.dump(buffer, exit_code, check_sat=True)
                 smt2file_builder.dump(f, exit_code, check_sat=True)
-            result = solvesmt2(buffer.getvalue())
-        print(f"Function {function.name} with exit code {exit_code.name}: \t {result}")
+            # result = solvesmt2(buffer.getvalue())
+        # print(f"Function {function.name} with exit code {exit_code.name}: \t {result}")
 
 
 if __name__ == "__main__":

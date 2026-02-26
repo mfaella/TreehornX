@@ -28,6 +28,7 @@ from treehornx.ir.expressions import (
     PtrIsPtr,
     Sub,
     Var,
+    sort_of,
 )
 from treehornx.ir.instructions import FieldAssignExpr, IfGoto, Instruction, VarAssignExpr
 
@@ -239,6 +240,8 @@ class SMT2FileBuilder:
                 return formatter(*args)
             case EnumConst(sort, value) if sort == irs.BOOL:
                 return smt2true() if value == TRUE else smt2false()
+            case EnumConst():
+                return smt2true()
             case _:
                 raise RuntimeError(f"Unsupported expression type: {expr}")
 
@@ -255,8 +258,6 @@ class SMT2FileBuilder:
         self.decls.add(decl)
 
     def assert_internal_step(self, tau: Label, stmt: Instruction):
-        if tau.id == 37:
-            pass
         self.declare_predicate(tau)
         constraints = []
         variable_decls = list(
@@ -290,7 +291,7 @@ class SMT2FileBuilder:
 
         match stmt:
             case IfGoto(cond, _) if not isinstance(cond, PtrIsPtr):
-                cond = ppexp(cond, tau)
+                cond = ppexp(cond, tau[-1])
                 constraints = []
                 if cond not in {TRUE, FALSE}:
                     cond_smt2 = self.expr_to_smt2(
@@ -304,23 +305,25 @@ class SMT2FileBuilder:
                 for left, right in zip(self.tau_fields_id(b), self.tau_fields_id(b - 1)):
                     constraints.append(smt2equals(left, right))
             case VarAssignExpr(var, expr):
-                expr = ppexp(expr, tau)
-                if isinstance(expr, Field):
-                    expr_smt2 = field_id_maker(expr.name)
-                else:
-                    expr_smt2 = self.expr_to_smt2(expr, var_id_maker, field_id_maker)
-                constraints = [smt2equals(self.tau_var_id(var.name, b), expr_smt2)]
+                expr = ppexp(expr, tau[-1])
+                if not isinstance(expr, EnumConst) and not (isinstance(expr, (Field, Var)) and sort_of(expr).is_enum()):
+                    if isinstance(expr, Field):
+                        expr_smt2 = field_id_maker(expr.name)
+                    else:
+                        expr_smt2 = self.expr_to_smt2(expr, var_id_maker, field_id_maker)
+                    constraints = [smt2equals(self.tau_var_id(var.name, b), expr_smt2)]
                 for left, right in zip(self.tau_vars_id(b), self.tau_vars_id(b - 1)):
                     if left != self.tau_var_id(var.name, b):
                         constraints.append(smt2equals(left, right))
                 for left, right in zip(self.tau_fields_id(b), self.tau_fields_id(b - 1)):
                     constraints.append(smt2equals(left, right))
             case FieldAssignExpr(field, expr):
-                expr = ppexp(expr, tau)
+                expr = ppexp(expr, tau[-1])
                 var: Var = field.ptr.sort.pointee.fields[field.name]  # type: ignore
                 assert isinstance(var, Var)
-                expr_smt2 = self.expr_to_smt2(expr, var_id_maker, field_id_maker)
-                constraints = [smt2equals(self.tau_field_id(var.name, b), expr_smt2)]
+                if not isinstance(expr, EnumConst):
+                    expr_smt2 = self.expr_to_smt2(expr, var_id_maker, field_id_maker)
+                    constraints = [smt2equals(self.tau_field_id(var.name, b), expr_smt2)]
                 for left, right in zip(self.tau_vars_id(b), self.tau_vars_id(b - 1)):
                     constraints.append(smt2equals(left, right))
                 for left, right in zip(self.tau_fields_id(b), self.tau_fields_id(b - 1)):
@@ -351,8 +354,6 @@ class SMT2FileBuilder:
         self.chcs.add(clause)
 
     def assert_external_step(self, pair: Pair):
-        if pair.leader().id == 183:
-            pass
         sigma = pair.follower()
         tau = pair.leader()
         self.declare_predicate(sigma)

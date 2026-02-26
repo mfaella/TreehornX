@@ -4,9 +4,12 @@ from typing import override
 
 from pycparser import c_ast
 from treehornx.ir.expressions import (
+    FALSE,
+    TRUE,
     Add,
     And,
     Div,
+    EnumConst,
     Eq,
     Expr,
     Field,
@@ -25,7 +28,7 @@ from treehornx.ir.expressions import (
     Var,
 )
 from treehornx.ir.instructions import Instruction
-from treehornx.ir.sorts import BOOL, Int, Real, Sort
+from treehornx.ir.sorts import BOOL, Enum, Int, Real, Sort
 from treehornx.ir.utils import *
 
 from .errors import UndefinedSymbolError, UnsupportedFeatureError
@@ -35,10 +38,20 @@ from .ScopeStack import ScopeStack
 @dataclass
 class ExprVisitor(c_ast.NodeVisitor):
     scopes: ScopeStack
-    instructions: list[Instruction] = field(default_factory=list, init=False)
+    enums: set[Enum]
     is_sub_expr: bool = field(default=False, init=False)
 
-    def visit_ID(self, node: c_ast.ID) -> Var:
+    def visit_ID(self, node: c_ast.ID) -> Var | EnumConst:
+        for enum in self.enums:
+            if node.name in enum.flags:
+                return EnumConst(sort=enum, value=node.name)
+
+        if node.name == "true":
+            return TRUE
+
+        if node.name == "false":
+            return FALSE
+
         if not self.scopes.is_variable_declared(node.name):
             raise UndefinedSymbolError(node.coord.line, node.name)
 

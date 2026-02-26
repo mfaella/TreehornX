@@ -15,16 +15,16 @@ get_lab_id = count(start=0, step=1).__next__
 
 @dataclass(frozen=True, order=True)
 class Frame:
-    index: int
+    index: int  # independent
     active: bool
-    pc: int
+    pc: int  # independent
     upd: frozendict[str, bool]
-    isnil: frozendict[str, bool]
+    isnil: frozendict[str, bool]  # independent
     event: Event
-    active_child: frozendict[str | int, bool]
-    enum_values: frozendict[str, str]
-    enum_fields: frozendict[str, str]
-    prev: tuple[Dir, int] | None = field(default=None)
+    active_child: frozendict[str | int, bool]  # independent
+    enum_values: frozendict[str, str]  # independent
+    enum_fields: frozendict[str, str]  # independent
+    prev: tuple[Dir, int] | None = field(default=None)  # independent
 
 
 @dataclass(slots=True)

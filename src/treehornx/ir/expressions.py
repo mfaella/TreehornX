@@ -77,7 +77,8 @@ class EnumConst:
             value: The value of the enumeration.
         """
         instance = object.__new__(cls)
-        cls.__init__(instance, sort, value)
+        object.__setattr__(instance, "sort", sort)
+        object.__setattr__(instance, "value", value)
         if instance not in cls._pool:
             cls._pool[instance] = instance
         return cls._pool[instance]
@@ -85,6 +86,10 @@ class EnumConst:
     def __post_init__(self):
         if not self.sort.exists(self.value):
             raise ValueError(f"value '{self.value}' not in enum sort {self.sort}")
+
+    def __deepcopy__(self, _):
+        # EnumConst instances are immutable and interned, so we can return the same instance
+        return self
 
 
 TRUE = EnumConst(BOOL, "TRUE")

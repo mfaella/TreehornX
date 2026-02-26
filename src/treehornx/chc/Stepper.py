@@ -128,6 +128,7 @@ class Stepper:
         next_pc = self.function.info_at(f1.pc).next_pc
         assert isinstance(next_pc, int)
         f2.pc = next_pc
+        exp = ppexp(exp, f1)
         if isinstance(exp, ire.EnumConst):
             assert isinstance(exp, ire.EnumConst)
             f2.enum_values[d.name] = exp.value
@@ -175,7 +176,7 @@ class Stepper:
         inst = self.function.instructions[f1.pc]
         assert isinstance(inst, IfGoto)
         expr = inst.condition
-        expr = ppexp(expr, sigma)
+        expr = ppexp(expr, sigma[-1])
         ftrue, ffalse = None, None
         if expr == ire.TRUE or expr != ire.FALSE:
             ftrue = FrameBuilder(f1)
@@ -194,8 +195,6 @@ class Stepper:
 
     def step_ptr_assign_ptr(self, pair: Pair, p: str, q: str) -> tuple[FrameBuilder, StepKind]:
         sigma = pair.leader()
-        if sigma.id == 63:
-            pass
         if sigma[-1].isnil[q]:
             return self.step_assign_nil(sigma, p), StepKind.INTERNAL
         elif stop_rewind(sigma, q):
@@ -238,10 +237,10 @@ class Stepper:
             assert isinstance(next_pc, int)
             inst = self.function.instructions[sigma[-1].pc]
             assert isinstance(inst, FieldAssignExpr)
-            exp = ppexp(exp, sigma)
+            exp = ppexp(exp, sigma[-1])
             tau_b = FrameBuilder(tau[-1])
             tau_b.prev = (Internal(), len(sigma) - 1)
-            tau_b = default(sigma[-1], tau[-1], tau_b)
+            tau_b = default(sigma[-1], sigma[-1], tau_b)
             tau_b.pc = next_pc
             if isinstance(exp, ire.EnumConst):
                 tau_b.enum_fields[pfield] = exp.value
@@ -259,7 +258,7 @@ class Stepper:
             return self.rewind(pair, p), None, StepKind.EXTERNAL
 
     def step_var_assign_field(self, pair: Pair, var: str, p: str, pfield: str) -> tuple[FrameBuilder, StepKind]:
-        """var := p->pfield"""
+        """var := p->field"""
         sigma = pair.leader()
         if sigma[-1].isnil[p]:
             return self.error(sigma), StepKind.INTERNAL
@@ -324,11 +323,9 @@ class Stepper:
             return frame, StepKind.EXTERNAL
 
     def step_ptr_assign_field(self, pair: Pair, p: str, pfield: str, q: str) -> tuple[FrameBuilder, StepKind]:
-        """p := q->field"""
+        """p := q->pfield"""
         sigma = pair.leader()
         tau = pair.follower()
-        if sigma.id == 570:
-            pass
         if sigma[-1].isnil[q]:
             return self.error(sigma), StepKind.INTERNAL
 
@@ -359,7 +356,7 @@ class Stepper:
                 else:
                     for r in self.pointers():
                         for i in range(1, len(sigma)):
-                            if not is_pfield_ptr(sigma, len(sigma), pfield, r, i):
+                            if not is_pfield_ptr(sigma, len(sigma) - 1, pfield, r, i):
                                 continue
                             if points_here(sigma, i, r):
                                 sigma_a = sigma[-1]
@@ -381,8 +378,6 @@ class Stepper:
 
     def step(self, pair: Pair) -> tuple[FrameBuilder, FrameBuilder | None, StepKind] | None:
         try:
-            if pair.leader().id == 12:
-                pass
             pc = pair.leader()[-1].pc
             if pc >= len(self.function.instructions):
                 return self.step_exit(pair.leader()), None, StepKind.INTERNAL

@@ -15,6 +15,6 @@ unsafe_folders = [
 #         file_path = os.path.join(folder, file)
 #         print(f"Testing file: {file_path}")
 #         main(["function=main", f"m=1", f"n=25", file_path])
-file_path = "benchmarks/safe/sll_safe_insert_sorted.c"
+file_path = "benchmarks/safe/rec-bst-prepost-left-only.c"
 print(f"Testing file: {file_path}")
-main(["function=main", f"m=1", f"n=50", file_path])
+main(["function=isBST", f"m=1", f"n=70", file_path])
