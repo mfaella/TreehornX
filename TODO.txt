@@ -1,3 +1,9 @@
 simplify and precisely define IR
 remove base from FrameBuilder and add check for fields integrity
 enum fields and enum vars default value
+
+sll_safe_insert_sorted.c: 2557/3710 sono coppie eliminabili
+
+rec-bst-prepost.c:
+134708/164025 coppie eliminabili con 70 frame
+1166612/1542559 coppie eliminabili con 75 frame

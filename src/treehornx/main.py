@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Iterable
 
 from .chc.ChcGenerator import ChcGenerator
-from .chc.SMT2FileBuilder import ExitCodeKind
+from .chc.SMT2FileBuilder import ExitCodeKind, SMT2FileBuilder
 from .ir.function import Function
 from .parser.CParser import CParser
 
@@ -68,7 +68,8 @@ def main(args: list[str]):
         config.m,
         config.n,
     )
-    smt2file_builder = chcgen.generate()
+    chcgen.generate()
+    smt2file_builder = chcgen.makeSMT2FileBuilder()
     output_path = Path("report")
     output_path.mkdir(parents=True, exist_ok=True)
     with open(f"report/{function.name}.dot", "w") as f:

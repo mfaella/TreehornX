@@ -6,6 +6,7 @@ from ir.function import Function
 from ir.instructions import *
 from ir.sorts import INT, REAL, UNIT, Pointer, Struct
 
+
 outsider_struct = Struct(name="Outsider", struct_vars={Var("data", INT)}, struct_ptrs={"outsider_next"})
 
 

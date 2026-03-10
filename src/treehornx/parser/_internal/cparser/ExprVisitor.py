@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from typing import override
 
 from pycparser import c_ast
+
 from treehornx.ir.expressions import (
     FALSE,
     TRUE,

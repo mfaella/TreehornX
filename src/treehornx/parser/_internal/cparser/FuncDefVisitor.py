@@ -2,6 +2,7 @@ from functools import cached_property
 from typing import Iterable, cast
 
 from pycparser import c_ast
+
 from treehornx.ir.errors import IncompatibleReturnTypeError
 from treehornx.ir.expressions import *
 from treehornx.ir.function import *

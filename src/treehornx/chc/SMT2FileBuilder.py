@@ -148,63 +148,63 @@ class SMT2FileBuilder:
         name = self.smt2_var_id(var.name, prefix)
         return f"({name} {sort})"
 
-    def sigma_var_decl(self, var: Var, index: int) -> str:
+    def sigma_var_decl(self, var: Var, id: int) -> str:
         """sv stands for 'sigma variable'."""
-        return self.smt2_var_decl(var, f"sv{index}")
+        return self.smt2_var_decl(var, f"sv{id}")
 
-    def tau_var_decl(self, var: Var, index: int) -> str:
+    def tau_var_decl(self, var: Var, id: int) -> str:
         """tv stands for 'tau variable'."""
-        return self.smt2_var_decl(var, f"tv{index}")
+        return self.smt2_var_decl(var, f"tv{id}")
 
-    def sigma_field_decl(self, field: Var, index: int) -> str:
+    def sigma_field_decl(self, field: Var, id: int) -> str:
         """sf stands for 'sigma field'."""
-        return self.smt2_var_decl(field, f"sf{index}")
+        return self.smt2_var_decl(field, f"sf{id}")
 
-    def tau_field_decl(self, field: Var, index: int) -> str:
+    def tau_field_decl(self, field: Var, id: int) -> str:
         """tf stands for 'tau field'."""
-        return self.smt2_var_decl(field, f"tf{index}")
+        return self.smt2_var_decl(field, f"tf{id}")
 
-    def sigma_var_id(self, var: str, index: int) -> str:
+    def sigma_var_id(self, var: str, id: int) -> str:
         """sv stands for 'sigma variable'."""
-        return self.smt2_var_id(var, f"sv{index}")
+        return self.smt2_var_id(var, f"sv{id}")
 
-    def tau_var_id(self, var: str, index: int) -> str:
+    def tau_var_id(self, var: str, id: int) -> str:
         """tv stands for 'tau variable'."""
         assert isinstance(var, str)
         assert var != "value"
-        return self.smt2_var_id(var, f"tv{index}")
+        return self.smt2_var_id(var, f"tv{id}")
 
-    def sigma_field_id(self, field: str, index: int) -> str:
+    def sigma_field_id(self, field: str, id: int) -> str:
         """sf stands for 'sigma field'."""
-        return self.smt2_var_id(field, f"sf{index}")
+        return self.smt2_var_id(field, f"sf{id}")
 
-    def tau_field_id(self, field: str, index: int) -> str:
+    def tau_field_id(self, field: str, id: int) -> str:
         """tf stands for 'tau field'."""
-        return self.smt2_var_id(field, f"tf{index}")
+        return self.smt2_var_id(field, f"tf{id}")
 
-    def sigma_vars_decl(self, index: int) -> Iterable[str]:
-        return (self.sigma_var_decl(var, index) for var in self.vars)
+    def sigma_vars_decl(self, id: int) -> Iterable[str]:
+        return (self.sigma_var_decl(var, id) for var in self.vars)
 
-    def sigma_fields_decl(self, index: int) -> Iterable[str]:
-        return (self.sigma_field_decl(field, index) for field in self.fields)
+    def sigma_fields_decl(self, id: int) -> Iterable[str]:
+        return (self.sigma_field_decl(field, id) for field in self.fields)
 
-    def tau_vars_decl(self, index: int) -> Iterable[str]:
-        return (self.tau_var_decl(var, index) for var in self.vars)
+    def tau_vars_decl(self, id: int) -> Iterable[str]:
+        return (self.tau_var_decl(var, id) for var in self.vars)
 
-    def tau_fields_decl(self, index: int) -> Iterable[str]:
-        return (self.tau_field_decl(field, index) for field in self.fields)
+    def tau_fields_decl(self, id: int) -> Iterable[str]:
+        return (self.tau_field_decl(field, id) for field in self.fields)
 
-    def sigma_vars_id(self, index: int) -> Iterable[str]:
-        return (self.sigma_var_id(var.name, index) for var in self.vars)
+    def sigma_vars_id(self, id: int) -> Iterable[str]:
+        return (self.sigma_var_id(var.name, id) for var in self.vars)
 
-    def sigma_fields_id(self, index: int) -> Iterable[str]:
-        return (self.sigma_field_id(field.name, index) for field in self.fields)
+    def sigma_fields_id(self, id: int) -> Iterable[str]:
+        return (self.sigma_field_id(field.name, id) for field in self.fields)
 
-    def tau_vars_id(self, index: int) -> Iterable[str]:
-        return (self.tau_var_id(var.name, index) for var in self.vars)
+    def tau_vars_id(self, id: int) -> Iterable[str]:
+        return (self.tau_var_id(var.name, id) for var in self.vars)
 
-    def tau_fields_id(self, index: int) -> Iterable[str]:
-        return (self.tau_field_id(field.name, index) for field in self.fields)
+    def tau_fields_id(self, id: int) -> Iterable[str]:
+        return (self.tau_field_id(field.name, id) for field in self.fields)
 
     def expr_to_smt2(self, expr: Expr, var_id_maker: Callable[[str], str], field_id_maker: Callable[[str], str]) -> str:
         op_formatter_map: dict[type, Callable[..., str]] = {
@@ -257,7 +257,108 @@ class SMT2FileBuilder:
         decl = smt2decl(pred_name, args_sorts)
         self.decls.add(decl)
 
-    def assert_internal_step(self, tau: Label, stmt: Instruction):
+    def assert_internal_replaced_step(self, tau: Label, ancestor: Label, stmt: Instruction):
+        self.declare_predicate(tau)
+        constraints = []
+
+        def iter_origins(label: Label) -> Iterable[Label]:
+            current: Label | None = label
+            while current is not None:
+                yield current
+                current = current.origin
+
+        origins = tuple(reversed(tuple(iter_origins(tau))))
+        assert len(origins) != 0
+        ancestor_origins = tuple(reversed(tuple(iter_origins(ancestor))))
+
+        variable_decls = list(
+            chain.from_iterable(chain(self.tau_vars_decl(lab.id), self.tau_fields_decl(lab.id)) for lab in origins)
+        )
+        variable_decls.extend(self.tau_vars_decl(ancestor.id))
+        variable_decls.extend(self.tau_fields_decl(ancestor.id))
+        tau_args = list(
+            chain.from_iterable(chain(self.tau_vars_id(lab.id), self.tau_fields_id(lab.id)) for lab in origins)
+        )
+        ancestor_args = list(
+            chain.from_iterable(chain(self.tau_vars_id(lab.id), self.tau_fields_id(lab.id)) for lab in ancestor_origins)
+        )
+
+        if any(isinstance(event, (OOM, ERR, LOF)) for event in tau.frame.events):
+            pred = f"Lab{tau.id}"
+            query = smt2assert(smt2forall(variable_decls, smt2implies(smt2predicate(pred, tau_args), smt2false())))
+            if OOM() in tau.frame.events:
+                self.oom_queries.add(query)
+            if ERR() in tau.frame.events:
+                self.err_qeueries.add(query)
+            if LOF() in tau.frame.events:
+                self.lof_queries.add(query)
+
+        def var_id_maker(v: str):
+            return self.tau_var_id(v, ancestor.id)
+
+        def field_id_maker(f: str):
+            return self.tau_field_id(f, ancestor.id)
+
+        match stmt:
+            case IfGoto(cond, _) if not isinstance(cond, PtrIsPtr):
+                cond = ppexp(cond, tau.frame)
+                constraints = []
+                if cond not in {TRUE, FALSE}:
+                    cond_smt2 = self.expr_to_smt2(
+                        cond,
+                        var_id_maker,
+                        field_id_maker,
+                    )
+                    constraints.append(cond_smt2)
+                for left, right in zip(self.tau_vars_id(tau.id), self.tau_vars_id(ancestor.id)):
+                    constraints.append(smt2equals(left, right))
+                for left, right in zip(self.tau_fields_id(tau.id), self.tau_fields_id(ancestor.id)):
+                    constraints.append(smt2equals(left, right))
+            case VarAssignExpr(var, expr):
+                expr = ppexp(expr, tau.frame)
+                if not isinstance(expr, EnumConst) and not (isinstance(expr, (Field, Var)) and sort_of(expr).is_enum()):
+                    if isinstance(expr, Field):
+                        expr_smt2 = field_id_maker(expr.name)
+                    else:
+                        expr_smt2 = self.expr_to_smt2(expr, var_id_maker, field_id_maker)
+                    constraints = [smt2equals(self.tau_var_id(var.name, tau.id), expr_smt2)]
+                for left, right in zip(self.tau_vars_id(tau.id), self.tau_vars_id(ancestor.id)):
+                    if left != self.tau_var_id(var.name, tau.id):
+                        constraints.append(smt2equals(left, right))
+                for left, right in zip(self.tau_fields_id(tau.id), self.tau_fields_id(ancestor.id)):
+                    constraints.append(smt2equals(left, right))
+            case FieldAssignExpr(field, expr):
+                expr = ppexp(expr, tau.frame)
+                var: Var = field.ptr.sort.pointee.fields[field.name]  # type: ignore
+                assert isinstance(var, Var)
+                if not isinstance(expr, EnumConst):
+                    expr_smt2 = self.expr_to_smt2(expr, var_id_maker, field_id_maker)
+                    constraints = [smt2equals(self.tau_field_id(var.name, tau.id), expr_smt2)]
+                for left, right in zip(self.tau_vars_id(tau.id), self.tau_vars_id(ancestor.id)):
+                    constraints.append(smt2equals(left, right))
+                for left, right in zip(self.tau_fields_id(tau.id), self.tau_fields_id(ancestor.id)):
+                    if left != self.tau_field_id(var.name, tau.id):
+                        constraints.append(smt2equals(left, right))
+            case _:
+                constraints: list[str] = []
+                for left, right in zip(self.tau_vars_id(tau.id), self.tau_vars_id(ancestor.id)):
+                    constraints.append(smt2equals(left, right))
+                for left, right in zip(self.tau_fields_id(tau.id), self.tau_fields_id(ancestor.id)):
+                    constraints.append(smt2equals(left, right))
+        pred_ancestor = f"Lab{ancestor.id}"
+        pred_tau = f"Lab{tau.id}"
+        clause = smt2assert(
+            smt2forall(
+                variable_decls,
+                smt2implies(
+                    smt2and(smt2predicate(pred_ancestor, ancestor_args), *constraints),
+                    smt2predicate(pred_tau, tau_args),
+                ),
+            )
+        )
+        self.chcs.add(clause)
+
+    def assert_internal_extended_step(self, tau: Label, ancestor: Label, stmt: Instruction):
         self.declare_predicate(tau)
         constraints = []
         variable_decls = list(
@@ -271,16 +372,15 @@ class SMT2FileBuilder:
             )
         )
 
-        if isinstance(tau.frame.event, (OOM, ERR, LOF)):
+        if any(isinstance(event, (OOM, ERR, LOF)) for event in tau.frame.events):
             pred = f"Lab{tau.id}"
             query = smt2assert(smt2forall(variable_decls, smt2implies(smt2predicate(pred, tau_args), smt2false())))
-            match tau.frame.event:
-                case OOM():
-                    self.oom_queries.add(query)
-                case ERR():
-                    self.err_qeueries.add(query)
-                case LOF():
-                    self.lof_queries.add(query)
+            if OOM() in tau.frame.events:
+                self.oom_queries.add(query)
+            if ERR() in tau.frame.events:
+                self.err_qeueries.add(query)
+            if LOF() in tau.frame.events:
+                self.lof_queries.add(query)
         b = tau.frame.index
 
         def var_id_maker(v: str):
@@ -291,7 +391,7 @@ class SMT2FileBuilder:
 
         match stmt:
             case IfGoto(cond, _) if not isinstance(cond, PtrIsPtr):
-                cond = ppexp(cond, tau[-1])
+                cond = ppexp(cond, tau.frame)
                 constraints = []
                 if cond not in {TRUE, FALSE}:
                     cond_smt2 = self.expr_to_smt2(
@@ -305,7 +405,7 @@ class SMT2FileBuilder:
                 for left, right in zip(self.tau_fields_id(b), self.tau_fields_id(b - 1)):
                     constraints.append(smt2equals(left, right))
             case VarAssignExpr(var, expr):
-                expr = ppexp(expr, tau[-1])
+                expr = ppexp(expr, tau.frame)
                 if not isinstance(expr, EnumConst) and not (isinstance(expr, (Field, Var)) and sort_of(expr).is_enum()):
                     if isinstance(expr, Field):
                         expr_smt2 = field_id_maker(expr.name)
@@ -318,7 +418,7 @@ class SMT2FileBuilder:
                 for left, right in zip(self.tau_fields_id(b), self.tau_fields_id(b - 1)):
                     constraints.append(smt2equals(left, right))
             case FieldAssignExpr(field, expr):
-                expr = ppexp(expr, tau[-1])
+                expr = ppexp(expr, tau.frame)
                 var: Var = field.ptr.sort.pointee.fields[field.name]  # type: ignore
                 assert isinstance(var, Var)
                 if not isinstance(expr, EnumConst):
@@ -353,6 +453,12 @@ class SMT2FileBuilder:
         )
         self.chcs.add(clause)
 
+    def assert_internal_step(self, lab: Label, ancestor: Label, stmt: Instruction):
+        if lab.origin == ancestor:
+            self.assert_internal_extended_step(lab, ancestor, stmt)
+        else:
+            self.assert_internal_replaced_step(lab, ancestor, stmt)
+
     def assert_external_step(self, pair: Pair):
         sigma = pair.follower()
         tau = pair.leader()
@@ -361,23 +467,18 @@ class SMT2FileBuilder:
         constraints: list[str] = []
         # Build equality constraints between sigma and tau variables/fields according to the pair's direction
         for f in sigma.slice(1):
-            match f.prev:
-                case dir, i if dir == pair.rev_dir():
-                    for left, right in zip(self.sigma_vars_id(f.index), self.tau_vars_id(i)):
-                        constraints.append(smt2equals(left, right))
-                    for left, right in zip(self.sigma_fields_id(f.index), self.sigma_fields_id(f.index - 1)):
-                        constraints.append(smt2equals(left, right))
-                case _:
-                    continue
+            if f.prev[0] == pair.rev_dir():
+                for left, right in zip(self.sigma_vars_id(f.index), self.tau_vars_id(tau.frame.index)):
+                    constraints.append(smt2equals(left, right))
+                for left, right in zip(self.sigma_fields_id(f.index), self.sigma_fields_id(f.index - 1)):
+                    constraints.append(smt2equals(left, right))
+
         for f in tau.slice(1):
-            match f.prev:
-                case dir, i if dir == pair.dir():
-                    for left, right in zip(self.tau_vars_id(f.index), self.sigma_vars_id(i)):
-                        constraints.append(smt2equals(left, right))
-                    for left, right in zip(self.tau_fields_id(f.index), self.tau_fields_id(f.index - 1)):
-                        constraints.append(smt2equals(left, right))
-                case _:
-                    continue
+            if f.prev[0] == pair.dir():
+                for left, right in zip(self.tau_vars_id(f.index), self.sigma_vars_id(sigma.frame.index)):
+                    constraints.append(smt2equals(left, right))
+                for left, right in zip(self.tau_fields_id(f.index), self.tau_fields_id(f.index - 1)):
+                    constraints.append(smt2equals(left, right))
         below = tau.origin
         pred_below = f"Lab{below.id}"
         pred_sigma = f"Lab{sigma.id}"

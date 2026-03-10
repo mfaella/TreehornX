@@ -6,7 +6,6 @@ from loguru import logger
 
 from .core import Frame, Label, Pair
 from .core.dir import Internal
-from .verify import *
 
 
 class PairDB:

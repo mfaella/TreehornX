@@ -1,10 +1,10 @@
+from parser._internal.cparser.errors import DuplicateDefinitionError, UnknownTypeError, UnsupportedFeatureError
+from parser._internal.cparser.FileVisitor import FileVisitor
 from unittest import TestCase
 
 from ir.expressions import Add, And, Div, Eq, Ge, Gt, Le, Lt, Mod, Mul, Ne, Not, Or, PtrIsNil, PtrIsPtr, Sub, Var
 from ir.instructions import Goto, IfGoto, Return, Skip, VarAssignExpr
 from ir.sorts import BOOL, INT, REAL, UNIT, Enum, Pointer, Struct
-from parser._internal.cparser.errors import DuplicateDefinitionError, UnknownTypeError, UnsupportedFeatureError
-from parser._internal.cparser.FileVisitor import FileVisitor
 
 
 class TestCASTVisitor(TestCase):

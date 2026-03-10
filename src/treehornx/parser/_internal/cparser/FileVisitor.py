@@ -4,6 +4,7 @@ from io import StringIO
 from typing import Any, Iterable, Sequence, TextIO, cast
 
 from pycparser import CParser, c_ast
+
 from treehornx.ir.errors import IncompatibleReturnTypeError
 from treehornx.ir.expressions import TRUE, EnumConst, Eq, Expr, Field, Not, PtrIsNil, Var, sort_of
 from treehornx.ir.function import Function

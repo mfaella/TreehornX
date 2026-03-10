@@ -16,6 +16,8 @@ class FrameJsonEncoder(json.JSONEncoder):
     def default(self, o: Any):
         if isinstance(o, (Event, Dir)):
             return str(o)
+        if isinstance(o, frozenset):
+            return list(o)
         return super().default(o)
 
 
@@ -23,6 +25,7 @@ class LabelDB:
     def __init__(self):
         self.db: set[Label] = set()
         self.origin_index: defaultdict[Label | None, set[Label]] = defaultdict(set)
+        self.ancestors_index: defaultdict[Label, set[Label]] = defaultdict(set)
 
     def add(self, label: Label):
         self.db.add(label)
@@ -36,10 +39,19 @@ class LabelDB:
         #     json_label_str = json.dumps(jsonlabel, indent=2, cls=FrameJsonEncoder)
         #     labels_file.write(json_label_str + "\n")
 
+    def add_ancestor(self, label: Label, ancestor: Label):
+        self.ancestors_index[label].add(ancestor)
+
+    def find_ancestors(self, label: Label) -> Iterable[Label]:
+        return self.ancestors_index.get(label, set())
+
     def find_by_origin(self, origin: Label) -> Iterable[Label]:
         if origin not in self.db:
             raise KeyError(f"Origin label {origin.id} not found in LabelDB.")
         return self.origin_index[origin]
+
+    def labels(self) -> Iterable[Label]:
+        return self.db
 
     def dump(self, stream: TextIO):
         labels = list(

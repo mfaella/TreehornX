@@ -6,7 +6,7 @@ from typing import override
 
 from treehornx.chc.core.cache_hash import cache_hash
 
-from .dir import Dir, Down, Up
+from .dir import Dir, Down, Internal, Up
 from .frame import Frame
 from .label import Label
 
@@ -55,11 +55,25 @@ class Pair:
 
     def extended_with_internal_frame(self, frame: Frame) -> Pair:
         if self.leadership == LeadershipKind.PARENT:
-            new_parent = self.parent.extended_with(frame)
-            return Pair(new_parent, self.child, self.child_key, self.leadership)
+            if self.parent.frame.prev[0] == Internal():
+                assert self.parent.origin is not None, (
+                    "Parent label must have an origin to extend with an internal frame if the last frame of the label is an internal step"
+                )
+                new_parent = self.parent.origin.extended_with(frame)
+                return Pair(new_parent, self.child, self.child_key, self.leadership)
+            else:
+                new_parent = self.parent.extended_with(frame)
+                return Pair(new_parent, self.child, self.child_key, self.leadership)
         else:
-            new_child = self.child.extended_with(frame)
-            return Pair(self.parent, new_child, self.child_key, self.leadership)
+            if self.child.frame.prev[0] == Internal():
+                assert self.child.origin is not None, (
+                    "Child label must have an origin to extend with an internal frame if the last frame of the label is an internal step"
+                )
+                new_child = self.child.origin.extended_with(frame)
+                return Pair(self.parent, new_child, self.child_key, self.leadership)
+            else:
+                new_child = self.child.extended_with(frame)
+                return Pair(self.parent, new_child, self.child_key, self.leadership)
 
     def extended_with_external_frame(self, frame: Frame) -> Pair:
         if self.leadership == LeadershipKind.PARENT:

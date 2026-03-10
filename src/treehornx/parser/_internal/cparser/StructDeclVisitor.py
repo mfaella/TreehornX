@@ -1,6 +1,7 @@
 from typing import cast, override
 
 from pycparser import c_ast
+
 from treehornx.ir.expressions import Var
 from treehornx.ir.sorts import *
 from treehornx.ir.sorts import Pointer, Sort, Struct

@@ -27,6 +27,7 @@ from ir.expressions import (
 )
 from ir.sorts import BOOL, INT, REAL, UNIT, Pointer, Struct
 
+
 birfc_struct_ptr = Pointer(
     Struct(
         "birfc",

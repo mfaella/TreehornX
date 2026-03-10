@@ -1,4 +1,5 @@
 from pycparser import c_ast
+
 from treehornx.ir.sorts import Enum, Sort
 
 from .errors import DuplicateDefinitionError, UnsupportedFeatureError
