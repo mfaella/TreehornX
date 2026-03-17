@@ -1,6 +1,7 @@
 from itertools import islice
+from typing import Callable, Iterable
 
-from .core import Frame, FrameBuilder, Label
+from .core import Frame, FrameDescriptor, Label
 from .core.dir import Down, Internal
 from .core.event import *
 
@@ -27,9 +28,6 @@ def is_pfield_ptr(sigma: Label, a: int, pfield: str, r: str, i: int) -> bool:
                     return False
                 case _:
                     continue
-
-    if sigma.id == 143:
-        pass
 
     return any(event == FieldAssignP(pfield, r) for event in sigma[i].events)
 
@@ -91,7 +89,7 @@ def stop_rewind2(sigma: Label, q1: str, q2: str) -> bool:
     return stop_rewind(sigma, q1) or stop_rewind(sigma, q2)
 
 
-def default_active_child(fprev: Frame, fbelow: Frame, f: FrameBuilder) -> FrameBuilder:
+def default_active_child(fprev: Frame, fbelow: Frame, f: FrameDescriptor) -> FrameDescriptor:
     assert f.prev is not None
     match f.prev:
         case Down(j), _:
@@ -103,29 +101,43 @@ def default_active_child(fprev: Frame, fbelow: Frame, f: FrameBuilder) -> FrameB
     return f
 
 
-def default(fprev: Frame, fbelow: Frame, f: FrameBuilder) -> FrameBuilder:
+def _default_prototype(
+    fprev: Frame, fbelow: Frame, f: FrameDescriptor, default_fields: set[str] = set()
+) -> FrameDescriptor:
     """Create a default frame based on the previous frame and the frame below. It set to default all the fields."""
-    f.active = fbelow.active
-    f.enum_values = dict(fprev.enum_values)
-    f.enum_fields = dict(fbelow.enum_fields)
-    f.isnil = dict(fprev.isnil)
-    f.pc = fprev.pc
-    f = default_active_child(fprev, fbelow, f)
+    if "active" in default_fields:
+        f.active = fbelow.active
+    if "val" in default_fields:
+        f.enum_fields = dict(fbelow.enum_fields)
+    if "d" in default_fields:
+        f.enum_values = dict(fprev.enum_values)
+    if "isnil" in default_fields:
+        f.isnil = dict(fprev.isnil)
+    if "event" in default_fields:
+        f.event = NOP()
+    if "pc" in default_fields:
+        f.pc = fprev.pc
+    if "active_child" in default_fields:
+        f = default_active_child(fprev, fbelow, f)
     return f
 
 
-def set_prev_of_internal_step(f: FrameBuilder, fbelow: Frame) -> FrameBuilder:
-    if fbelow.prev is not None and fbelow.prev[0] == Internal():
-        f.prev = fbelow.prev
-    else:
-        f.prev = (Internal(), fbelow.index)
-    return f
+def default(*default_fields: str) -> Callable[[Frame, Frame, FrameDescriptor], FrameDescriptor]:
+    """Create a default frame based on the previous frame and the frame below. It set to default all the fields in default_fields."""
+
+    assert all(field in {"active", "val", "d", "isnil", "event", "pc", "active_child"} for field in default_fields), (
+        f"Invalid default field. Valid fields are: active, event, d, val, isnil, pc, active_child. Got: {default_fields}"
+    )
+
+    def _default(fprev: Frame, fbelow: Frame, f: FrameDescriptor) -> FrameDescriptor:
+        return _default_prototype(fprev, fbelow, f, set(default_fields))
+
+    return _default
 
 
-def set_ptr_here(f1: Frame, f2: FrameBuilder, p: str) -> FrameBuilder:
-    f2 = set_prev_of_internal_step(f2, f1)
-    f2 = default(f1, f1, f2)
+def set_ptr_here(f1: Frame, f2: FrameDescriptor, p: str) -> FrameDescriptor:
     f2.pc = f1.pc + 1
-    f2.events.add(Here(p))
+    f2.event = Here(p)
     f2.isnil[p] = False
+    f2 = default("active", "val", "d", "active_child")(f1, f1, f2)
     return f2

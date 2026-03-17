@@ -72,8 +72,6 @@ def main(args: list[str]):
     smt2file_builder = chcgen.makeSMT2FileBuilder()
     output_path = Path("report")
     output_path.mkdir(parents=True, exist_ok=True)
-    with open(f"report/{function.name}.dot", "w") as f:
-        f.write(chcgen.dependency_graph.source)
     with open(f"report/{function.name}_LABELS.json", "w") as labels_file:
         chcgen.labels_db.dump(labels_file)
     for exit_code in (ExitCodeKind.ERR, ExitCodeKind.OOM, ExitCodeKind.LABEL_OVERFLOW):

@@ -62,7 +62,7 @@ void sll_safe_insert_sorted(struct Node* root, int value) {
         if (next)  {
             next_data = next->data;
             if (data > next_data) {
-                temp_data = null->data;
+                temp_data = null->data; //assertion failure
             }
         }
         current = current->next;

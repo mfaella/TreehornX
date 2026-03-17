@@ -10,7 +10,6 @@ from treehornx.chc.core.cache_hash import cache_hash
 # from .dir import Down
 from .frame import Frame
 
-
 next_label_id = count().__next__
 
 
@@ -35,7 +34,7 @@ def _make_label(*frames: Frame) -> Label:
 
 @dataclass(frozen=True)
 class Label:
-    id: int = field(init=False, compare=False)
+    id: int = field(default=0, init=False, compare=False, hash=False)
     frame: Frame
     origin: Label | None = field(default=None)
 

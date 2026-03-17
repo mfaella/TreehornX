@@ -2,7 +2,7 @@ import json
 import sys
 from asyncio.unix_events import SelectorEventLoop
 from collections import defaultdict, deque
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cache, cached_property
 from itertools import chain, count, product
 from typing import Iterable
@@ -18,13 +18,13 @@ from treehornx.ir.function import Function
 from treehornx.ir.instructions import *
 from treehornx.ir.sorts import Enum, Pointer, Struct
 
-from .core import Frame, FrameBuilder, Label, Pair
+from .core import Frame, FrameDescriptor, Label, Pair
 from .core.dir import Down, Internal
-from .core.event import ERR, LOF, NOP, OOM, Exit, Here
+from .core.event import ERR, LOF, NOP, OOM, Exit, Here, Loop
+from .Knitter import Knitter, StepKind
 from .LabelDB import LabelDB
 from .PairDB import PairDB
 from .SMT2FileBuilder import SMT2FileBuilder
-from .Stepper import StepKind, Stepper
 
 # logger.remove(0)
 # logger.add(sys.stdout, level=20)
@@ -41,14 +41,12 @@ class ChcGenerator:
     db: PairDB = field(init=False, default_factory=PairDB)
     labels_db: LabelDB = field(init=False, default_factory=LabelDB)
     dependency_graph: gv.Digraph | None = field(init=False, default=None)
-    _step_cache: dict[Pair, tuple[Frame, Frame | None, StepKind] | None] = field(init=False, default_factory=lambda: {})
 
     def __post_init__(self):
         assert isinstance(self.root.sort, Pointer)
         root_sort = self.root.sort.pointee
         assert isinstance(root_sort, Struct)
         self.k = sum(1 for f in root_sort.fields.values() if f.sort.is_ptr())
-        self.stepper = Stepper(self.function, self.k, self.m, self.n)
 
         if self.create_dependency_graph:
             self.dependency_graph = gv.Digraph("dependency graph", strict=True)
@@ -132,18 +130,35 @@ class ChcGenerator:
 
     def start_frames(self) -> Iterable[tuple[Frame, Frame]]:
         for first_frame in self.first_frames():
-            frame_builder = FrameBuilder(base=first_frame)
+            frame_builder = FrameDescriptor()
             frame_builder.index = 1
             frame_builder.active = first_frame.active
             frame_builder.prev = (Internal(), 1)
-            assert all(first_frame.isnil.values())
             if frame_builder.active:
-                frame_builder.events.add(Here(self.root.name))
+                frame_builder.event = Here(self.root.name)
                 frame_builder.isnil[self.root.name] = False
             else:
-                frame_builder.events = set()
+                frame_builder.event = NOP()
                 frame_builder.active_child = {key: False for key in self.children_keys}
-            yield first_frame, frame_builder.build()
+            second_frame = Frame(
+                index=1,
+                active=first_frame.active,
+                pc=0,
+                upd=frozendict({key.name: False for key in self.pointers}),
+                isnil=frozendict(
+                    {key.name: key.name != self.root.name for key in self.pointers}
+                    if first_frame.active
+                    else {key.name: True for key in self.pointers}
+                ),
+                events=frozenset({Here(self.root.name)}) if first_frame.active else frozenset(),
+                enum_fields=first_frame.enum_fields,
+                enum_values=first_frame.enum_values,
+                active_child=first_frame.active_child
+                if first_frame.active
+                else frozendict({key: False for key in self.children_keys}),
+                prev=(Internal(), 1),
+            )
+            yield first_frame, second_frame
 
     def start_pairs(self) -> Iterable[Pair]:
         for parent, child, child_key in product(self.start_frames(), self.first_frames(), self.children_keys):
@@ -168,96 +183,24 @@ class ChcGenerator:
                 # )
                 yield pair
 
-    def update_globals_after_internal_step(self, pair: Pair, frame: Frame) -> Iterable[Pair]:
-        pairs = list(self.db.find_by_leader(leader=pair.leader()))
-        for p in pairs:
-            new_p = p.extended_with_internal_frame(frame)
-            self.db.add(new_p)
-            self._add_label(new_p.leader())
-            self._add_label(new_p.follower())
-            self._add_ancestor(new_p.leader(), p.leader())
-            yield new_p
+    def _add_ancestor(self, label: Label, ancestor: Label) -> None:
+        self.labels_db.add_ancestor(label, ancestor)
 
-    def update_globals_after_external_step(self, pair: Pair, frame: Frame) -> Iterable[Pair]:
-        new_pair = pair.extended_with_external_frame(frame)
-        new_pairs = [new_pair]
-        for p in self.db.find_by_leader(leader=pair.follower()):
-            if p.dir() != pair.rev_dir() or not self.is_continuity_pair(p):
-                new_leader = p.leader().extended_with(frame)
-                new_p = p.updated_with_leader(new_leader)
-                new_pairs.append(new_p)
+    def _add_label(self, label: Label) -> None:
+        self.labels_db.add(label)
 
-        for new_p in new_pairs:
-            self.db.add(new_p)
-            self._add_label(new_p.leader())
-            self._add_label(new_p.follower())
-
-        return new_pairs
-
-    def _step(self, pair: Pair) -> tuple[FrameBuilder, FrameBuilder | None, StepKind] | None:
-        return Stepper(self.function, self.k, self.m, self.n).step(pair)
-
-    def psi_internal(self, frameb: FrameBuilder) -> Frame:
-        for ptr in self.pointers:
-            frameb.upd[ptr.name] = False
-        return frameb.build()
-
-    def psi_external(self, pair: Pair, frameb: FrameBuilder) -> Frame:
-        sigma = pair.leader()
-        tau = pair.follower()
-        if tau.origin is None or tau.origin.origin is None:  # index <= 1:
-            for p in self.pointers:
-                frameb.upd[p.name] = False
-        else:
-            a_ = next(f.index for f in sigma.slice(1) if f.prev[0] == pair.dir())
-            for p in self.pointers:
-                frameb.upd[p.name] = not frameb.isnil[p.name] and (
-                    any(Here(p.name) in f.events for f in sigma.slice(a_))
-                    or any(f.upd[p.name] for f in sigma.slice(a_ + 1))
-                )
-
-        return frameb.build()
-
-    def index_after_internal_step(self, old_pair: Pair) -> int:
-        if old_pair.leader().frame.prev[0] == Internal():
-            return len(old_pair.leader().origin)
-        else:
-            return len(old_pair.leader())
-
-    def step(self, pair: Pair) -> tuple[Frame, Frame | None, StepKind] | None:
-        if pair not in self._step_cache:
-            if any(isinstance(event, (OOM, ERR, LOF, Exit)) for event in pair.leader().frame.events):
-                self._step_cache[pair] = None
-                return None
-
-            step_result = self._step(pair)
-            if step_result is None:
-                return None
-            tau_b_builder, tau_b_false_builder, step_kind = step_result
-            if step_kind == StepKind.INTERNAL:
-                tau_b_builder.index = self.index_after_internal_step(pair)
-                frame = self.psi_internal(tau_b_builder)
-                if tau_b_false_builder is None:
-                    self._step_cache[pair] = (frame, None, step_kind)
-                else:
-                    tau_b_false_builder.index = self.index_after_internal_step(pair)
-                    frame_false = self.psi_internal(tau_b_false_builder)
-                    self._step_cache[pair] = (frame, frame_false, step_kind)
-            else:
-                tau_b_builder.index = len(pair.follower())
-                tau_b = self.psi_external(pair, tau_b_builder)
-                self._step_cache[pair] = (tau_b, None, step_kind)
-        return self._step_cache[pair]
-
-    def is_continuity_pair(self, pair: Pair) -> bool:
-        return self.step(pair) is not None
+    def _add_pair(self, pair: Pair) -> None:
+        self.db.add(pair)
+        self._add_label(pair.leader())
+        self._add_label(pair.follower())
 
     def add_internal_step_dependency(self, label: Label):
         for ancestor in self.labels_db.find_ancestors(label):
             pc = label.frame.pc
             instr = self.function.instructions[pc] if pc < len(self.function.instructions) else Return()
-            self.dependency_graph.node(label.name, label=f"{label.name}\n{instr}")
-            self.dependency_graph.edge(ancestor.name, label.name, label="I", color="red")
+            self.add_label_node(self.dependency_graph, ancestor)
+            self.add_label_node(self.dependency_graph, label)
+            self.dependency_graph.edge(ancestor.name, label.name, label="I", color="blue")
 
     def add_external_step_dependency(self, pair: Pair):
         sigma = pair.follower()
@@ -265,61 +208,19 @@ class ChcGenerator:
         if sigma == tau:
             logger.debug(f"adding self dependency for label {sigma.id}")
         if self.create_dependency_graph:
-            self.dependency_graph.node(tau.name, label=f"{tau.name}\n{self.function.instructions[tau.frame.pc]}")
+            self.add_label_node(self.dependency_graph, tau)
             external_step_label = f"{f'D({pair.child_key})' if pair.dir() == Up() else 'U'}"
-            self.dependency_graph.edge(sigma.name, tau.name, label=external_step_label, color="red")
+            self.dependency_graph.edge(sigma.name, tau.name, label=external_step_label, color="blue")
             for ancestor in self.labels_db.find_ancestors(tau):
-                self.dependency_graph.edge(ancestor.name, tau.name, label="I")
+                self.dependency_graph.edge(ancestor.name, tau.name, label="I", color="grey")
             if tau.frame.prev is not None and tau.frame.prev[0] != Internal():
-                self.dependency_graph.edge(tau.origin.name, tau.name, label="I")
-
-    # def _label_to_json(self, label: Label) -> str:
-    #     frames = []
-    #     for f in label.iter():
-    #         prev = None
-    #         if f.prev_dir is not None:
-    #             dir, idx = f.prev
-    #             prev = {"dir": str(dir), "index": idx}
-    #         frames.append(
-    #             {
-    #                 "index": f.index,
-    #                 "active": f.active,
-    #                 "pc": f.pc,
-    #                 "upd": dict(f.upd),
-    #                 "isnil": dict(f.isnil),
-    #                 "event": str(f.event),
-    #                 "active_child": dict(f.active_child),
-    #                 "enum_values": dict(f.enum_values),
-    #                 "enum_fields": dict(f.enum_fields),
-    #                 "prev": prev,
-    #             }
-    #         )
-    #     payload = {
-    #         "id": label.id,
-    #         "origin_id": label.origin.id if label.origin is not None else None,
-    #         "frames": frames,
-    #     }
-    #     return json.dumps(payload, separators=(",", ":"), sort_keys=False)
-
-    def _add_label(self, label: Label) -> None:
-        self.labels_db.add(label)
-        # logger.debug(f"LABEL_JSON {self._label_to_json(label)}")
-
-    def _add_ancestor(self, label: Label, ancestor: Label) -> None:
-        self.labels_db.add_ancestor(label, ancestor)
-        # logger.debug(f"ANCESTOR {label.id} -> {ancestor.id}")
-
-    def _is_continuity_pair(self, pair: Pair) -> bool:
-        if pair in self._step_cache:
-            return self._step_cache[pair] is not None
-        if pair.leader().frame.events.intersection({Exit(), OOM(), ERR(), LOF()}):
-            return False
-        step_result = self.step(pair)
-        return step_result is not None
+                self.dependency_graph.edge(tau.origin.name, tau.name, label="I", color="grey")
 
     def build_dep_graph(self):
         if self.dependency_graph is None:
             return
+
+        self.dependency_graph.attr(bgcolor="lightgrey", style="filled")
 
         pairs = {
             p
@@ -331,129 +232,258 @@ class ChcGenerator:
         pairs.difference_update(default_pairs)
         for pair in pairs:
             leader = pair.leader()
+            follower = pair.follower()
             if leader.frame.prev is not None and leader.frame.prev[0] == Internal():
                 self.add_internal_step_dependency(leader)
-            elif leader.frame.prev is not None:
+            elif leader.frame.prev is not None and follower.frame.index != 0:
                 self.add_external_step_dependency(pair)
 
+    def add_label_node(self, graph: gv.Digraph, lab: Label):
+        if Loop() in lab.frame.events:
+            graph.node(lab.name, style="filled", label=f"Loop()", fillcolor="red")
+            return
+
+        err_event = next((e for e in lab.frame.events if e in {ERR(), OOM(), LOF()}), None)
+        if err_event:
+            graph.node(lab.name, style="filled", label=f"{lab.name}:{err_event}", fillcolor="yellow")
+            return
+
+        if Exit() in lab.frame.events:
+            graph.node(lab.name, style="filled", label=f"{lab.name}:Exit()", fillcolor="lightgreen")
+            return
+
+        f = lab.frame
+        fjson = {
+            "index": f.index,
+            "active": f.active,
+            "pc": f.pc,
+            "upd": dict(f.upd),
+            "isnil": dict(f.isnil),
+            "event": list(str(e) for e in f.events),
+            "active_child": dict(f.active_child),
+            "enum_values": dict(f.enum_values),
+            "enum_fields": dict(f.enum_fields),
+            "prev": None if f.prev is None else (str(f.prev[0]), f.prev[1]),
+        }
+        tooltip = json.dumps(fjson, indent=2)
+        if lab.origin is None:
+            graph.node(lab.name, label=f"{lab.name}", tooltip=tooltip, style="filled", fillcolor="white")
+        else:
+            pc = lab.frame.pc
+            instr = self.function.instructions[pc] if pc < len(self.function.instructions) else Return()
+            graph.node(lab.name, label=f"{lab.name}\n{instr}", tooltip=tooltip, style="filled", fillcolor="white")
+
+    def build_consecutive_internal_dep_graph(self, path):
+        consecutive_dep_graph = gv.Digraph("consecutive internal dependency graph", strict=True)
+        consecutive_dep_graph.attr(bgcolor="lightgrey", style="filled")
+
+        for label in self.labels_db.labels():
+            if label.origin is None or label.frame.prev is None:
+                continue
+
+            self.add_label_node(consecutive_dep_graph, label)
+            if label.frame.prev[0] != Internal():
+                self.add_label_node(consecutive_dep_graph, label.origin)
+                consecutive_dep_graph.edge(label.origin.name, label.name, label=str(label.frame.prev[0]), color="red")
+            else:
+                for ancestor in self.labels_db.find_ancestors(label):
+                    self.add_label_node(consecutive_dep_graph, ancestor)
+                    consecutive_dep_graph.edge(ancestor.name, label.name, label="I", color="black")
+        consecutive_dep_graph.save(path)
+
     def generate(self):
-        # smt2file = SMT2FileBuilder(
-        #     {v for v in self.function.vars if not (sort_of(v).is_ptr() or sort_of(v).is_enum())},
-        #     {v for v in self.root.sort.pointee.fields.values() if not (sort_of(v).is_ptr() or sort_of(v).is_enum())},  # type: ignore
-        # )
-        processed: set[Pair] = set()
         queue: deque[Pair] = deque()
 
-        # yielding assertion of first and start frames
-        for f in self.start_frames():
-            lab = Label.make(*f)
-            # smt2file.assert_fact(lab)
-            if self.create_dependency_graph:
-                self.dependency_graph.node(
-                    lab.name, label=f"{lab.name}\n{self.function.instructions[0]}", tooltip="start frame"
-                )
-        for f in self.first_frames():
-            lab = Label.make(f)
-            # smt2file.assert_fact(lab)
-            if self.create_dependency_graph:
-                self.dependency_graph.node(f"{lab.name}", tooltip="first frame")
-
         for pair in self.start_pairs():
-            self.db.add(pair)
-            self._add_label(pair.leader())
-            self._add_label(pair.follower())
+            self._add_pair(pair)
             queue.append(pair)
 
         for pair in self.first_pairs():
-            self.db.add(pair)
-            self._add_label(pair.leader())
-            self._add_label(pair.follower())
+            self._add_pair(pair)
 
-        try:
-            while queue:
-                pair = queue.popleft()
-                if pair in processed:
-                    continue
-                processed.add(pair)
-                step_result = self.step(pair)
-                if step_result is None:  # non continuos pair
-                    # questo branch copre quei casi in cui il prossimo frame del lace va attaccato a una label esterna alla coppia
-                    # in questi casi può succedere che la nuova label esterna sia già stata generata processando un altra coppia
-                    # quindi la coppia corrente non verrà aggiornata, perché l'aggiornamento global delle coppie è gia avvenuto
-                    new_pairs = tuple(
-                        pair.updated_with_leader(leader) for leader in self.labels_db.find_by_origin(pair.leader())
+        knitter = Knitter(self.function, self.k, self.m, self.n)
+
+        def last_step_kind(pair: Pair) -> StepKind:
+            last_frame = pair.leader().frame
+            if last_frame.prev[0] == Internal():
+                return StepKind.INTERNAL
+            else:
+                return StepKind.EXTERNAL
+
+        def knit_internal_steps_chain(pair: Pair) -> tuple[Pair, ...]:
+            final_pairs: list[Pair] = []
+            visited_internal_step: set[tuple[Label, Label]] = set()
+            q: deque[Pair] = deque()
+
+            def handle(p: Pair, p_: Pair):
+                if (p.leader(), p_.leader()) in visited_internal_step:
+                    p__leader_last_frame = p_.leader().frame
+                    p__leader_new_last_frame = replace(
+                        p__leader_last_frame, events=p__leader_last_frame.events.union({Loop()})
                     )
-                    for new_pair in new_pairs:
-                        self.db.add(new_pair)
-                        self._add_label(new_pair.leader())
-                        self._add_label(new_pair.follower())
-                        if self._is_continuity_pair(new_pair):
-                            queue.append(new_pair)
+                    p__new_leader = p_.leader().origin.extended_with(p__leader_new_last_frame)
+                    self._add_ancestor(p__new_leader, p.leader())
+                    if p_.leadership == LeadershipKind.PARENT:
+                        p_ = replace(p_, parent=p__new_leader)
+                    else:
+                        p_ = replace(p_, child=p__new_leader)
+                    self._add_pair(p_)
+                else:
+                    visited_internal_step.add((p.leader(), p_.leader()))
+                    self._add_pair(p_)
+                    self._add_ancestor(p_.leader(), p.leader())
+                    q.append(p_)
+
+            q.append(pair)
+            while q:
+                p = q.popleft()
+
+                knit_result = knitter.knit(p)
+                if knit_result is None:
+                    final_pairs.append(p)
                     continue
-                tau_b, tau_b_false, step_kind = step_result
-                # assert tau_b_false is None
-                if step_kind == StepKind.INTERNAL:
-                    for p in self.db.find_by_leader(pair.leader()):
-                        processed.add(p)
 
-                    old_leader = pair.leader()
-                    updated_pairs = tuple(self.update_globals_after_internal_step(pair, tau_b))
-                    queue.extend(p for p in updated_pairs if self._is_continuity_pair(p))
+                p1, p2 = knit_result
+                if last_step_kind(p1) == StepKind.INTERNAL:
+                    handle(p, p1)
 
-                    if tau_b_false is None:
+                    if p2 is None:
                         continue
 
-                    old_leader_false = pair.leader()
-                    new_leader_false = old_leader.extended_with(tau_b_false)
-                    # self.add_internal_step_dependency(old_leader_false, new_leader_false)
+                    handle(p, p2)
 
-                    if Exit() not in tau_b_false.events:
-                        inst = self.function.instructions[pair.leader().frame.pc]
-                        match inst:
-                            case IfGoto(cond, target, label=label):
-                                inst = IfGoto(Not(cond), target, label=label)
-                            case FieldAssignExpr(field, expr, label=label) if sort_of(field) == BOOL:
-                                inst = FieldAssignExpr(field, Not(expr), label=label)
-                            case VarAssignExpr(var, expr, label=label) if sort_of(var) == BOOL:
-                                inst = VarAssignExpr(var, Not(expr), label=label)
-                            case _:
-                                pass
-                    updated_pairs_false = tuple(self.update_globals_after_internal_step(pair, tau_b_false))
-                    queue.extend(
-                        p for p in updated_pairs_false if self._is_continuity_pair(p)
-                    )  # queue.append(pair.extended_with_internal_frame(tau_b_false))
-                    # smt2file.assert_internal_step(new_leader_false, inst)
                 else:
-                    new_pair = pair.extended_with_external_frame(tau_b)
-                    # self.add_external_step_dependency(new_pair)
-                    # update pairs db
-                    updated_pairs = (
-                        *self.update_globals_after_external_step(pair, tau_b),
-                        # se la label leader è stata gia estesa, include nelle nuove coppie tutte quelle coppie che si ottengono
-                        # estendendo la leader gia estesa con tau_b, in modo da non perdere nessuna coppia che potrebbe essere di continuita
-                        *(
-                            new_pair.updated_with_leader(leader)
-                            for leader in self.labels_db.find_by_origin(new_pair.leader())
-                        ),
-                    )
-                    queue.extend(pair for pair in updated_pairs if self._is_continuity_pair(pair))
+                    final_pairs.append(p)
 
-                    # assert external step for tau_b
-                    # smt2file.assert_external_step(new_pair)
+            return tuple(final_pairs)
 
-            logger.info("All pair have been generated")
-            # return smt2file
-            #
-            #
-        except Exception as e:
-            logger.exception(f"Exception during generation: {e}")
+        @cache
+        def knit(pair: Pair) -> tuple[Pair, ...] | Pair | None:
+            """returns
+            None if pair is not a continuity pair
+            a tuple of pairs if the pair generates some internal step chains
+            a pair if it just process an external step
+            """
+            knit_result = knitter.knit(pair)
+            if knit_result is None:
+                return None
+            elif last_step_kind(knit_result[0]) == StepKind.INTERNAL:
+                return knit_internal_steps_chain(pair)
+            else:
+                return knit_result[0]
 
-        finally:
-            self.build_dep_graph()
+        def is_continuos_pair(pair: Pair) -> bool:
+            return knit(pair) is not None
 
-            pppsss = sorted((p.parent.id, p.child.id) for p in self.db.pairs_db)
-            for p in pppsss:
-                logger.info(f"PAIR {p}")
+        def qappend(pair: Pair):
+            if is_continuos_pair(pair):
+                queue.append(pair)
+
+        # def update_after_internal_connection_frame_discovered(last_label: Label, enqueue: bool = False):
+        #     # already_updated_pairs = connected_pairs_index[last_label.origin]
+        #     # connected_pairs = set(self.db.find_by_leader(leader=last_label.origin))
+        #     # pairs = connected_pairs.difference(already_updated_pairs)
+        #     # connected_pairs_index[last_label.origin] = connected_pairs
+        #     pairs = set(self.db.find_by_leader(leader=last_label.origin))
+        #     for p in pairs:
+        #         parent = last_label if p.leadership == LeadershipKind.PARENT else p.parent
+        #         child = last_label if p.leadership == LeadershipKind.CHILD else p.child
+        #         child_key = p.child_key
+        #         leadership = p.leadership
+        #         new_p = Pair(parent=parent, child=child, child_key=child_key, leadership=leadership)
+        #         self._add_pair(new_p)
+        #         if enqueue:
+        #             qappend(new_p)
+
+        # def update_after_external_connection_frame_discovered(new_pair: Pair, enqueue: bool = False):
+        #     pairs = set(self.db.find_by_leader(leader=new_pair.leader().origin))
+        #     for p in pairs:
+        #         if new_pair.leadership != p.leadership or new_pair.child_key != p.child_key:
+        #             parent = new_pair1.follower() if p.leadership == LeadershipKind.PARENT else p.parent
+        #             child = new_pair1.follower() if p.leadership == LeadershipKind.CHILD else p.child
+        #             child_key = p.child_key
+        #             leadership = p.leadership
+        #             new_p = Pair(parent=parent, child=child, child_key=child_key, leadership=leadership)
+        #             self._add_pair(new_p)
+        #             if enqueue:
+        #                 qappend(new_p)
+
+        # def update_with_discovered_connection_frames(pair: Pair, enqueue: bool = False):
+        #     """when the internal steps of a label has already been processed,
+        #     this function just adds it to the leader the keep processing"""
+        #     for lab in self.labels_db.find_by_origin(pair.leader()):
+        #         parent = lab if pair.leadership == LeadershipKind.PARENT else pair.parent
+        #         child = lab if pair.leadership == LeadershipKind.CHILD else pair.child
+        #         child_key = pair.child_key
+        #         leadership = pair.leadership
+        #         new_p = Pair(parent=parent, child=child, child_key=child_key, leadership=leadership)
+        #         self._add_pair(new_p)
+        #         if enqueue:
+        #             qappend(new_p)
+
+        processed: set[Pair] = set()
+
+        while queue:
+            pair = queue.popleft()
+            logger.info(
+                f"extracted from queue: {{parent={pair.parent.id}, child={pair.child.id}, child_key={pair.child_key}, leadership={pair.leadership}}}"
+            )
+
+            if Loop() in pair.leader().frame.events:
+                continue
+
+            if pair in processed:
+                continue
+
+            processed.add(pair)
+
+            knit_result = knit(pair)
+
+            match knit_result:
+                case None:  # non continuos pair
+                    for extended_leader in self.labels_db.find_by_origin(pair.leader()):
+                        new_pair = pair.updated_with_leader(extended_leader)
+                        self._add_pair(new_pair)
+                        qappend(new_pair)
+                case tuple():  # internal steps
+                    for chain_end_label in knit_result:
+                        new_leader = chain_end_label.leader()
+                        assert pair in set(self.db.find_by_leader(pair.leader()))
+                        for p in self.db.find_by_leader(pair.leader()):
+                            parent = new_leader if p.leadership == LeadershipKind.PARENT else p.parent
+                            child = new_leader if p.leadership == LeadershipKind.CHILD else p.child
+                            leadership = p.leadership
+                            child_key = p.child_key
+                            new_p = Pair(parent, child, child_key, leadership)
+                            qappend(new_p)
+                            self._add_pair(new_p)
+                case Pair(parent, child, child_key, leadership):  # external step
+                    self._add_pair(knit_result)
+                    qappend(knit_result)
+
+                    new_leader = parent if leadership == LeadershipKind.PARENT else child
+                    for p in self.db.find_by_leader(
+                        pair.follower()
+                    ):  # finding by follower because the leadership has been switched in the new pair
+                        if (leadership != p.leadership or child_key != p.child_key) and not is_continuos_pair(p):
+                            parent = new_leader if p.leadership == LeadershipKind.PARENT else p.parent
+                            child = new_leader if p.leadership == LeadershipKind.CHILD else p.child
+                            leadership = p.leadership
+                            child_key = p.child_key
+                            new_p = Pair(parent, child, child_key, leadership)
+                            self._add_pair(new_p)
+                            qappend(new_p)
+
+        logger.info("All pair have been generated")
+        assert len(queue) == 0
+        logger.info("Building dependency graph")
+        self.build_dep_graph()
+        self.dependency_graph.save(f"report/{self.function.name}.dot")
+        self.build_consecutive_internal_dep_graph(f"report/{self.function.name}_internals.dot")
+
+        # pppsss = sorted((p.parent.id, p.child.id) for p in self.db.pairs_db)
+        # for p in pppsss:
+        #     logger.info(f"PAIR {p}")
 
     def makeSMT2FileBuilder(self) -> SMT2FileBuilder:
         smt2file = SMT2FileBuilder(

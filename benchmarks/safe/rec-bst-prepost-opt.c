@@ -43,16 +43,15 @@ void isBST(struct Node* root) {
 		//begin <blocco1-new>
 		current->isbst = true;
 		//end <blocco1-new>
+		current->retpc = B2;
 		tmp = current->left; //scende a sinistra
 		if(!tmp) {
     		return_isbst = true;
             return_min = 0;
             return_max = 0;
-            current->retpc = B2;
             goto MyReturn;
 		}
 		tmp = current; // rewind (sale nel padre)
-		current->retpc = B2;
 		current = current->left; //scende a sinistra
 		current->parent = tmp;
 		goto START;
@@ -74,16 +73,15 @@ void isBST(struct Node* root) {
       		current->min = value_tmp;
        	}
        	//end <blocco2-new>
+        current->retpc = B3;
         tmp = current->right; // scendo nel destro
         if(!tmp) {
       		return_isbst = true;
             return_min = 0;
             return_max = 0;
-            current->retpc = B3; // risale
             goto MyReturn;
         }
         tmp = current; // risale
-        current->retpc = B3;
         current = current->right; // riscende nel destro
         current->parent = tmp;
         goto START;
@@ -93,15 +91,15 @@ void isBST(struct Node* root) {
         current->minr = return_min;
         current->maxr = return_max;
         //begin <blocco3-new>
-        tmp = current->right;
+        tmp = current->right; //scende nel destro
         if(tmp) {
-            current->max = return_max;
+            current->max = return_max; //risale
             current_isbst = current->isbst;
             value_tmp = current->value;
             current->isbst = current_isbst && return_isbst && value_tmp <= return_min;
        	}
        	else {
-            value_tmp = current->value;
+            value_tmp = current->value; //risale
       		current->max = value_tmp;;
        	}
        	return_isbst = current->isbst;
