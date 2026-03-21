@@ -1,11 +1,8 @@
-from collections import defaultdict, deque
-from dataclasses import dataclass, field
-from typing import Iterable, TextIO
+from collections import defaultdict
+from typing import Iterable
 
-from loguru import logger
-
-from .core import Frame, Label, Pair
-from .core.dir import Internal
+from .core import Label
+from .knitter.Pair import Pair
 
 
 class PairDB:
@@ -20,9 +17,6 @@ class PairDB:
 
     def add(self, pair: Pair):
         if pair not in self.pairs_db:
-            logger.debug(
-                f"Adding pair: {{ leader.id: {pair.leader().id}[{len(pair.leader())}], follower.id: {pair.follower().id}[{len(pair.follower())}], child_key: {pair.child_key}, leadership: {pair.leadership} }}"
-            )
             self.pairs_db.add(pair)
             self.leader_index[pair.leader()].add(pair)
 

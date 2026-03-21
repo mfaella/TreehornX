@@ -1,21 +1,176 @@
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterable, cast
-
-from frozendict import frozendict
-from loguru import logger
+from typing import Callable, Iterable, cast
 
 import treehornx.ir.expressions as ire
-from treehornx.chc.core import frame
+from frozendict import frozendict
+from loguru import logger
+from treehornx.chc.knitter.IKnitter import IKnitter
+from treehornx.chc.knitter.KnitResult import ExternalStepResult, InternalStepResult, KnitResult, StepFailed
 from treehornx.ir.function import Function
 from treehornx.ir.instructions import *
+from treehornx.ir.sorts import Enum as Enumeration
+from treehornx.ir.sorts import Pointer
 
-from .core import *
-from .core.dir import *
-from .core.event import *
-from .core.pair import LeadershipKind
-from .helpers import *
-from .ppexp import ppexp
+from ...ir.expressions import EnumConst, normalized
+from ..core import *
+from ..core import Frame, Label
+from ..core.Dir import *
+from ..core.Event import *
+from .Pair import LeadershipKind, Pair
+
+
+def is_pfield_nil(sigma: Label, pfield: str) -> bool:
+    frames = sigma[1:]
+    for f in reversed(frames):
+        for event in f.events:
+            match event:
+                case FieldAssignP(pf, p) if pf == pfield:
+                    return p is None
+                case FieldHere(pf) if pf == pfield:
+                    return False
+                case _:
+                    continue
+
+    return False
+
+
+def is_pfield_ptr(sigma: Label, a: int, pfield: str, r: str, i: int) -> bool:
+    frames = sigma[i + 1 : a + 1]
+    for f in reversed(frames):
+        for event in f.events:
+            match event:
+                case FieldAssignP(pf, _) | FieldHere(pf) if pf == pfield:
+                    return False
+                case _:
+                    continue
+
+    return any(event == FieldAssignP(pfield, r) for event in sigma[i].events)
+
+
+def is_pfield_implicit(sigma: Label, pfield: str) -> bool:
+    for f in sigma[1:]:
+        for event in f.events:
+            match event:
+                case FieldAssignP(pf, _) | FieldHere(pf) if pf == pfield:
+                    return False
+                case _:
+                    continue
+
+    return True
+
+
+def is_pfield_here(sigma: Label, pfield: str) -> bool:
+    for f in reversed(sigma[1:]):
+        for event in f.events:
+            match event:
+                case FieldHere(pf) if pf == pfield:
+                    return True
+                case FieldAssignP(pf, _) if pf == pfield:
+                    return False
+                case _:
+                    continue
+
+    return False
+
+
+def cur_rewind_pos(sigma: Label) -> int:
+    if not sigma.frame.events:
+        return len(sigma) - 1
+    for event in sigma.frame.events:
+        match event:
+            case Rewind(b):
+                return b
+            case _:
+                return len(sigma) - 1
+    assert False, "cur_rewind_pos should always find a Rewind event in the current frame"
+
+
+def points_here(sigma: Label, a: int, q: str) -> bool:
+    for f in reversed(sigma[1 : a + 1]):
+        for event in f.events:
+            match event:
+                case Here(p) if p == q:
+                    return True
+                case _ if f.upd[q]:
+                    return False
+                case _:
+                    continue
+
+    return False
+
+
+def are_equal_after_rewind(sigma: Label, p: str, q: str) -> bool:
+    a_ = cur_rewind_pos(sigma)
+    return points_here(sigma, a_, p) and points_here(sigma, a_, q)
+
+
+def last_upd(sigma: Label, a: int, q: str) -> int:
+    upd_q_indices = {f.index for f in sigma[1 : a + 1] if f.upd[q]}
+    return max(upd_q_indices) if upd_q_indices else 1
+
+
+def stop_rewind(sigma: Label, q: str) -> bool:
+    a_ = cur_rewind_pos(sigma)
+    return not sigma.frame.isnil[q] and points_here(sigma, a_, q)
+
+
+def stop_rewind2(sigma: Label, q1: str, q2: str) -> bool:
+    return stop_rewind(sigma, q1) or stop_rewind(sigma, q2)
+
+
+def default_active_child(fprev: Frame, fbelow: Frame, f: FrameDescriptor) -> FrameDescriptor:
+    assert f.prev is not None
+    match f.prev:
+        case Down(j), _:
+            f.active_child[j] = fprev.active
+            for i in filter(lambda i: i != j, fbelow.active_child.keys()):
+                f.active_child[i] = fbelow.active_child[i]
+        case _:
+            f.active_child = dict(fbelow.active_child)
+    return f
+
+
+def _default_prototype(
+    fprev: Frame, fbelow: Frame, f: FrameDescriptor, default_fields: set[str] = set()
+) -> FrameDescriptor:
+    """Create a default frame based on the previous frame and the frame below. It set to default all the fields."""
+    if "active" in default_fields:
+        f.active = fbelow.active
+    if "val" in default_fields:
+        f.enum_fields = dict(fbelow.enum_fields)
+    if "d" in default_fields:
+        f.enum_values = dict(fprev.enum_vars)
+    if "isnil" in default_fields:
+        f.isnil = dict(fprev.isnil)
+    if "event" in default_fields:
+        f.event = NOP()
+    if "pc" in default_fields:
+        f.pc = fprev.pc
+    if "active_child" in default_fields:
+        f = default_active_child(fprev, fbelow, f)
+    return f
+
+
+def default(*default_fields: str) -> Callable[[Frame, Frame, FrameDescriptor], FrameDescriptor]:
+    """Create a default frame based on the previous frame and the frame below. It set to default all the fields in default_fields."""
+
+    assert all(field in {"active", "val", "d", "isnil", "event", "pc", "active_child"} for field in default_fields), (
+        f"Invalid default field. Valid fields are: active, event, d, val, isnil, pc, active_child. Got: {default_fields}"
+    )
+
+    def _default(fprev: Frame, fbelow: Frame, f: FrameDescriptor) -> FrameDescriptor:
+        return _default_prototype(fprev, fbelow, f, set(default_fields))
+
+    return _default
+
+
+def set_ptr_here(f1: Frame, f2: FrameDescriptor, p: str) -> FrameDescriptor:
+    f2.pc = f1.pc + 1
+    f2.event = Here(p)
+    f2.isnil[p] = False
+    f2 = default("active", "val", "d", "active_child")(f1, f1, f2)
+    return f2
 
 
 class StepKind(Enum):
@@ -28,11 +183,12 @@ class NonContinuosPairError(Exception):
 
 
 @dataclass
-class Knitter:
+class CompressedKnitter(IKnitter):
     function: Function
     k: int
     m: int
     n: int
+    make_label: Callable[[Label | None, Frame], Label] = lambda o, f: Label(f, o)
 
     def pointers(self) -> Iterable[str]:
         for p in self.function.vars:
@@ -63,9 +219,9 @@ class Knitter:
         return f2
 
     def _copy_all_enum_d_but_target(self, f1: Frame, f2: FrameDescriptor, target: str) -> FrameDescriptor:
-        for d in f1.enum_values:
+        for d in f1.enum_vars:
             if d != target:
-                f2.enum_values[d] = f1.enum_values[d]
+                f2.enum_values[d] = f1.enum_vars[d]
         return f2
 
     def _copy_all_enum_val_but_target(self, f1: Frame, f2: FrameDescriptor, target: str) -> FrameDescriptor:
@@ -82,6 +238,18 @@ class Knitter:
             return (Internal(), last_frame.index)
         else:
             return (Internal(), last_frame.index + 1)
+
+    def _normalized_expression(self, expr: Expr, frame: Frame) -> Expr:
+        env: dict[Expr, int | float | EnumConst | None] = {}
+        for var in self.function.vars:
+            match var.sort:
+                case Pointer():
+                    env[var] = None
+                case Enumeration():
+                    env[var] = EnumConst(var.sort, frame.enum_vars[var.name])
+                case _:
+                    pass
+        return normalized(expr, env)
 
     def set_ptr_here(self, f1: Frame, p: str) -> FrameDescriptor:
         f2 = FrameDescriptor()
@@ -172,15 +340,16 @@ class Knitter:
     def step_var_assign_exp(self, f1: Frame, d: Var, exp: Expr) -> tuple[FrameDescriptor, FrameDescriptor | None]:
         f2 = FrameDescriptor()
         f2 = self.advance_pc(f1, f2)
+        f2 = self._copy_all_enum_d_but_target(f1, f2, d.name)
         f2.prev = self._prev_of_internal_step(f1)
         f2 = default("active", "val", "isnil", "event", "active_child")(f1, f1, f2)
-        exp = ppexp(exp, f1)
+        exp = self._normalized_expression(exp, env)  # type: ignore
         if isinstance(exp, ire.EnumConst):
             assert isinstance(exp, ire.EnumConst)
             f2.enum_values[d.name] = exp.value
             return f2, None
         elif isinstance(exp, ire.Var) and sort_of(exp).is_enum():
-            flag_name = f1.enum_values[exp.name]
+            flag_name = f1.enum_vars[exp.name]
             f2.enum_values[d.name] = flag_name
             return f2, None
         elif sort_of(d) == BOOL:
@@ -219,7 +388,7 @@ class Knitter:
         inst = self.function.instructions[f1.pc]
         assert isinstance(inst, IfGoto)
         expr = inst.condition
-        expr = ppexp(expr, sigma.frame)
+        expr = self._normalized_expression(expr, sigma.frame)
         ftrue, ffalse = None, None
         if expr == ire.TRUE or expr != ire.FALSE:
             ftrue = FrameDescriptor()
@@ -228,9 +397,9 @@ class Knitter:
             ftrue = default("active", "val", "d", "isnil", "event", "active_child")(f1, f1, ftrue)
         if expr == ire.FALSE or expr != ire.TRUE:
             ffalse = FrameDescriptor()
+            ffalse = self.advance_pc(f1, ffalse, False)
             ffalse.prev = self._prev_of_internal_step(f1)
             ffalse = default("active", "val", "d", "isnil", "event", "active_child")(f1, f1, ffalse)
-            ffalse = self.advance_pc(f1, ffalse, False)
         return ftrue, ffalse
 
     def step_assign_cond(self, sigma: Label, tau: Label, p: str, q: str) -> tuple[FrameDescriptor, StepKind]:
@@ -255,7 +424,10 @@ class Knitter:
         elif stop_rewind(sigma, p):
             sigma_a = FrameDescriptor()
             sigma_a = self.advance_pc(sigma.frame, sigma_a)
-            sigma_a.event = FieldAssignP(pfield, None if sigma.frame.isnil[q] else q)
+            if points_here(sigma, len(sigma) - 1, q):
+                sigma_a.event = FieldHere(pfield)
+            else:
+                sigma_a.event = FieldAssignP(pfield, None if sigma.frame.isnil[q] else q)
             sigma_a.prev = self._prev_of_internal_step(sigma.frame)
             sigma_a = default("active", "val", "d", "isnil", "active_child")(sigma.frame, sigma.frame, sigma_a)
             return sigma_a, StepKind.INTERNAL
@@ -271,7 +443,7 @@ class Knitter:
         if sigma.frame.isnil[p]:
             return self.error(sigma.frame), None, StepKind.INTERNAL
         elif stop_rewind(sigma, p):
-            exp = ppexp(exp, sigma.frame)
+            exp = self._normalized_expression(exp, sigma.frame)
             if sort_of(exp).is_enum():
                 if isinstance(exp, (ire.EnumConst, ire.Var)):  # enum values
                     tau_b = FrameDescriptor()
@@ -284,9 +456,7 @@ class Knitter:
                             tau_b.enum_fields[pfield] = flag_name
                     tau_b = self._copy_all_enum_val_but_target(sigma.frame, tau_b, pfield)
                     tau_b.prev = self._prev_of_internal_step(sigma.frame)
-                    tau_b = default("active", "d", "isnil", "event", "pc", "active_child")(
-                        sigma.frame, sigma.frame, tau_b
-                    )
+                    tau_b = default("active", "d", "isnil", "event", "active_child")(sigma.frame, sigma.frame, tau_b)
                     return tau_b, None, StepKind.INTERNAL
 
                 elif sort_of(exp) == BOOL:  # boolean expressions
@@ -298,7 +468,7 @@ class Knitter:
                     tau_b_false = deepcopy(tau_b)
                     tau_b_true.enum_fields[pfield] = "TRUE"
                     tau_b_false.enum_fields[pfield] = "FALSE"
-                    tau_b_true = self._copy_all_enum_val_but_target(sigma.frame, tau_b_false, pfield)
+                    tau_b_true = self._copy_all_enum_val_but_target(sigma.frame, tau_b_true, pfield)
                     tau_b_false = self._copy_all_enum_val_but_target(sigma.frame, tau_b_false, pfield)
 
                     return tau_b_true, tau_b_false, StepKind.INTERNAL
@@ -310,6 +480,7 @@ class Knitter:
             else:
                 tau_b = FrameDescriptor()
                 tau_b = self.advance_pc(sigma.frame, tau_b)
+                tau_b = self._copy_all_enum_val_but_target(sigma.frame, tau_b, pfield)
                 tau_b.prev = self._prev_of_internal_step(sigma.frame)
                 tau_b = default("active", "d", "isnil", "event", "active_child")(sigma.frame, sigma.frame, tau_b)
                 return tau_b, None, StepKind.INTERNAL
@@ -325,7 +496,7 @@ class Knitter:
         elif stop_rewind(sigma, p):
             tau_b = FrameDescriptor()
             tau_b = self.advance_pc(sigma.frame, tau_b)
-            if var in sigma.frame.enum_values:
+            if var in sigma.frame.enum_vars:
                 flag_name = sigma.frame.enum_fields[pfield]
                 tau_b.enum_values[var] = flag_name
             tau_b = self._copy_all_enum_d_but_target(sigma.frame, tau_b, var)
@@ -348,7 +519,7 @@ class Knitter:
                     tau_b.isnil[q] = True
                 else:
                     tau_b.isnil[q] = sigma.frame.isnil[q]
-            tau_b = self._copy_all_isnil_but_target(sigma.frame, tau_b, q)
+            tau_b = self._copy_all_isnil_but_target(sigma.frame, tau_b, p)
             tau_b.prev = self._prev_of_internal_step(sigma.frame)
             tau_b = default("val", "d", "event", "active_child")(sigma.frame, sigma.frame, tau_b)
             return tau_b, StepKind.INTERNAL
@@ -413,11 +584,9 @@ class Knitter:
             else:
                 for r in self.pointers():
                     for i in range(1, len(sigma)):
-                        if not is_pfield_ptr(sigma, len(sigma) - 1, pfield, r, i):
-                            continue
-                        if points_here(sigma, i, r):
+                        if is_pfield_here(sigma, pfield):
                             return self.set_ptr_here(sigma.frame, p), StepKind.INTERNAL
-                        else:
+                        if is_pfield_ptr(sigma, len(sigma) - 1, pfield, r, i):
                             return self.rewind_special(pair, r, i), StepKind.EXTERNAL
                 assert False, "Unreachable code in step_ptr_assign_field"
         else:
@@ -512,15 +681,14 @@ class Knitter:
     def psi_external(self, pair: Pair, framed: FrameDescriptor) -> FrameDescriptor:
         sigma = pair.leader()
         tau = pair.follower()
-        if tau.origin is None or tau.origin.origin is None:  # index <= 1:
+        if tau.frame.index < 1:  # index <= 1:
             for ptr_name in self.pointers():
                 framed.upd[ptr_name] = False
         else:
-            a_ = next(f.index for f in reversed(list(sigma.slice(1))) if f.prev[0] == pair.dir())
+            a_ = next(f.index for f in reversed(sigma[1:]) if f.prev[0] == pair.dir())
             for ptr_name in self.pointers():
                 framed.upd[ptr_name] = not framed.isnil[ptr_name] and (
-                    any(Here(ptr_name) in f.events for f in sigma.slice(a_))
-                    or any(f.upd[ptr_name] for f in sigma.slice(a_ + 1))
+                    any(Here(ptr_name) in f.events for f in sigma[a_:]) or any(f.upd[ptr_name] for f in sigma[a_ + 1 :])
                 )
         framed.index = tau.frame.index + 1
         assert framed.prev == (pair.rev_dir(), sigma.frame.index)
@@ -557,11 +725,11 @@ class Knitter:
                 upd=frozendict(framed.upd),
                 events=frozenset(events),
                 active_child=frozendict(framed.active_child),
-                enum_values=frozendict(framed.enum_values),
+                enum_vars=frozendict(framed.enum_values),
                 enum_fields=frozendict(framed.enum_fields),
                 prev=framed.prev,
             )
-            new_leader = pair.leader().origin.extended_with(frame)
+            new_leader = self.make_label(pair.leader().origin, frame)
             new_parent = new_leader if pair.leadership == LeadershipKind.PARENT else pair.follower()
             new_child = pair.follower() if pair.leadership == LeadershipKind.PARENT else new_leader
             new_pair = Pair(new_parent, new_child, pair.child_key, pair.leadership)
@@ -575,11 +743,11 @@ class Knitter:
                 upd=frozendict(framed.upd),
                 events=frozenset({framed.event}) if framed.event != NOP() else frozenset(),
                 active_child=frozendict(framed.active_child),
-                enum_values=frozendict(framed.enum_values),
+                enum_vars=frozendict(framed.enum_values),
                 enum_fields=frozendict(framed.enum_fields),
                 prev=framed.prev,
             )
-            new_leader = pair.leader().extended_with(frame)
+            new_leader = self.make_label(pair.leader(), frame)
             new_parent = new_leader if pair.leadership == LeadershipKind.PARENT else pair.follower()
             new_child = pair.follower() if pair.leadership == LeadershipKind.PARENT else new_leader
             new_pair = Pair(new_parent, new_child, pair.child_key, pair.leadership)
@@ -594,33 +762,34 @@ class Knitter:
             upd=frozendict(framed.upd),
             events=frozenset({framed.event}) if framed.event != NOP() else frozenset(),
             active_child=frozendict(framed.active_child),
-            enum_values=frozendict(framed.enum_values),
+            enum_vars=frozendict(framed.enum_values),
             enum_fields=frozendict(framed.enum_fields),
             prev=framed.prev,
         )
         new_follower = pair.leader()
-        new_leader = pair.follower().extended_with(frame)
+        new_leader = self.make_label(pair.follower(), frame)
         new_leadership = pair.leadership.opposite()
         new_parent = new_leader if new_leadership == LeadershipKind.PARENT else new_follower
         new_child = new_follower if new_leadership == LeadershipKind.PARENT else new_leader
         new_pair = Pair(new_parent, new_child, pair.child_key, new_leadership)
         return new_pair
 
-    def knit(self, pair: Pair) -> tuple[Pair, Pair | None] | None:
+    def knit(self, pair: Pair) -> KnitResult:
         # special cases
         if pair.leader().frame.index == 0:
-            return None
+            return StepFailed()
         if any(e in {Exit(), ERR(), OOM(), LOF()} for e in pair.leader().frame.events):
-            return None
+            return StepFailed()
 
         step_result = self.step(pair)
         if step_result is None:
-            return None
+            return StepFailed()
         framed, framed2, kind = step_result
         if kind == StepKind.INTERNAL:
             if framed2 is None:
                 framed = self.psi_internal(pair.leader(), framed)
-                return self.extend_pair_with_internal_frame(pair, framed), None
+                new_pair = self.extend_pair_with_internal_frame(pair, framed)
+                return InternalStepResult((new_pair,))
             else:
                 framed_true = framed
                 framed_false = framed2
@@ -628,7 +797,8 @@ class Knitter:
                 framed_false = self.psi_internal(pair.leader(), framed_false)
                 new_pair_true = self.extend_pair_with_internal_frame(pair, framed_true)
                 new_pair_false = self.extend_pair_with_internal_frame(pair, framed_false)
-                return new_pair_true, new_pair_false
+                return InternalStepResult((new_pair_true, new_pair_false))
         else:
             framed = self.psi_external(pair, framed)
-            return self.extend_pair_with_external_frame(pair, framed), None
+            new_pair = self.extend_pair_with_external_frame(pair, framed)
+            return ExternalStepResult(new_pair)
