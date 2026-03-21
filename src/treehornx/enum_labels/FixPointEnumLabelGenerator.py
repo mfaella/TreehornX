@@ -10,8 +10,8 @@ from typing import Iterable
 from frozendict import frozendict
 from loguru import logger
 
-from treehornx.chc.knitter.IKnitter import IKnitter
-from treehornx.chc.knitter.KnitResult import ExternalStepResult, InternalStepResult, KnitResult, StepFailed
+from treehornx.enum_labels.knitter.IKnitter import IKnitter
+from treehornx.enum_labels.knitter.KnitResult import ExternalStepResult, InternalStepResult, KnitResult, StepFailed
 from treehornx.ir.expressions import Var
 from treehornx.ir.function import Function
 from treehornx.ir.instructions import *

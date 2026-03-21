@@ -3,10 +3,10 @@ from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Callable, override
 
-from treehornx.chc.core.Dir import Internal
-from treehornx.chc.core.Event import LOF
-from treehornx.chc.core.Frame import Frame
-from treehornx.chc.core.Label import Label
+from treehornx.enum_labels.core.Dir import Internal
+from treehornx.enum_labels.core.Event import LOF
+from treehornx.enum_labels.core.Frame import Frame
+from treehornx.enum_labels.core.Label import Label
 from treehornx.ir.function import Function
 
 from .CompressedKnitter import CompressedKnitter

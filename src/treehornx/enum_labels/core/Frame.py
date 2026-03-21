@@ -4,7 +4,7 @@ from dataclasses import dataclass, field
 from itertools import count
 
 from frozendict import frozendict
-from treehornx.chc.core.cache_hash import cache_hash
+from treehornx.enum_labels.core.cache_hash import cache_hash
 
 from .Dir import Dir, Internal
 from .Event import NOP, Event, FieldAssignP, Here
