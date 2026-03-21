@@ -1,10 +1,8 @@
 from typing import TypeAlias
 
-from .dir import Dir
-from .event import Event
-from .frame import Frame, FrameDescriptor
-from .label import Label
-from .pair import Pair
+from .Dir import Dir
+from .Event import Event
+from .Frame import Frame, FrameDescriptor
+from .Label import Label
 
-
-__all__ = ["Dir", "Event", "Frame", "FrameDescriptor", "Label", "Pair"]
+__all__ = ["Dir", "Event", "Frame", "FrameDescriptor", "Label"]

@@ -4,11 +4,10 @@ from dataclasses import dataclass, field
 from itertools import count
 
 from frozendict import frozendict
-
 from treehornx.chc.core.cache_hash import cache_hash
 
-from .dir import Dir, Internal
-from .event import NOP, Event, FieldAssignP, Here
+from .Dir import Dir, Internal
+from .Event import NOP, Event, FieldAssignP, Here
 
 
 @dataclass(frozen=True, order=True)
@@ -20,7 +19,7 @@ class Frame:
     isnil: frozendict[str, bool]  # independent
     events: frozenset[Event]
     active_child: frozendict[str | int, bool]  # independent
-    enum_values: frozendict[str, str]  # independent
+    enum_vars: frozendict[str, str]  # independent
     enum_fields: frozendict[str, str]  # independent
     prev: tuple[Dir, int] | None  # independent
 

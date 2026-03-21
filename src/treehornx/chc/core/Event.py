@@ -40,6 +40,11 @@ class Here:
 
 
 @dataclass(slots=True, frozen=True)
+class FieldHere:
+    pfield: str
+
+
+@dataclass(slots=True, frozen=True)
 class Rewind:
     i: int
 
@@ -55,4 +60,4 @@ class Exit:
     pass
 
 
-Event = NOP | OOM | ERR | FieldAssignP | Here | Rewind | Rewind2 | Exit | LOF | Loop
+Event = NOP | OOM | ERR | FieldAssignP | Here | Rewind | Rewind2 | Exit | LOF | Loop | FieldHere
