@@ -1,8 +1,12 @@
 from __future__ import annotations
 
+import math
+import operator
 from dataclasses import dataclass, field, is_dataclass
+from functools import reduce
 from itertools import chain
 from typing import (
+    Any,
     Callable,
     ClassVar,
     Protocol,
@@ -13,7 +17,7 @@ from typing import (
 )
 
 from ._internal.sorts.Enum import BOOL, Enum
-from ._internal.sorts.natives import INT, REAL
+from ._internal.sorts.natives import INT, REAL, Pointer
 from ._internal.sorts.Sort import Sort
 
 
@@ -264,6 +268,17 @@ def _no_fields(op: Operator):
                 pass
 
 
+def _no_pointer_comparison(op: Operator):
+    for arg in op.args():
+        match arg:
+            case PtrIsPtr():
+                raise ValueError("pointers comparisons are not allowed as arguments")
+            case _ if isinstance(arg, Operator):
+                _no_pointer_comparison(arg)
+            case _:
+                pass
+
+
 @dataclass(frozen=True)
 @_validate(_only_pointers)
 class PtrIsNil(_UnaryOperator):
@@ -340,7 +355,7 @@ class PtrIsPtr(_BinaryOperator):
 
 
 @dataclass(frozen=True, slots=True, init=False)
-@_validate(_boolean, _no_fields)
+@_validate(_boolean, _no_fields, _no_pointer_comparison)
 class And(_AssociativeOperator):
     """N-ary logical conjunction over boolean expressions.
 
@@ -353,7 +368,7 @@ class And(_AssociativeOperator):
 
 
 @dataclass(frozen=True, slots=True, init=False)
-@_validate(_boolean, _no_fields)
+@_validate(_boolean, _no_fields, _no_pointer_comparison)
 class Or(_AssociativeOperator):
     """N-ary logical disjunction over boolean expressions.
 
@@ -544,5 +559,221 @@ def sort_of(expr: Expr) -> Sort:
             return BOOL
         case Add() | Sub() | Mul() | Div() | Mod() | Negate():
             return sort_of(expr.arg(0))
+        case _:
+            raise ValueError(f"Unknown expression type: {type(expr)}")
+
+
+_EnvDomain = int | float | EnumConst | None
+_Env = dict[Var | Field, _EnvDomain]
+
+
+def _is_const(expr):
+    return isinstance(expr, (int, float, EnumConst))
+
+
+def _cast_to_ir_bool(b):
+    return TRUE if b else FALSE
+
+
+def _var_normalized(var, env):
+    return env.get(var, var)
+
+
+def _field_normalized(field, env):
+    return env.get(field, field)
+
+
+def _int_normalized(value, env):
+    return value
+
+
+def _float_normalized(value, env):
+    return value
+
+
+def _ptrisnil_normalized(ptrisnil, env):
+    if ptrisnil.argument in env:
+        return _cast_to_ir_bool(env[ptrisnil.argument] is None)
+    else:
+        return ptrisnil
+
+
+def _ptrisptr_normalized(ptrisptr, env):
+    if ptrisptr.left in env and ptrisptr.right in env:
+        if env[ptrisptr.left] is None and env[ptrisptr.right] is None:
+            return TRUE
+        elif env[ptrisptr.left] == env[ptrisptr.right]:
+            return TRUE
+        else:
+            return FALSE
+    else:
+        return ptrisptr
+
+
+def _binary_operator_normalized(expr, env, cls, op):
+    left = _normalized(expr.left, env)
+    right = _normalized(expr.right, env)
+    if _is_const(left) and _is_const(right):
+        if sort_of(expr) == BOOL:
+            return _cast_to_ir_bool(op(left, right))
+        else:
+            return op(left, right)
+    else:
+        return cls(left, right)
+
+
+def _eq_normalized(expr, env):
+    return _binary_operator_normalized(expr, env, Eq, operator.eq)
+
+
+def _ne_normalized(expr, env):
+    return _binary_operator_normalized(expr, env, Ne, operator.ne)
+
+
+def _gt_normalized(expr, env):
+    return _binary_operator_normalized(expr, env, Gt, operator.gt)
+
+
+def _ge_normalized(expr, env):
+    return _binary_operator_normalized(expr, env, Ge, operator.ge)
+
+
+def _lt_normalized(expr, env):
+    return _binary_operator_normalized(expr, env, Lt, operator.lt)
+
+
+def _le_normalized(expr, env):
+    return _binary_operator_normalized(expr, env, Le, operator.le)
+
+
+def _sub_normalized(expr, env):
+    return _binary_operator_normalized(expr, env, Sub, operator.sub)
+
+
+def _div_normalized(expr, env):
+    if sort_of(expr) == INT:
+        return _binary_operator_normalized(expr, env, Div, operator.floordiv)
+    else:
+        return _binary_operator_normalized(expr, env, Div, operator.truediv)
+
+
+def _mod_normalized(expr, env):
+    return _binary_operator_normalized(expr, env, Mod, operator.mod)
+
+
+def _negate_normalized(expr, env):
+    arg = _normalized(expr.argument, env)
+    if _is_const(arg):
+        return -arg
+    else:
+        return Negate(arg)
+
+
+def _associative_operator_normalized(expr, env, cls, op, neutral_value, killer_value, death_result):
+    normalized_args = [_normalized(arg, env) for arg in expr.args()]
+    if killer_value is not None and killer_value in normalized_args:
+        return death_result
+
+    const_args = [arg for arg in normalized_args if _is_const(arg)]
+    consts_eval = reduce(op, const_args, neutral_value)
+    new_args = [arg for arg in normalized_args if not _is_const(arg)]
+
+    if not new_args:
+        return consts_eval
+
+    if consts_eval != neutral_value:
+        new_args.append(consts_eval)
+
+    if len(new_args) == 1:
+        return new_args[0]
+
+    return cls(new_args[0], new_args[1], *new_args[2:])
+
+
+def _add_normalized(expr: Add, env):
+    return _associative_operator_normalized(expr, env, Add, operator.add, 0, None, None)
+
+
+def _mul_normalized(expr: Mul, env):
+    return _associative_operator_normalized(expr, env, Mul, operator.mul, 1, 0, 0)
+
+
+def _and_normalized(expr, env):
+    def and_op(left, right):
+        return TRUE if left == TRUE and right == TRUE else FALSE
+
+    return _associative_operator_normalized(expr, env, And, and_op, TRUE, FALSE, FALSE)
+
+
+def _or_normalized(expr, env):
+    def or_op(left, right):
+        return TRUE if left == TRUE or right == TRUE else FALSE
+
+    return _associative_operator_normalized(expr, env, Or, or_op, FALSE, TRUE, TRUE)
+
+
+def _not_normalized(expr, env):
+    arg = _normalized(expr.argument, env)
+    if _is_const(arg):
+        if arg == TRUE:
+            return FALSE
+        elif arg == FALSE:
+            return TRUE
+    elif arg == expr:
+        return Not(arg)
+    else:
+        return _normalized(Not(arg))
+
+
+def normalized(expr: Expr, env: dict[Expr, int | float | EnumConst | None]) -> Expr:
+    if expr in env:
+        return env[expr]
+    match expr:
+        case Var():
+            return _var_normalized(expr, env)
+        case Field():
+            return _field_normalized(expr, env)
+        case int():
+            return _int_normalized(expr, env)
+        case float():
+            return _float_normalized(expr, env)
+        case EnumConst():
+            return expr
+        case Not(Not(e)):
+            return _normalized(e, env)
+        case Not():
+            return _not_normalized(expr, env)
+        case And():
+            return _and_normalized(expr, env)
+        case Or():
+            return _or_normalized(expr, env)
+        case Eq():
+            return _eq_normalized(expr, env)
+        case Ne():
+            return _ne_normalized(expr, env)
+        case Lt():
+            return _lt_normalized(expr, env)
+        case Le():
+            return _le_normalized(expr, env)
+        case Gt():
+            return _gt_normalized(expr, env)
+        case Ge():
+            return _ge_normalized(expr, env)
+        case Add():
+            return _add_normalized(expr, env)
+        case Sub():
+            return _sub_normalized(expr, env)
+        case Mul():
+            return _mul_normalized(expr, env)
+        case Div():
+            return _div_normalized(expr, env)
+        case Mod():
+            return _mod_normalized(expr, env)
+        case Negate():
+            return _negate_normalized(expr, env)
+        case PtrIsNil():
+            return _ptrisnil_normalized(expr, env)
+        case PtrIsPtr():
+            return _ptrisptr_normalized(expr, env)
         case _:
             raise ValueError(f"Unknown expression type: {type(expr)}")
