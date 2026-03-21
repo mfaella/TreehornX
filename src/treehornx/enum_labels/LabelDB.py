@@ -2,7 +2,7 @@ import json
 from collections import defaultdict
 from dataclasses import dataclass, field
 from itertools import count
-from typing import Any, Callable, Iterable, Protocol, TextIO, override
+from typing import Any, Callable, Iterable, Iterator
 
 from loguru import logger
 
@@ -65,7 +65,7 @@ class LabelDB:
     def is_endless_loop_pivot(self, lab: Label) -> bool:
         return self._pool[lab].is_endless_loop_pivot
 
-    def __iter__(self) -> Iterable[Label]:
+    def __iter__(self) -> Iterator[Label]:
         return (lab for lab in self._pool)
 
     def __in__(self, lab: Label) -> bool:

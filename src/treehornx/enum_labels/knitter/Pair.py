@@ -3,6 +3,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import Enum
 
+from treehornx.enum_labels.knitter.StepKind import StepKind
+
 from ..core.Dir import Dir, Down, Internal, Up
 from ..core.Frame import Frame
 from ..core.Label import Label
@@ -55,3 +57,12 @@ class Pair:
             return replace(self, parent=new_leader)
         else:
             return replace(self, child=new_leader)
+
+    def last_step_kind(self) -> StepKind | None:
+        leader = self.leader()
+        if leader.frame.prev is None:
+            return None
+        elif leader.frame.prev[0] == Internal():
+            return StepKind.INTERNAL
+        else:
+            return StepKind.EXTERNAL

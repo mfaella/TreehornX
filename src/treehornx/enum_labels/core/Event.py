@@ -23,11 +23,6 @@ class LOF:
     pass
 
 
-@dataclass(frozen=True)
-class Loop:
-    pass
-
-
 @dataclass(slots=True, frozen=True)
 class FieldAssignP:
     pfield: str
@@ -60,4 +55,4 @@ class Exit:
     pass
 
 
-Event = NOP | OOM | ERR | FieldAssignP | Here | Rewind | Rewind2 | Exit | LOF | Loop | FieldHere
+Event = NOP | OOM | ERR | FieldAssignP | Here | Rewind | Rewind2 | Exit | LOF | FieldHere

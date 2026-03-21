@@ -1,14 +1,10 @@
-import json
-import sys
-from asyncio.unix_events import SelectorEventLoop
-from collections import defaultdict, deque
-from dataclasses import dataclass, field, replace
+from collections import deque
+from dataclasses import dataclass, field
 from functools import cache, cached_property
-from itertools import chain, count, product
+from itertools import chain, product
 from typing import Iterable
 
 from frozendict import frozendict
-from loguru import logger
 
 from treehornx.enum_labels.knitter.IKnitter import IKnitter
 from treehornx.enum_labels.knitter.KnitResult import ExternalStepResult, InternalStepResult, KnitResult, StepFailed
@@ -19,13 +15,12 @@ from treehornx.ir.sorts import Enum, Pointer, Struct
 
 from .core import Frame, FrameDescriptor, Label
 from .core.Dir import Down, Internal, Up
-from .core.Event import ERR, LOF, NOP, OOM, Here, Loop
+from .core.Event import NOP, Here
 from .knitter.CompressedBoundedInternalChainKnitter import CompressedBoundedInternalChainKnitter
 from .knitter.CompressedUnboundedInternalChainKnitter import CompressedUnboundedInternalChainKnitter
 from .knitter.Pair import LeadershipKind, Pair
 from .LabelDB import LabelDB
 from .PairDB import PairDB
-from .SMT2FileBuilder import SMT2FileBuilder
 
 # logger.remove(0)
 # logger.add(sys.stdout, level=20)
@@ -186,162 +181,6 @@ class FixPointEnumLabelGenerator:
         self.labels.add(pair.leader())
         self.labels.add(pair.follower())
 
-    # def add_internal_step_dependency(self, label: Label):
-    #     for ancestor in self.labels_db.find_ancestors(label):
-    #         pc = label.frame.pc
-    #         instr = self.function.instructions[pc] if pc < len(self.function.instructions) else Return()
-    #         self.add_label_node(self.dependency_graph, ancestor)
-    #         self.add_label_node(self.dependency_graph, label)
-    #         self.dependency_graph.edge(ancestor.name, label.name, label="I", color="blue")
-
-    # def add_external_step_dependency(self, pair: Pair):
-    #     sigma = pair.follower()
-    #     tau = pair.leader()
-    #     if sigma == tau:
-    #         logger.debug(f"adding self dependency for label {sigma.id}")
-    #     if self.create_dependency_graph:
-    #         self.add_label_node(self.dependency_graph, tau)
-    #         external_step_label = f"{f'D({pair.child_key})' if pair.dir() == Up() else 'U'}"
-    #         self.dependency_graph.edge(sigma.name, tau.name, label=external_step_label, color="blue")
-    #         for ancestor in self.labels_db.find_ancestors(tau):
-    #             self.dependency_graph.edge(ancestor.name, tau.name, label="I", color="grey")
-    #         if tau.frame.prev is not None and tau.frame.prev[0] != Internal():
-    #             self.dependency_graph.edge(tau.origin.name, tau.name, label="I", color="grey")
-
-    # def build_dep_graph(self):
-    #     if self.dependency_graph is None:
-    #         return
-
-    #     self.dependency_graph.attr(bgcolor="lightgrey", style="filled")
-
-    #     pairs = {
-    #         p
-    #         for p in self.db.pairs_db
-    #         if p.leader().frame.prev is not None
-    #         and (p.leader().frame.prev[0] == Internal() or p.leader().frame.prev[0] == p.dir())
-    #     }
-    #     default_pairs = {*self.initial_root_pairs(), *self.initial_internal_node_pairs()}
-    #     pairs.difference_update(default_pairs)
-    #     for pair in pairs:
-    #         leader = pair.leader()
-    #         follower = pair.follower()
-    #         if leader.frame.prev is not None and leader.frame.prev[0] == Internal():
-    #             self.add_internal_step_dependency(leader)
-    #         elif leader.frame.prev is not None and follower.frame.index != 0:
-    #             self.add_external_step_dependency(pair)
-
-    # def add_label_node(self, graph: gv.Digraph, lab: Label):
-    #     f = lab.frame
-    #     fjson = {
-    #         "index": f.index,
-    #         "active": f.active,
-    #         "pc": f.pc,
-    #         "upd": dict(f.upd),
-    #         "isnil": dict(f.isnil),
-    #         "event": list(str(e) for e in f.events),
-    #         "active_child": dict(f.active_child),
-    #         "enum_values": dict(f.enum_vars),
-    #         "enum_fields": dict(f.enum_fields),
-    #         "prev": None if f.prev is None else (str(f.prev[0]), f.prev[1]),
-    #     }
-    #     tooltip = json.dumps(fjson, indent=2)
-
-    #     if Loop() in lab.frame.events:
-    #         graph.node(lab.name, style="filled", tooltip=tooltip, label=f"Loop()", fillcolor="red")
-    #         return
-
-    #     err_event = next((e for e in lab.frame.events if e in {ERR(), OOM(), LOF()}), None)
-    #     if err_event:
-    #         graph.node(lab.name, tooltip=tooltip, style="filled", label=f"{lab.name}:{err_event}", fillcolor="yellow")
-    #         return
-
-    #     if Exit() in lab.frame.events:
-    #         graph.node(lab.name, tooltip=tooltip, style="filled", label=f"{lab.name}:Exit()", fillcolor="lightgreen")
-    #         return
-
-    #     if lab.origin is None:
-    #         graph.node(lab.name, label=f"{lab.name}", tooltip=tooltip, style="filled", fillcolor="white")
-    #     else:
-    #         pc = lab.frame.pc
-    #         instr = self.function.instructions[pc] if pc < len(self.function.instructions) else Return()
-    #         graph.node(lab.name, label=f"{lab.name}\n{instr}", tooltip=tooltip, style="filled", fillcolor="white")
-
-    # def build_consecutive_internal_dep_graph(self, path):
-    #     consecutive_dep_graph = gv.Digraph("consecutive internal dependency graph", strict=True)
-    #     consecutive_dep_graph.attr(bgcolor="lightgrey", style="filled")
-    #     prevs = defaultdict(set)
-    #     nexts = defaultdict(set)
-
-    #     for label in self.labels_db.labels():
-    #         if label.origin is None or label.frame.prev is None:
-    #             continue
-
-    #         self.add_label_node(consecutive_dep_graph, label)
-    #         if label.frame.prev[0] != Internal():
-    #             self.add_label_node(consecutive_dep_graph, label.origin)
-    #             consecutive_dep_graph.edge(label.origin.name, label.name, label="I", color="grey")
-    #             label_prevs: set[Label] = {
-    #                 p.follower() for p in self.db.find_by_leader(label) if p.dir() == label.frame.prev[0]
-    #             }
-    #             prevs[label] = label_prevs
-    #             for prev in label_prevs:
-    #                 nexts[prev].add(label)
-    #             # dir = next(iter(prevs)).rev_dir()
-    #             # prev_text = "\n".join(map(lambda p: p.follower().name, prevs))
-    #             # consecutive_dep_graph.node(f"{label.name}.prevs", label=prev_text, style="filled", fillcolor="white")
-    #             # consecutive_dep_graph.edge(f"{label.name}.prevs", label.name, label=str(dir), color="blue")
-
-    #             # if label.frame.index > 1:
-    #             #     nexts = {p for p}
-    #         else:
-    #             for ancestor in self.labels_db.find_ancestors(label):
-    #                 self.add_label_node(consecutive_dep_graph, ancestor)
-    #                 consecutive_dep_graph.edge(ancestor.name, label.name, label="I", color="blue")
-
-    #         for lab, prev_labs in prevs.items():
-    #             dir = next(p for p in self.db.find_by_leader(lab) if p.dir() == lab.frame.prev[0]).rev_dir()
-    #             prev_text = "\n".join(map(lambda l: l.name, prev_labs))
-    #             consecutive_dep_graph.node(f"{lab.name}.prevs", label=prev_text, style="filled", fillcolor="white")
-    #             consecutive_dep_graph.edge(f"{lab.name}.prevs", lab.name, color="blue")
-
-    #         for lab, next_labs in nexts.items():
-    #             next_text = "\n".join(map(lambda l: l.name, next_labs))
-    #             consecutive_dep_graph.node(f"{lab.name}.nexts", label=next_text, style="filled", fillcolor="white")
-    #             consecutive_dep_graph.edge(lab.name, f"{lab.name}.nexts", color="blue")
-
-    #             # if label.frame.index > 1:
-    #             #     nexts = {p for p}
-    #     consecutive_dep_graph.save(path)
-
-    # def build_pairs_text_file(self):
-    #     pairs = {
-    #         p
-    #         for p in self.db.pairs_db
-    #         if p.leader().frame.prev is not None
-    #         and (p.leader().frame.prev[0] == Internal() or p.leader().frame.prev[0] == p.dir())
-    #     }
-    #     default_pairs = {*self.initial_root_pairs(), *self.initial_internal_node_pairs()}
-    #     pairs.difference_update(default_pairs)
-    #     text_pairs: set[tuple[int, int, StepKind]] = set()
-    #     for pair in pairs:
-    #         leader = pair.leader()
-    #         follower = pair.follower()
-    #         if leader.frame.prev is not None and leader.frame.prev[0] == Internal():
-    #             for ancestor in self.labels_db.find_ancestors(leader):
-    #                 sigma_id = ancestor.id
-    #                 tau_id = leader.id
-    #                 text_pairs.add((sigma_id, tau_id, StepKind.INTERNAL))
-
-    #         elif leader.frame.prev is not None and follower.frame.index != 0:
-    #             sigma_id = follower.id
-    #             tau_id = leader.id
-    #             text_pairs.add((sigma_id, tau_id, StepKind.EXTERNAL))
-    #     with open(f"report/{self.function.name}_pairs.csv", "w") as pairs_txt:
-    #         pairs_txt.write("sigma,tau,kind\n")
-    #         for p in text_pairs:
-    #             kind = "internal" if p[2] == StepKind.INTERNAL else "external"
-    #             pairs_txt.write(f"{p[0]},{p[1]},{kind}\n")
-
     def _initialize_pairs(self):
         for pair in self.initial_root_pairs():
             self._add_pair(pair)
@@ -411,7 +250,7 @@ class FixPointEnumLabelGenerator:
         while queue:
             pair = queue.popleft()
 
-            if Loop() in pair.leader().frame.events:
+            if self.labels.is_endless_loop_pivot(pair.leader()):
                 continue
 
             if pair in processed:
@@ -467,34 +306,3 @@ class FixPointEnumLabelGenerator:
         # pppsss = sorted((p.parent.id, p.child.id) for p in self.db.pairs_db)
         # for p in pppsss:
         #     logger.info(f"PAIR {p}")
-
-    # def makeSMT2FileBuilder(self) -> SMT2FileBuilder:
-    #     smt2file = SMT2FileBuilder(
-    #         {v for v in self.function.vars if not (sort_of(v).is_ptr() or sort_of(v).is_enum())},
-    #         {v for v in self.root.sort.pointee.fields.values() if not (sort_of(v).is_ptr() or sort_of(v).is_enum())},  # type: ignore
-    #     )
-    #     for lab in self.start_frames():
-    #         smt2file.assert_fact(Label.make(*lab))
-    #     for lab in self.first_frames():
-    #         smt2file.assert_fact(Label.make(lab))
-
-    #     def is_lace_step(pair: Pair) -> bool:
-    #         if pair.leader().frame.prev[0] == Internal():
-    #             return True
-    #         return pair.leader().frame.prev[0] == pair.dir()
-
-    #     lace_step_pairs = self.pairs.pairs_db.difference(
-    #         {*self.initial_root_pairs(), *self.initial_internal_node_pairs()}
-    #     )
-    #     lace_step_pairs = set(p for p in lace_step_pairs if is_lace_step(p))
-
-    #     for pair in lace_step_pairs:
-    #         if pair.leader().frame.prev[0] == Internal():
-    #             for ancestor in self.labels_db.find_ancestors(pair.leader()):
-    #                 if ancestor.frame.pc >= len(self.function.instructions):
-    #                     continue
-    #                 inst = self.function.instructions[ancestor.frame.pc]
-    #                 smt2file.assert_internal_step(pair.leader(), ancestor, inst)
-    #         else:
-    #             smt2file.assert_external_step(pair)
-    #     return smt2file

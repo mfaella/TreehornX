@@ -16,7 +16,7 @@ from .Pair import Pair
 
 class _VertexColor(Enum):
     WHITE = 1
-    GRAY = 2
+    GREY = 2
     BLACK = 3
 
 
@@ -53,7 +53,7 @@ class CompressedUnboundedInternalChainKnitter(IKnitter):
             colors = defaultdict(lambda: _VertexColor.WHITE)
         if loop_pivots is None:
             loop_pivots = set()
-        colors[pair] = _VertexColor.GRAY
+        colors[pair] = _VertexColor.GREY
         knit_result = self._knitter.knit(pair)
         match knit_result:
             case ExternalStepResult(_) | StepFailed():  # base case
@@ -65,7 +65,7 @@ class CompressedUnboundedInternalChainKnitter(IKnitter):
                     match colors[p_]:
                         case _VertexColor.WHITE:
                             final_pairs.extend(self._knit_internal_steps_chain(p_, loop_pivots, colors).pairs)
-                        case _VertexColor.GRAY:
+                        case _VertexColor.GREY:
                             loop_pivots.add(p_)
                         case _VertexColor.BLACK:
                             pass

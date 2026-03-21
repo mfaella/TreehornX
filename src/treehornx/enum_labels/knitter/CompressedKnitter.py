@@ -9,15 +9,15 @@ from treehornx.enum_labels.knitter.IKnitter import IKnitter
 from treehornx.enum_labels.knitter.KnitResult import ExternalStepResult, InternalStepResult, KnitResult, StepFailed
 from treehornx.ir.function import Function
 from treehornx.ir.instructions import *
-from treehornx.ir.sorts import Enum as Enumeration
-from treehornx.ir.sorts import Pointer
 
-from ...ir.expressions import EnumConst, normalized
+from ...ir.expressions import EnumConst
 from ..core import *
 from ..core import Frame, Label
 from ..core.Dir import *
 from ..core.Event import *
 from .Pair import LeadershipKind, Pair
+from .StepKind import StepKind
+from .utils import normalized_expr
 
 
 def is_pfield_nil(sigma: Label, pfield: str) -> bool:
@@ -153,7 +153,8 @@ def _default_prototype(
 
 
 def default(*default_fields: str) -> Callable[[Frame, Frame, FrameDescriptor], FrameDescriptor]:
-    """Create a default frame based on the previous frame and the frame below. It set to default all the fields in default_fields."""
+    """Create a default frame based on the previous frame and the frame below.
+    It set to default all the fields in default_fields."""
 
     assert all(field in {"active", "val", "d", "isnil", "event", "pc", "active_child"} for field in default_fields), (
         f"Invalid default field. Valid fields are: active, event, d, val, isnil, pc, active_child. Got: {default_fields}"
@@ -171,11 +172,6 @@ def set_ptr_here(f1: Frame, f2: FrameDescriptor, p: str) -> FrameDescriptor:
     f2.isnil[p] = False
     f2 = default("active", "val", "d", "active_child")(f1, f1, f2)
     return f2
-
-
-class StepKind(Enum):
-    INTERNAL = 1
-    EXTERNAL = 2
 
 
 class NonContinuosPairError(Exception):
@@ -238,18 +234,6 @@ class CompressedKnitter(IKnitter):
             return (Internal(), last_frame.index)
         else:
             return (Internal(), last_frame.index + 1)
-
-    def _normalized_expression(self, expr: Expr, frame: Frame) -> Expr:
-        env: dict[Expr, int | float | EnumConst | None] = {}
-        for var in self.function.vars:
-            match var.sort:
-                case Pointer():
-                    env[var] = None
-                case Enumeration():
-                    env[var] = EnumConst(var.sort, frame.enum_vars[var.name])
-                case _:
-                    pass
-        return normalized(expr, env)
 
     def set_ptr_here(self, f1: Frame, p: str) -> FrameDescriptor:
         f2 = FrameDescriptor()
@@ -343,7 +327,7 @@ class CompressedKnitter(IKnitter):
         f2 = self._copy_all_enum_d_but_target(f1, f2, d.name)
         f2.prev = self._prev_of_internal_step(f1)
         f2 = default("active", "val", "isnil", "event", "active_child")(f1, f1, f2)
-        exp = self._normalized_expression(exp, env)  # type: ignore
+        exp = normalized_expr(exp, env)  # type: ignore
         if isinstance(exp, ire.EnumConst):
             assert isinstance(exp, ire.EnumConst)
             f2.enum_values[d.name] = exp.value
@@ -388,7 +372,7 @@ class CompressedKnitter(IKnitter):
         inst = self.function.instructions[f1.pc]
         assert isinstance(inst, IfGoto)
         expr = inst.condition
-        expr = self._normalized_expression(expr, sigma.frame)
+        expr = normalized_expr(expr, sigma.frame)
         ftrue, ffalse = None, None
         if expr == ire.TRUE or expr != ire.FALSE:
             ftrue = FrameDescriptor()
@@ -443,7 +427,7 @@ class CompressedKnitter(IKnitter):
         if sigma.frame.isnil[p]:
             return self.error(sigma.frame), None, StepKind.INTERNAL
         elif stop_rewind(sigma, p):
-            exp = self._normalized_expression(exp, sigma.frame)
+            exp = normalized_expr(exp, sigma.frame)
             if sort_of(exp).is_enum():
                 if isinstance(exp, (ire.EnumConst, ire.Var)):  # enum values
                     tau_b = FrameDescriptor()

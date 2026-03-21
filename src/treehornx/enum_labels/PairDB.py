@@ -1,5 +1,5 @@
 from collections import defaultdict
-from typing import Iterable
+from typing import Iterable, Iterator
 
 from .core import Label
 from .knitter.Pair import Pair
@@ -14,6 +14,9 @@ class PairDB:
 
     def __len__(self) -> int:
         return len(self.pairs_db)
+
+    def __iter__(self) -> Iterator[Pair]:
+        return iter(self.pairs_db)
 
     def add(self, pair: Pair):
         if pair not in self.pairs_db:
