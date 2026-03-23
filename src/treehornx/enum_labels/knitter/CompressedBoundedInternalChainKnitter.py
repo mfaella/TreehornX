@@ -66,8 +66,10 @@ class CompressedBoundedInternalChainKnitter(IKnitter):
             knit_result = self._knitter.knit(current_pair)
             match knit_result:
                 case ExternalStepResult(p_):
+                    final_pairs.add(current_pair)
                     self._on_new_external_step(current_pair, p_)
                 case StepFailed():
+                    final_pairs.add(current_pair)
                     self._on_step_failed(current_pair)
                 case InternalStepResult(ps):
                     for p_ in ps:

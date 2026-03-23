@@ -16,8 +16,6 @@ class Sort:
 
     name: str
 
-    _pool: ClassVar[dict[Sort, Sort]] = {}
-
     @override
     def __str__(self) -> str:
         """Return the sort's name as its string representation."""

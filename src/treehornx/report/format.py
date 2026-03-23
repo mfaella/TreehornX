@@ -3,7 +3,6 @@ from __future__ import annotations
 from typing import Any
 
 from frozendict import frozendict
-
 from treehornx.enum_labels.core.Dir import Down, Internal, Up
 from treehornx.enum_labels.core.Event import (
     ERR,
@@ -15,13 +14,13 @@ from treehornx.enum_labels.core.Event import (
     FieldAssignP,
     FieldHere,
     Here,
-    Loop,
     Rewind,
     Rewind2,
 )
 from treehornx.enum_labels.core.Frame import Frame
 from treehornx.enum_labels.core.Label import Label
 from treehornx.enum_labels.knitter.Pair import LeadershipKind, Pair
+from treehornx.enum_labels.LabelDB import LabelDB
 
 
 def _dir_to_json(dir_value: Up | Internal | Down) -> dict[str, Any]:
@@ -56,8 +55,6 @@ def _event_to_json(event: Event) -> dict[str, Any]:
             return {"type": "ERR"}
         case LOF():
             return {"type": "LOF"}
-        case Loop():
-            return {"type": "Loop"}
         case Exit():
             return {"type": "Exit"}
         case FieldAssignP(pfield=pfield, p=p):
@@ -154,6 +151,19 @@ def label_to_json(label: Label) -> dict[str, Any]:
     }
 
 
+def label_to_light_json(label: Label, labels: LabelDB) -> dict[str, Any]:
+    return {
+        "frame": frame_to_json(label.frame),
+        "origin_id": None if label.origin is None else labels.id(label.origin),
+    }
+
+
+def label_from_light_json(obj: dict[str, Any], labels: LabelDB) -> Label:
+    origin_id = obj["origin_id"]
+    origin = None if origin_id is None else labels.find_by_id(origin_id)
+    return Label(frame=frame_from_json(obj["frame"]), origin=origin)
+
+
 def label_from_json(obj: dict[str, Any]) -> Label:
     origin_obj = obj["origin"]
     origin = None if origin_obj is None else label_from_json(origin_obj)
@@ -177,3 +187,22 @@ def pair_from_json(obj: dict[str, Any]) -> Pair:
         leadership=LeadershipKind[obj["leadership"]],
     )
 
+
+def pair_to_light_json(pair: Pair, labels: LabelDB) -> dict[str, Any]:
+    return {
+        "parent_id": labels.id(pair.parent),
+        "child_id": labels.id(pair.child),
+        "child_key": pair.child_key,
+        "leadership": pair.leadership.name,
+    }
+
+
+def pair_from_light_json(obj: dict[str, Any], labels: LabelDB) -> Pair:
+    parent_id = obj["parent_id"]
+    child_id = obj["child_id"]
+    return Pair(
+        parent=labels.find_by_id(parent_id),
+        child=labels.find_by_id(child_id),
+        child_key=obj["child_key"],
+        leadership=LeadershipKind[obj["leadership"]],
+    )

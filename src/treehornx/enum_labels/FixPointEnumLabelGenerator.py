@@ -100,6 +100,8 @@ class FixPointEnumLabelGenerator:
         enum_values = frozendict({v.name: tuple(v.sort.flags)[0] for v in self._enum_vars})
         enum_fields = frozendict({f.name: tuple(f.sort.flags)[0] for f in self._enum_fields})
         for active_child in self.active_child_products():
+            if active_child.get("parent", False):
+                continue
             active_frame = Frame(
                 index=0,
                 active=True,
@@ -169,7 +171,8 @@ class FixPointEnumLabelGenerator:
 
     def initial_internal_node_pairs(self) -> Iterable[Pair]:
         for parent, child, child_key in product(self.backbone_labels(), self.backbone_labels(), self._children_keys):
-            if parent[1].active_child[child_key] == child[0].active:
+            # parent_active = parent[0].active_child.get("parent", False)
+            if parent[0].active_child[child_key] == child[0].active:  # and not parent_active:
                 pair = Pair(parent=parent, child=child, child_key=child_key)
                 yield pair
 
@@ -236,6 +239,8 @@ class FixPointEnumLabelGenerator:
 
         @cache
         def knit(pair: Pair) -> KnitResult:
+            if self.labels.id(pair.leader()) == 49:
+                pass
             return knitter.knit(pair)
 
         def is_continuos_pair(pair: Pair) -> bool:
@@ -279,30 +284,15 @@ class FixPointEnumLabelGenerator:
                             qappend(new_p)
                             self._add_pair(new_p)
                 case ExternalStepResult(pair=Pair(parent, child, child_key, leadership)):
-                    self._add_pair(pair)
-                    qappend(pair)
+                    qappend(knit_result.pair)
 
                     new_leader = parent if leadership == LeadershipKind.PARENT else child
                     for p in self.pairs.find_by_leader(
                         pair.follower()
                     ):  # finding by follower because the leadership has been switched in the new pair
                         if (leadership != p.leadership or child_key != p.child_key) and not is_continuos_pair(p):
-                            parent = new_leader if p.leadership == LeadershipKind.PARENT else p.parent
-                            child = new_leader if p.leadership == LeadershipKind.CHILD else p.child
-                            leadership = p.leadership
-                            child_key = p.child_key
-                            new_p = Pair(parent, child, child_key, leadership)
+                            new_parent = new_leader if p.leadership == LeadershipKind.PARENT else p.parent
+                            new_child = new_leader if p.leadership == LeadershipKind.CHILD else p.child
+                            new_p = Pair(new_parent, new_child, p.child_key, p.leadership)
                             self._add_pair(new_p)
                             qappend(new_p)
-
-        # logger.info("All pair have been generated")
-        # assert len(queue) == 0
-        # logger.info("Building dependency graph")
-        # self.build_dep_graph()
-        # self.dependency_graph.save(f"report/{self.function.name}.dot")
-        # self.build_consecutive_internal_dep_graph(f"report/{self.function.name}_internals.dot")
-        # self.build_pairs_text_file()
-
-        # pppsss = sorted((p.parent.id, p.child.id) for p in self.db.pairs_db)
-        # for p in pppsss:
-        #     logger.info(f"PAIR {p}")

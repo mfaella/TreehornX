@@ -1,16 +1,13 @@
 from dataclasses import dataclass
-from enum import Enum
-from typing import Callable, Iterable, cast
+from typing import Callable, Iterable
 
 import treehornx.ir.expressions as ire
 from frozendict import frozendict
-from loguru import logger
 from treehornx.enum_labels.knitter.IKnitter import IKnitter
 from treehornx.enum_labels.knitter.KnitResult import ExternalStepResult, InternalStepResult, KnitResult, StepFailed
 from treehornx.ir.function import Function
 from treehornx.ir.instructions import *
 
-from ...ir.expressions import EnumConst
 from ..core import *
 from ..core import Frame, Label
 from ..core.Dir import *
@@ -327,7 +324,7 @@ class CompressedKnitter(IKnitter):
         f2 = self._copy_all_enum_d_but_target(f1, f2, d.name)
         f2.prev = self._prev_of_internal_step(f1)
         f2 = default("active", "val", "isnil", "event", "active_child")(f1, f1, f2)
-        exp = normalized_expr(exp, env)  # type: ignore
+        exp = normalized_expr(exp, f1)
         if isinstance(exp, ire.EnumConst):
             assert isinstance(exp, ire.EnumConst)
             f2.enum_values[d.name] = exp.value
@@ -372,7 +369,7 @@ class CompressedKnitter(IKnitter):
         inst = self.function.instructions[f1.pc]
         assert isinstance(inst, IfGoto)
         expr = inst.condition
-        expr = normalized_expr(expr, sigma.frame)
+        expr = normalized_expr(expr, f1)
         ftrue, ffalse = None, None
         if expr == ire.TRUE or expr != ire.FALSE:
             ftrue = FrameDescriptor()
@@ -592,7 +589,6 @@ class CompressedKnitter(IKnitter):
             inst = self.function.instructions[pc]
             if len(pair.leader()) >= self.n:
                 return self.label_overflow(pair.leader().frame), None, StepKind.INTERNAL
-            logger.debug(f"step: {inst} (pc={pc})")
             match inst:
                 case IfGoto(ire.PtrIsPtr(p, q), _):
                     assert isinstance(p, Var)

@@ -4,6 +4,7 @@ from functools import cached_property
 from itertools import chain
 from typing import Any, Callable, ClassVar, Iterable, Sequence, TextIO
 
+from treehornx.enum_labels.knitter.StepKind import StepKind
 from treehornx.enum_labels.knitter.utils import normalized_expr
 from treehornx.enum_labels.LabelDB import LabelDB
 from treehornx.enum_labels.PairDB import PairDB
@@ -30,7 +31,6 @@ from treehornx.ir.expressions import (
     PtrIsPtr,
     Sub,
     Var,
-    normalized,
     sort_of,
 )
 from treehornx.ir.function import Function
@@ -38,8 +38,8 @@ from treehornx.ir.instructions import FieldAssignExpr, IfGoto, Instruction, VarA
 from treehornx.ir.sorts import BOOL, INT, REAL, Sort, Struct
 
 from ..enum_labels.core import Label
-from ..enum_labels.core.Dir import Down
-from ..enum_labels.core.Event import ERR, LOF, OOM
+from ..enum_labels.core.Dir import Down, Internal
+from ..enum_labels.core.Event import ERR, LOF, OOM, Exit
 from ..enum_labels.knitter.Pair import Pair
 
 
@@ -139,15 +139,17 @@ class SMT2FileBuilder:
     root_sort: Struct
     labels: LabelDB
     pairs: PairDB
+    facts: set[Label]
     chcs: set[str] = field(init=False, default_factory=lambda: set())
     decls: set[str] = field(init=False, default_factory=lambda: set())
     oom_queries: set[str] = field(init=False, default_factory=lambda: set())
     err_qeueries: set[str] = field(init=False, default_factory=lambda: set())
     lof_queries: set[str] = field(init=False, default_factory=lambda: set())
+    loaded: bool = field(init=False, default=False)
 
     @cached_property
     def vars(self) -> Sequence[Var]:
-        return tuple(var for var in self.function.vars if not var.sort.is_enum())
+        return tuple(var for var in self.function.vars if not (var.sort.is_enum() or var.sort.is_ptr()))
 
     @cached_property
     def fields(self) -> Sequence[Var]:
@@ -326,8 +328,8 @@ class SMT2FileBuilder:
 
         match stmt:
             case IfGoto(cond, _) if not isinstance(cond, PtrIsPtr):
-                cond = normalized_expr(cond, tau.frame)
                 cond = Not(cond) if tau.frame.pc == ancestor.frame.pc + 1 else cond
+                cond = normalized_expr(cond, tau.frame)
                 constraints = []
                 if cond not in {TRUE, FALSE}:
                     cond_smt2 = self.expr_to_smt2(
@@ -359,7 +361,12 @@ class SMT2FileBuilder:
                 assert isinstance(var, Var)
                 if not isinstance(expr, EnumConst):
                     expr_smt2 = self.expr_to_smt2(expr, var_id_maker, field_id_maker)
-                    constraints = [smt2equals(self.tau_field_id(var.name, self.id(tau)), expr_smt2)]
+                    if var.sort == BOOL:
+                        if tau.frame.enum_fields[var.name] == "FALSE":
+                            expr_smt2 = smt2not(expr_smt2)
+                        constraints = [expr_smt2]
+                    else:
+                        constraints = [smt2equals(self.tau_field_id(var.name, self.id(tau)), expr_smt2)]
                 for left, right in zip(self.tau_vars_id(self.id(tau)), self.tau_vars_id(self.id(ancestor))):
                     constraints.append(smt2equals(left, right))
                 for left, right in zip(self.tau_fields_id(self.id(tau)), self.tau_fields_id(self.id(ancestor))):
@@ -465,7 +472,12 @@ class SMT2FileBuilder:
                 assert isinstance(var, Var)
                 if not isinstance(expr, EnumConst):
                     expr_smt2 = self.expr_to_smt2(expr, var_id_maker, field_id_maker)
-                    constraints = [smt2equals(self.tau_field_id(var.name, self.id(tau)), expr_smt2)]
+                    if var.sort == BOOL:
+                        if tau.frame.enum_fields[var.name] == "FALSE":
+                            expr_smt2 = smt2not(expr_smt2)
+                        constraints = [expr_smt2]
+                    else:
+                        constraints = [smt2equals(self.tau_field_id(var.name, self.id(tau)), expr_smt2)]
                 for left, right in zip(self.tau_vars_id(self.id(tau)), self.tau_vars_id(self.id(ancestor))):
                     constraints.append(smt2equals(left, right))
                 for left, right in zip(self.tau_fields_id(self.id(tau)), self.tau_fields_id(self.id(ancestor))):
@@ -600,6 +612,19 @@ class SMT2FileBuilder:
         }
         return len(excode_to_queries[exit_code]) == 0
 
+    def dump_to_file(
+        self,
+        file_path: str,
+        exit_code: ExitCodeKind,
+        *,
+        logic: str = "HORN",
+        check_sat: bool = False,
+        get_model: bool = False,
+        exit: bool = False,
+    ):
+        with open(file_path, "w") as f:
+            self.dump(f, exit_code, logic=logic, check_sat=check_sat, get_model=get_model, exit=exit)
+
     def dump(
         self,
         stream: TextIO,
@@ -610,19 +635,16 @@ class SMT2FileBuilder:
         get_model: bool = False,
         exit: bool = False,
     ):
+        self._load()
         stream.write(f"(set-logic {logic})\n")
-        for decl in self.decls:
-            stream.write(f"{decl}\n")
-        for chc in self.chcs:
-            stream.write(f"{chc}\n")
+        stream.writelines(self.decls)
+        stream.writelines(self.chcs)
         if exit_code == ExitCodeKind.ERR:
             queries = self.err_qeueries
         elif exit_code == ExitCodeKind.OOM:
             queries = self.oom_queries
         elif exit_code == ExitCodeKind.LABEL_OVERFLOW:
             queries = self.lof_queries
-        else:
-            queries: set[str] = set()
         for query in queries:
             stream.write(f"{query}\n")
 
@@ -634,3 +656,24 @@ class SMT2FileBuilder:
 
         if exit:
             stream.write(f"(exit)\n")
+
+    def _load(self):
+        if self.loaded:
+            return
+        for lab in self.facts:
+            self.assert_fact(lab)
+        for pair in self.pairs:
+            if pair.leader() in self.facts:
+                continue
+            leader = pair.leader()
+            match pair.last_step_kind():
+                case StepKind.INTERNAL:
+                    for ancestor in self.labels.ancestors(pair.leader()):
+                        if Exit() not in leader.frame.events:
+                            stmt = self.function.instructions[ancestor.frame.pc]
+                            self.assert_internal_step(pair.leader(), ancestor, stmt)
+                case StepKind.EXTERNAL if leader.frame.prev and leader.frame.prev[0] == pair.dir():
+                    self.assert_external_step(pair)
+                case _:
+                    continue
+        self.leaded = True

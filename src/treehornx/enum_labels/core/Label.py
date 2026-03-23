@@ -9,7 +9,7 @@ from typing import Iterable, overload, override
 from .Frame import Frame
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Label:
     frame: Frame
     origin: Label | None = field(default=None)

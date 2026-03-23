@@ -34,13 +34,16 @@ class LabelInfo:
 @dataclass
 class LabelDB:
     _pool: dict[Label, LabelInfo] = field(default_factory=dict, init=False)
-    _origin_index: defaultdict[Label | None, set[Label]] = field(default_factory=defaultdict, init=False)
+    _origin_index: defaultdict[Label | None, set[Label]] = field(default_factory=lambda: defaultdict(set), init=False)
+    _id_index: list[Label] = field(init=False, default_factory=list)
     _id_counter: Callable[[], int] = field(init=False, default_factory=lambda: count().__next__)
 
     def _save(self, lab: Label):
         if lab not in self._pool:
-            self._pool[lab] = LabelInfo(self._id_counter())
+            lab_id = self._id_counter()
+            self._pool[lab] = LabelInfo(lab_id)
             self._origin_index[lab.origin].add(lab)
+            self._id_index.append(lab)
 
     def make(self, origin: Label | None, frame: Frame) -> Label:
         lab = Label(frame, origin)
@@ -52,6 +55,9 @@ class LabelDB:
 
     def id(self, lab: Label) -> int:
         return self._pool[lab].id
+
+    def find_by_id(self, lab_id: int) -> Label:
+        return self._id_index[lab_id]
 
     def ancestors(self, lab: Label) -> Iterable[Label]:
         return self._pool[lab].ancestors
@@ -70,6 +76,9 @@ class LabelDB:
 
     def __in__(self, lab: Label) -> bool:
         return lab in self._pool
+
+    def __len__(self) -> int:
+        return len(self._pool)
 
     def find_by_origin(self, origin: Label) -> Iterable[Label]:
         return self._origin_index[origin]

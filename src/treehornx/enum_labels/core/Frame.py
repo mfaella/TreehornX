@@ -1,16 +1,14 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from itertools import count
 
 from frozendict import frozendict
-from treehornx.enum_labels.core.cache_hash import cache_hash
 
-from .Dir import Dir, Internal
-from .Event import NOP, Event, FieldAssignP, Here
+from .Dir import Dir
+from .Event import NOP, Event
 
 
-@dataclass(frozen=True, order=True)
+@dataclass(frozen=True, slots=True)
 class Frame:
     index: int  # independent
     active: bool
