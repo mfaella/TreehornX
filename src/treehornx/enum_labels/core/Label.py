@@ -3,7 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from functools import cached_property
-from typing import Iterable, overload, override
+from typing import Iterable, cast, overload, override
 
 # from .dir import Down
 from .Frame import Frame
@@ -13,6 +13,7 @@ from .Frame import Frame
 class Label:
     frame: Frame
     origin: Label | None = field(default=None)
+    _cached_hash: int | None = field(default=None, init=False, hash=False, compare=False)
 
     def append(self, frame: Frame) -> Label:
         return Label(frame, self)
@@ -51,13 +52,15 @@ class Label:
     def __len__(self) -> int:
         return sum(1 for _ in reversed(self))
 
-    @cached_property
-    def __cache_hash__(self) -> int:
-        return hash((self.frame, self.origin))
+    def _compute_cached_hash(self) -> int:
+        if self._cached_hash is None:
+            hash_value = hash((self.frame, self.origin))
+            object.__setattr__(self, "_cached_hash", hash_value)
+        return cast(int, self._cached_hash)
 
     @override
     def __hash__(self) -> int:
-        return self.__cache_hash__
+        return self._compute_cached_hash()
 
     @override
     def __eq__(self, other: object) -> bool:
