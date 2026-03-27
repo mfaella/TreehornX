@@ -1,20 +1,21 @@
 from dataclasses import dataclass
 from typing import Callable, Iterable
 
-import treehornx.ir.expressions as ire
 from frozendict import frozendict
-from treehornx.enum_labels.knitter.IKnitter import IKnitter
-from treehornx.enum_labels.knitter.KnitResult import ExternalStepResult, InternalStepResult, KnitResult, StepFailed
+
+import treehornx.ir.expressions as ire
+from treehornx.enum_labels.core import *
+from treehornx.enum_labels.core import Frame, Label
+from treehornx.enum_labels.core.Dir import *
+from treehornx.enum_labels.core.Event import *
+from treehornx.enum_labels.utils import normalized_expr
 from treehornx.ir.function import Function
 from treehornx.ir.instructions import *
 
-from ..core import *
-from ..core import Frame, Label
-from ..core.Dir import *
-from ..core.Event import *
+from .IKnitter import IKnitter
+from .KnitResult import ExternalStepResult, InternalStepResult, KnitResult, StepFailed
 from .Pair import LeadershipKind, Pair
 from .StepKind import StepKind
-from .utils import normalized_expr
 
 
 def is_pfield_nil(sigma: Label, pfield: str) -> bool:

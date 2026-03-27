@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import deque
 from dataclasses import dataclass, field
 from functools import cached_property
+from itertools import islice
 from typing import Iterable, cast, overload, override
 
 # from .dir import Down
@@ -19,13 +20,7 @@ class Label:
         return Label(frame, self)
 
     def __iter__(self) -> Iterable[Frame]:
-        current: Label | None = self
-        stack: deque[Frame] = deque()
-        while current is not None:
-            stack.append(current.frame)
-            current = current.origin
-        while stack:
-            yield stack.pop()
+        return map(lambda label: label.frame, self.iter_origins())
 
     def __reversed__(self) -> Iterable[Frame]:
         current: Label | None = self
@@ -42,9 +37,7 @@ class Label:
     def __getitem__(self, index: int | slice) -> Frame | tuple[Frame, ...]:
         match index:
             case int():
-                if index < 0:
-                    index = len(self) + index
-                return next(f for f in reversed(self) if f.index == index)
+                return self.origin_at(index).frame
             case slice():
                 start, stop, step = index.indices(len(self))
                 return tuple(self[i] for i in range(start, stop, step))
@@ -68,9 +61,16 @@ class Label:
             return NotImplemented
         return self.frame == other.frame and self.origin == other.origin
 
-    @classmethod
-    def from_frames(cls, first_frame: Frame, *frames: Frame) -> Label:
-        lab: Label = Label(first_frame, None)
-        for frame in frames:
-            lab = Label(frame, lab)
-        return lab
+    def iter_origins(self) -> Iterable[Label]:
+        stack: deque[Label] = deque()
+        current: Label | None = self
+        while current is not None:
+            stack.append(current)
+            current = current.origin
+        while stack:
+            yield stack.pop()
+
+    def origin_at(self, index: int) -> Label:
+        if index < 0:
+            index = len(self) + index
+        return next(islice(self.iter_origins(), index, index + 1))

@@ -3,11 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from enum import Enum
 
-from treehornx.enum_labels.knitter.StepKind import StepKind
-
-from ..core.Dir import Dir, Down, Internal, Up
-from ..core.Frame import Frame
-from ..core.Label import Label
+from treehornx.enum_labels._internal.knitter.StepKind import StepKind
+from treehornx.enum_labels.core.Dir import Dir, Down, Internal, Up
+from treehornx.enum_labels.core.Frame import Frame
+from treehornx.enum_labels.core.Label import Label
 
 
 class LeadershipKind(Enum):

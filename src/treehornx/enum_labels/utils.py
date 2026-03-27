@@ -5,6 +5,10 @@ from treehornx.ir.expressions import (
     EnumConst,
     Eq,
     Expr,
+    Ge,
+    Gt,
+    Le,
+    Lt,
     Ne,
     Not,
     Or,
@@ -15,7 +19,29 @@ from treehornx.ir.expressions import (
 )
 from treehornx.ir.sorts import Sort
 
-from ..core import Frame
+from .core import Frame
+
+
+def _normalize_if_negated_comparison(expr: Expr) -> Expr:
+    match expr:
+        case Not(neg_expr):
+            match neg_expr:
+                case Eq(lhs, rhs):
+                    return Ne(lhs, rhs)
+                case Ne(lhs, rhs):
+                    return Eq(lhs, rhs)
+                case Le(lhs, rhs):
+                    return Gt(lhs, rhs)
+                case Lt(lhs, rhs):
+                    return Ge(lhs, rhs)
+                case Ge(lhs, rhs):
+                    return Lt(lhs, rhs)
+                case Gt(lhs, rhs):
+                    return Le(lhs, rhs)
+                case _:
+                    return expr
+        case _:
+            return expr
 
 
 def normalized_expr(expr: Expr, f_prev: Frame) -> Expr:  # noqa: PLR0915
@@ -25,16 +51,28 @@ def normalized_expr(expr: Expr, f_prev: Frame) -> Expr:  # noqa: PLR0915
             return EnumConst(sort, flag_name)  # type: ignore
         case Not(Not(e)):
             return normalized_expr(e, f_prev)
+        case Not(Eq(lhs, rhs)):
+            return normalized_expr(Ne(lhs, rhs), f_prev)
+        case Not(Ne(lhs, rhs)):
+            return normalized_expr(Eq(lhs, rhs), f_prev)
+        case Not(Le(lhs, rhs)):
+            return normalized_expr(Gt(lhs, rhs), f_prev)
+        case Not(Lt(lhs, rhs)):
+            return normalized_expr(Ge(lhs, rhs), f_prev)
+        case Not(Ge(lhs, rhs)):
+            return normalized_expr(Lt(lhs, rhs), f_prev)
+        case Not(Gt(lhs, rhs)):
+            return normalized_expr(Le(lhs, rhs), f_prev)
         case Not(e):
             if e == TRUE:
                 return FALSE
             elif e == FALSE:
                 return TRUE
-            ppe = normalized_expr(e, f_prev)
-            if e == ppe:
-                return Not(ppe)
+            normal_expr = normalized_expr(e, f_prev)
+            if e == normal_expr:
+                return Not(normal_expr)
             else:
-                return normalized_expr(Not(ppe), f_prev)
+                return normalized_expr(Not(normal_expr), f_prev)
         case And():
             new_args = [normalized_expr(arg, f_prev) for arg in expr.args()]
             if FALSE in new_args:

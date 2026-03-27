@@ -1,16 +1,14 @@
 import json
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from enum import Enum
 from typing import Iterable
 
 import pydot
-from treehornx.enum_labels.core.Dir import Internal, Up
+
+from treehornx.enum_labels import LaceOverApproximation, Step
+from treehornx.enum_labels.core.Dir import Dir, Down, Internal, Up
 from treehornx.enum_labels.core.Event import ERR, LOF, OOM, Exit
 from treehornx.enum_labels.core.Label import Label
-from treehornx.enum_labels.knitter.Pair import Pair
-from treehornx.enum_labels.knitter.StepKind import StepKind
-from treehornx.enum_labels.LabelDB import LabelDB
-from treehornx.enum_labels.PairDB import PairDB
 from treehornx.ir.function import Function
 from treehornx.ir.instructions import Return
 from treehornx.report.format import frame_to_json
@@ -20,7 +18,6 @@ class DependencyGraphKind(Enum):
     FULL = "full"
     COMPRESSED = "compressed"
     INTERNAL = "internal"
-    COMPRESSED_INTERNAL = "compressed_internal"
 
 
 @dataclass(slots=True)
@@ -32,16 +29,25 @@ class DependencyGraphInfo:
 @dataclass
 class DependencyGraphBuilder:
     function: Function
-    labels: LabelDB
-    pairs: PairDB
-    internal_dependency_graph_nodes_count: int = field(init=False, default=0)
-    compressed_internal_dependency_graph_nodes_count: int = field(init=False, default=0)
-    compressed_dependency_graph_nodes_count: int = field(init=False, default=0)
-    full_dependency_graph_nodes_count: int = field(init=False, default=0)
+    lace_over_approx: LaceOverApproximation
+
+    def _id(self, label: Label) -> int:
+        return self.lace_over_approx.id(label)
+
+    def _is_endless_loop_pivot(self, label: Label) -> bool:
+        return self.lace_over_approx.is_endless_loop_pivot(label)
+
+    def _steps(self) -> Iterable[Step]:
+        return self.lace_over_approx.steps()
 
     def _label_name(self, label: Label) -> str:
-        lab_id = self.labels.id(label)
+        lab_id = self._id(label)
         return f"Lab{lab_id}"
+
+    def _ancestors(self, lab: Label) -> Iterable[Label]:
+        for step in self._steps():
+            if step.dir == Internal() and step.out_label == lab:
+                yield step.in_label
 
     def _create_label_node(self, graph: pydot.Dot, lab: Label):
         lab_name = self._label_name(lab)
@@ -51,7 +57,7 @@ class DependencyGraphBuilder:
         fjson = frame_to_json(f)
         tooltip = json.dumps(fjson, indent=2)
 
-        if self.labels.is_endless_loop_pivot(lab):
+        if self._is_endless_loop_pivot(lab):
             node = pydot.Node(lab_name, style="filled", tooltip=tooltip, label=f"Loop()", fillcolor="red")
             graph.add_node(node)
             return
@@ -85,39 +91,32 @@ class DependencyGraphBuilder:
     def _engine(self) -> str:
         return "dot"
 
-    def _continuity_pairs(self) -> Iterable[Pair]:
-        return (
-            p
-            for p in self.pairs
-            if (leader := p.leader()).frame.prev is not None
-            and (leader.frame.prev[0] == Internal() or leader.frame.prev[0] == p.dir())
-        )
+    def _dir_to_edge_label(self, dir: Dir) -> str:
+        match dir:
+            case Up():
+                return "U"
+            case Internal():
+                return "I"
+            case Down(j):
+                return f"D({j})"
 
-    def add_lace_internal_step_dependency(self, prev: Label, next: Label, graph: pydot.Dot):
-        self._create_label_node(graph, prev)
-        self._create_label_node(graph, next)
-        prev_name = self._label_name(prev)
-        next_name = self._label_name(next)
-        edge = pydot.Edge(prev_name, next_name, label="I", color="blue")
+    def add_lace_step_dependency(self, step: Step, graph: pydot.Dot):
+        in_label = step.in_label
+        out_label = step.out_label
+        self._create_label_node(graph, in_label)
+        self._create_label_node(graph, out_label)
+        in_label_name = self._label_name(in_label)
+        out_label_name = self._label_name(out_label)
+        edge_label = self._dir_to_edge_label(step.dir)
+        edge = pydot.Edge(in_label_name, out_label_name, label=edge_label, color="blue")
         graph.add_edge(edge)
 
-    def add_structural_internal_step_dependency(self, prev: Label, next: Label, graph: pydot.Dot):
-        self._create_label_node(graph, prev)
-        self._create_label_node(graph, next)
-        prev_name = self._label_name(prev)
-        next_name = self._label_name(next)
-        edge = pydot.Edge(prev_name, next_name, color="grey")
-        graph.add_edge(edge)
-
-    def add_external_step_dependency(self, pair: Pair, graph: pydot.Dot):
-        sigma = pair.follower()
-        tau = pair.leader()
-        self._create_label_node(graph, tau)
-        self._create_label_node(graph, sigma)
-        tau_name = self._label_name(tau)
-        sigma_name = self._label_name(sigma)
-        external_step_label = f"{f'D({pair.child_key})' if pair.dir() == Up() else 'U'}"
-        edge = pydot.Edge(sigma_name, tau_name, label=external_step_label, color="blue")
+    def add_structural_dependency(self, in_label: Label, out_label: Label, graph: pydot.Dot):
+        self._create_label_node(graph, in_label)
+        self._create_label_node(graph, out_label)
+        in_label_name = self._label_name(in_label)
+        out_label_name = self._label_name(out_label)
+        edge = pydot.Edge(in_label_name, out_label_name, color="grey")
         graph.add_edge(edge)
 
     def _make_graph(self, graph_name: str) -> pydot.Dot:
@@ -128,83 +127,48 @@ class DependencyGraphBuilder:
     def full_dependency_graph(self) -> pydot.Dot:
         graph = self._make_graph("full dependency graph")
 
-        for pair in self._continuity_pairs():
-            leader = pair.leader()
-            follower = pair.follower()
-            if leader.frame.prev is not None:
-                if leader.frame.prev[0] == Internal():
-                    for ancestor in self.labels.ancestors(leader):
-                        self.add_lace_internal_step_dependency(ancestor, leader, graph)
-                else:
-                    self.add_external_step_dependency(pair, graph)
-                    self.add_structural_internal_step_dependency(leader.origin, leader, graph)
+        for step in self._steps():
+            match step.dir:
+                case Internal():
+                    self.add_lace_step_dependency(step, graph)
+                case _:
+                    self.add_lace_step_dependency(step, graph)
+                    assert step.out_label.origin is not None
+                    self.add_structural_dependency(step.out_label.origin, step.out_label, graph)
 
         return graph
 
     def compressed_dependency_graph(self) -> pydot.Dot:
         graph = self._make_graph("compressed dependency graph")
 
-        for pair in self._continuity_pairs():
-            leader = pair.leader()
-            follower = pair.follower()
-            if pair.last_step_kind() == StepKind.EXTERNAL:
-                self.add_external_step_dependency(pair, graph)
-
-                match leader.frame.prev:
-                    case (_, _):
-                        self.add_structural_internal_step_dependency(leader.origin, leader, graph)
-                    case _:
-                        pass
-
-                match follower.frame.prev:
-                    case (Internal(), _):
-                        self.add_lace_internal_step_dependency(follower.origin, follower, graph)
-                    case (_, _):
-                        self.add_structural_internal_step_dependency(follower.origin, follower, graph)
-                    case _:
-                        pass
-            elif any(e in leader.frame.events for e in (Exit(), ERR(), OOM(), LOF())):
-                self.add_lace_internal_step_dependency(leader.origin, leader, graph)
+        for step in self._steps():
+            in_label = step.in_label
+            out_label = step.out_label
+            match step.dir:
+                case Up() | Down(_):
+                    self.add_lace_step_dependency(step, graph)
+                case Internal() if out_label.frame.events.intersection({Exit(), ERR(), OOM(), LOF()}):
+                    if out_label.origin is None:
+                        self._create_label_node(graph, out_label)
+                    else:
+                        compressed_step = replace(step, in_label=out_label.origin)
+                        self.add_lace_step_dependency(compressed_step, graph)
+                case _:
+                    pass
 
         return graph
 
     def internal_dependency_graph(self) -> pydot.Dot:
         graph = self._make_graph("internal dependency graph")
 
-        for label in self.labels:
-            match label.frame.prev:
-                case (Internal(), _):
-                    for ancestor in self.labels.ancestors(label):
-                        self.add_lace_internal_step_dependency(ancestor, label, graph)
-                case _ if label.origin is not None:
-                    self.add_structural_internal_step_dependency(label.origin, label, graph)
-                case _:
-                    pass
-
-        return graph
-
-    def compressed_internal_dependency_grpah(self) -> pydot.Dot:
-        graph = self._make_graph("compressed internal dependency graph")
-
-        for pair in self._continuity_pairs():
-            leader = pair.leader()
-            follower = pair.follower()
-            if pair.last_step_kind() == StepKind.EXTERNAL:
-                match leader.frame.prev:
-                    case (_, _):
-                        self.add_structural_internal_step_dependency(leader.origin, leader, graph)
-                    case _:
-                        pass
-
-                match follower.frame.prev:
-                    case (Internal(), _):
-                        self.add_lace_internal_step_dependency(follower.origin, follower, graph)
-                    case (_, _):
-                        self.add_structural_internal_step_dependency(follower.origin, follower, graph)
-                    case _:
-                        pass
-            elif any(e in leader.frame.events for e in (Exit(), ERR(), OOM(), LOF())):
-                self.add_lace_internal_step_dependency(leader.origin, leader, graph)
+        for step in self._steps():
+            in_label = step.in_label
+            out_label = step.out_label
+            if step.dir == Internal():
+                self.add_lace_step_dependency(step, graph)
+            else:
+                assert out_label.origin is not None
+                self.add_structural_dependency(out_label.origin, in_label, graph)
 
         return graph
 
@@ -216,5 +180,3 @@ class DependencyGraphBuilder:
                 return self.compressed_dependency_graph()
             case DependencyGraphKind.INTERNAL:
                 return self.internal_dependency_graph()
-            case DependencyGraphKind.COMPRESSED_INTERNAL:
-                return self.compressed_internal_dependency_grpah()

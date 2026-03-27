@@ -6,43 +6,31 @@ from typing import Iterable
 
 from frozendict import frozendict
 
-from treehornx.enum_labels.knitter.IKnitter import IKnitter
-from treehornx.enum_labels.knitter.KnitResult import ExternalStepResult, InternalStepResult, KnitResult, StepFailed
+from treehornx.enum_labels.core import Frame, FrameDescriptor, Label
+from treehornx.enum_labels.core.Dir import Internal
+from treehornx.enum_labels.core.Event import NOP, Here
 from treehornx.ir.expressions import Var
 from treehornx.ir.function import Function
 from treehornx.ir.instructions import *
 from treehornx.ir.sorts import Enum, Pointer, Struct
 
-from .core import Frame, FrameDescriptor, Label
-from .core.Dir import Down, Internal, Up
-from .core.Event import NOP, Here
 from .knitter.CompressedBoundedInternalChainKnitter import CompressedBoundedInternalChainKnitter
 from .knitter.CompressedUnboundedInternalChainKnitter import CompressedUnboundedInternalChainKnitter
+from .knitter.IKnitter import IKnitter
+from .knitter.KnitResult import ExternalStepResult, InternalStepResult, KnitResult, StepFailed
 from .knitter.Pair import LeadershipKind, Pair
-from .LabelDB import LabelDB
-from .PairDB import PairDB
-
-# logger.remove(0)
-# logger.add(sys.stdout, level=20)
+from .StatesDB import StatesDB
 
 
 @dataclass
-class LabelInfo:
-    id: int
-    ancestors: set[Label] = field(init=False, default_factory=set)
-    extensions: set[Label] = field(init=False, default_factory=set)
-
-
-@dataclass
-class FixPointEnumLabelGenerator:
+class EnumLabelGenerator:
     function: Function
     root: Var
     m: int
     n: int
     internal_chain_bound: int | None = None
     k: int = field(init=False)
-    pairs: PairDB = field(init=False, default_factory=PairDB)
-    labels: LabelDB = field(init=False, default_factory=LabelDB)
+    db: StatesDB = field(init=False, default_factory=StatesDB)
 
     def __post_init__(self):
         assert isinstance(self.root.sort, Pointer)
@@ -114,7 +102,7 @@ class FixPointEnumLabelGenerator:
                 enum_fields=enum_fields,
                 prev=None,
             )
-            yield self.labels.make(None, active_frame)
+            yield self.db.make_label(None, active_frame)
         inactive_frame = Frame(
             index=0,
             active=False,
@@ -127,7 +115,7 @@ class FixPointEnumLabelGenerator:
             enum_fields=enum_fields,
             prev=None,
         )
-        yield self.labels.make(None, inactive_frame)
+        yield self.db.make_label(None, inactive_frame)
 
     def start_labels(self) -> Iterable[Label]:
         for backbone_label in self.backbone_labels():
@@ -160,7 +148,7 @@ class FixPointEnumLabelGenerator:
                 else frozendict({key: False for key in self._children_keys}),
                 prev=(Internal(), 1),
             )
-            yield self.labels.make(backbone_label, second_frame)
+            yield self.db.make_label(backbone_label, second_frame)
 
     def initial_root_pairs(self) -> Iterable[Pair]:
         for parent, child, child_key in product(self.start_labels(), self.backbone_labels(), self._children_keys):
@@ -177,12 +165,12 @@ class FixPointEnumLabelGenerator:
                 yield pair
 
     def _add_ancestor(self, label: Label, ancestor: Label) -> None:
-        self.labels.add_ancestor(label, ancestor)
+        self.db.add_ancestor(label, ancestor)
 
     def _add_pair(self, pair: Pair) -> None:
-        self.pairs.add(pair)
-        self.labels.add(pair.leader())
-        self.labels.add(pair.follower())
+        self.db.add_pair(pair)
+        self.db.add_label(pair.leader())
+        self.db.add_label(pair.follower())
 
     def _initialize_pairs(self):
         for pair in self.initial_root_pairs():
@@ -192,11 +180,10 @@ class FixPointEnumLabelGenerator:
 
     def _make_knitter(self) -> IKnitter:
         def make_label(o: Label | None, f: Frame) -> Label:
-            return self.labels.make(o, f)
+            return self.db.make_label(o, f)
 
         def on_new_internal_step(ancestor_pair: Pair, lab_pair: Pair):
             self._add_ancestor(lab_pair.leader(), ancestor_pair.leader())
-            self._add_pair(lab_pair)
 
         def on_new_external_step(previous_pair: Pair, lab_pair: Pair):
             self._add_pair(lab_pair)
@@ -204,7 +191,7 @@ class FixPointEnumLabelGenerator:
         if self.internal_chain_bound is None:
 
             def on_endless_loop_detected(pivot: Pair):
-                self.labels.set_endless_loop_pivot(pivot.leader())
+                self.db.set_endless_loop_pivot(pivot.leader())
 
             knitter = CompressedUnboundedInternalChainKnitter(
                 self.function,
@@ -239,23 +226,20 @@ class FixPointEnumLabelGenerator:
 
         @cache
         def knit(pair: Pair) -> KnitResult:
-            if self.labels.id(pair.leader()) == 49:
-                pass
             return knitter.knit(pair)
 
         def is_continuos_pair(pair: Pair) -> bool:
             return knit(pair) != StepFailed()
 
         def qappend(pair: Pair):
-            if is_continuos_pair(pair):
-                queue.append(pair)
+            queue.append(pair)
 
         processed: set[Pair] = set()
 
         while queue:
             pair = queue.popleft()
 
-            if self.labels.is_endless_loop_pivot(pair.leader()):
+            if self.db.is_endless_loop_pivot(pair.leader()):
                 continue
 
             if pair in processed:
@@ -267,27 +251,30 @@ class FixPointEnumLabelGenerator:
 
             match knit_result:
                 case StepFailed():  # non continuos pair
-                    for extended_leader in self.labels.find_by_origin(pair.leader()):
+                    for extended_leader in self.db.get_connection_extensions(pair.leader()):
                         new_pair = pair.replace_leader(extended_leader)
                         self._add_pair(new_pair)
                         qappend(new_pair)
                 case InternalStepResult(chain_end_pairs):  # internal steps
                     for chain_end_pair in chain_end_pairs:
                         new_leader = chain_end_pair.leader()
-                        assert pair in set(self.pairs.find_by_leader(pair.leader()))
-                        for p in self.pairs.find_by_leader(pair.leader()):
+                        self.db.set_connection_label(new_leader)
+                        assert pair in set(self.db.find_pairs_by_leader(pair.leader()))
+                        for p in self.db.find_pairs_by_leader(pair.leader()):
                             parent = new_leader if p.leadership == LeadershipKind.PARENT else p.parent
                             child = new_leader if p.leadership == LeadershipKind.CHILD else p.child
                             leadership = p.leadership
                             child_key = p.child_key
                             new_p = Pair(parent, child, child_key, leadership)
+                            self._add_pair(new_p)
                             qappend(new_p)
                             self._add_pair(new_p)
                 case ExternalStepResult(pair=Pair(parent, child, child_key, leadership)):
                     qappend(knit_result.pair)
 
                     new_leader = parent if leadership == LeadershipKind.PARENT else child
-                    for p in self.pairs.find_by_leader(
+                    self.db.set_connection_label(new_leader)
+                    for p in self.db.find_pairs_by_leader(
                         pair.follower()
                     ):  # finding by follower because the leadership has been switched in the new pair
                         if (leadership != p.leadership or child_key != p.child_key) and not is_continuos_pair(p):

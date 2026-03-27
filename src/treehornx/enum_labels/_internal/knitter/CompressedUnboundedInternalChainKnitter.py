@@ -40,6 +40,7 @@ class CompressedUnboundedInternalChainKnitter(IKnitter):
         self._on_new_internal_step = on_new_internal_step
         self._on_new_external_step = on_new_external_step
         self._on_step_failed = on_step_failed
+        self._internal_steps_cache: dict[Label, InternalStepResult] = dict()
 
     def _knit_internal_steps_chain(
         self,
@@ -78,10 +79,14 @@ class CompressedUnboundedInternalChainKnitter(IKnitter):
 
     @override
     def knit(self, pair: Pair) -> KnitResult:
+        if pair.leader() in self._internal_steps_cache:
+            return self._internal_steps_cache[pair.leader()]
         knit_result = self._knitter.knit(pair)
         match knit_result:
             case InternalStepResult(ps):
-                return self._knit_internal_steps_chain(pair)
+                result = self._knit_internal_steps_chain(pair)
+                self._internal_steps_cache[pair.leader()] = result
+                return result
             case ExternalStepResult(p_):
                 self._on_new_external_step(pair, p_)
                 return knit_result

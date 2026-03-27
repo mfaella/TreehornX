@@ -2,8 +2,9 @@ C_SUBSET_DOC_LINK = "<link>"
 
 
 class CParserError(Exception):
-    def __init__(self, line: int, message: str):
-        super().__init__(f"line: {line} >>> {message}")
+    def __init__(self, line: int | None, message: str):
+        line_info = f"line {line} " if line is not None else ""
+        super().__init__(f"{line_info}>>> {message}")
 
 
 class UnsupportedFeatureError(CParserError):
