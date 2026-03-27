@@ -9,16 +9,26 @@ readme = { file = "README.md", content-type = "text/markdown" }
 keywords = ["programming languages", "program verification", "formal methods", "static analysis"]
 requires-python = ">=3.12"
 dependencies = [
+    # general purpose
     "frozendict",
-    "z3-solver",
+    # tui
+    "typer",
+    "rich",
+    "humanfriendly",
+    "types-humanfriendly",
+    # report generation
+    "pydot",
+    # frontend
     "pycparser",
-    "loguru",
-    "graphviz",
-    "attrs"
+    # sat
+    "z3-solver",
+    "networkx",
+    "types-networkx>=3.6.1.20260321"
 ]
 
 [dependency-groups]
 dev = [
+    "pyinstrument>=5.1.2",
     "ruff",
     "pylint",
     "pyright",
@@ -30,6 +40,9 @@ dev = [
     "sphinx-autodoc-typehints",
     "snakeviz>=2.2.2",
 ]
+
+[project.scripts]
+treehornx = "treehornx.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
