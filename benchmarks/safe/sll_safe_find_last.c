@@ -25,8 +25,7 @@ void sll_safe_find_last(struct Node *root) {
     if (curr) { //10
         v2 = curr->data;
         if (v1 != v2) { //12
-            curr = null;
-            curr = curr->next;
+            curr = null->next;
         }
     }
     return;

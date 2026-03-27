@@ -8,31 +8,31 @@ void bst_safe_insert(struct Node* root, int value) {
     struct Node* newNode;
     struct Node* parent;
     struct Node* current;
-    int temp_value;
+    int tmp_value;
 
-    current = root;
+    // function
+	current = root;
+	if (current) {
 
-    if (current) {
-        newNode = malloc(sizeof(struct Node));
-        newNode->value = value;
+		while (current) {
+			parent = current;
+			tmp_value = current->value;
+			if (value < tmp_value) {
+				current = current->left;
+			}
+			else {
+				current = current->right;
+			}
+		}
 
-        while (current) {
-            parent = current; //5
-            temp_value = current->value;
-            if (value < temp_value) { //7
-                current = current->left;
-            }
-            else {
-                current = current->right;
-            }
-        }
-
-        temp_value = parent->value; //10
-        if (value < temp_value) {
-            parent->left = newNode;
-        }
-        else {
-            parent->right = newNode;
-        }
-    }
+		tmp_value = parent->value;
+		newNode = malloc(sizeof(struct Node));
+		newNode->value = value;
+		if (value < tmp_value) {
+			parent->left = newNode;
+		}
+		else {
+			parent->right = newNode;
+		}
+	}
 }

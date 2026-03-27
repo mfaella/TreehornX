@@ -89,7 +89,7 @@ step_assign_nil(σ^a,τ^b,p))∧
 ((is_pfield_implicit(σ,a,pfield)∧σ^a.active_childindex(pfield))→  
 (σ^a.next=(index(pfield),b)∧advance_pc(σ^a,τ^b)∧  
 τ^b.event=⟨p:=here⟩∧  
-+r∈PVP/{p}⋀τ^b.isnil_r=σ^a.isnil_r∧τ^b.isnil_r=false
++r∈PVP/{p}⋀τ^b.isnil_r=σ^a.isnil_r∧τ^b.isnil_p=false
 default_avail,active,val,d,active_child​(σ^a,τ^b−1,τ^b)))∧  
 +(is_pfield_here(σ,a,pfield)→  //correzione della sezione precedente
 -r∈PVP,i∈\[2,n]⋀((is_pfield_ptr(σ,a,pfield,r,i)∧points_here(σ,i,r))→  //correzione della sezione precedente
