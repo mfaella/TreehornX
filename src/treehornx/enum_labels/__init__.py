@@ -1,14 +1,9 @@
 from dataclasses import dataclass
-from enum import Enum
-from functools import cached_property
 from typing import Iterable
-
-import networkx as nx
 
 from treehornx.enum_labels._internal.EnumLabelGenerator import EnumLabelGenerator
 from treehornx.enum_labels._internal.StatesDB import StatesDB
 from treehornx.enum_labels.core.Dir import Dir, Internal
-from treehornx.enum_labels.core.Event import Event
 from treehornx.enum_labels.core.Label import Label
 from treehornx.ir.expressions import Var
 from treehornx.ir.function import Function

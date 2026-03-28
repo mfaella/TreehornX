@@ -1,6 +1,4 @@
-from dataclasses import dataclass, field
-from email.charset import SHORTEST
-from enum import Enum
+from dataclasses import dataclass
 from functools import cached_property
 from typing import Callable, Iterable
 
@@ -10,7 +8,7 @@ import pysmt.typing as smtty
 from pysmt.fnode import FNode
 
 from treehornx.enum_labels import LaceOverApproximation, Step
-from treehornx.enum_labels.core import Label
+from treehornx.enum_labels.core.Label import Label
 from treehornx.enum_labels.utils import normalized_expr
 from treehornx.ir.expressions import (
     FALSE,

@@ -1,0 +1,55 @@
+ + Lab122 : {'frame': {'index': 1, 'active': False, 'pc': 108, 'upd': {'null_0': False, 'root_0': False, 'newNode_0': False,
+'tmp_0': False, 'current_0': False}, 'isnil': {'current_0': True, 'null_0': True, 'root_0': True, 'newNode_0': True,
+'tmp_0': True}, 'events': [], 'active_child': [{'key': 'right', 'value': False}, {'key': 'left', 'value': False}, {'key':
+'parent', 'value': False}], 'enum_vars': {'tmp_retpc_0': 'B2', 'current_isbst_0': 'FALSE', 'return_isbst_0': 'TRUE'},
+'enum_fields': {'isbstl': 'FALSE', 'isbstr': 'FALSE', 'retpc': 'B2', 'isbst': 'FALSE'}, 'prev': {'dir': {'type':
+'Internal'}, 'index': 1}}, 'origin': {'frame': {'index': 0, 'active': False, 'pc': 0, 'upd': {'null_0': False, 'root_0':
+False, 'newNode_0': False, 'tmp_0': False, 'current_0': False}, 'isnil': {'null_0': True, 'root_0': True, 'newNode_0': True,
+'tmp_0': True, 'current_0': True}, 'events': [], 'active_child': [{'key': 'right', 'value': True}, {'key': 'left', 'value':
+True}, {'key': 'parent', 'value': True}], 'enum_vars': {'tmp_retpc_0': 'B2', 'current_isbst_0': 'FALSE', 'return_isbst_0':
+'FALSE'}, 'enum_fields': {'isbstl': 'FALSE', 'isbstr': 'FALSE', 'retpc': 'B2', 'isbst': 'FALSE'}, 'prev': None}, 'origin':
+None}}
+ + Lab124 : {'frame': {'index': 1, 'active': False, 'pc': 109, 'upd': {'null_0': False, 'root_0': False, 'newNode_0': False,
+'tmp_0': False, 'current_0': False}, 'isnil': {'current_0': True, 'null_0': True, 'root_0': True, 'newNode_0': True,
+'tmp_0': True}, 'events': [{'type': 'Exit'}], 'active_child': [{'key': 'right', 'value': False}, {'key': 'left', 'value':
+False}, {'key': 'parent', 'value': False}], 'enum_vars': {'tmp_retpc_0': 'B2', 'current_isbst_0': 'FALSE', 'return_isbst_0':
+'TRUE'}, 'enum_fields': {'isbstl': 'FALSE', 'isbstr': 'FALSE', 'retpc': 'B2', 'isbst': 'FALSE'}, 'prev': {'dir': {'type':
+'Internal'}, 'index': 1}}, 'origin': {'frame': {'index': 0, 'active': False, 'pc': 0, 'upd': {'null_0': False, 'root_0':
+False, 'newNode_0': False, 'tmp_0': False, 'current_0': False}, 'isnil': {'null_0': True, 'root_0': True, 'newNode_0': True,
+'tmp_0': True, 'current_0': True}, 'events': [], 'active_child': [{'key': 'right', 'value': True}, {'key': 'left', 'value':
+True}, {'key': 'parent', 'value': True}], 'enum_vars': {'tmp_retpc_0': 'B2', 'current_isbst_0': 'FALSE', 'return_isbst_0':
+'FALSE'}, 'enum_fields': {'isbstl': 'FALSE', 'isbstr': 'FALSE', 'retpc': 'B2', 'isbst': 'FALSE'}, 'prev': None}, 'origin':
+None}}
+ + Lab123 : {'frame': {'index': 1, 'active': False, 'pc': 109, 'upd': {'null_0': False, 'root_0': False, 'newNode_0': False,
+'tmp_0': False, 'current_0': False}, 'isnil': {'current_0': True, 'null_0': True, 'root_0': True, 'newNode_0': True,
+'tmp_0': True}, 'events': [], 'active_child': [{'key': 'right', 'value': False}, {'key': 'left', 'value': False}, {'key':
+'parent', 'value': False}], 'enum_vars': {'tmp_retpc_0': 'B2', 'current_isbst_0': 'FALSE', 'return_isbst_0': 'TRUE'},
+'enum_fields': {'isbstl': 'FALSE', 'isbstr': 'FALSE', 'retpc': 'B2', 'isbst': 'FALSE'}, 'prev': {'dir': {'type':
+'Internal'}, 'index': 1}}, 'origin': {'frame': {'index': 0, 'active': False, 'pc': 0, 'upd': {'null_0': False, 'root_0':
+False, 'newNode_0': False, 'tmp_0': False, 'current_0': False}, 'isnil': {'null_0': True, 'root_0': True, 'newNode_0': True,
+'tmp_0': True, 'current_0': True}, 'events': [], 'active_child': [{'key': 'right', 'value': True}, {'key': 'left', 'value':
+True}, {'key': 'parent', 'value': True}], 'enum_vars': {'tmp_retpc_0': 'B2', 'current_isbst_0': 'FALSE', 'return_isbst_0':
+'FALSE'}, 'enum_fields': {'isbstl': 'FALSE', 'isbstr': 'FALSE', 'retpc': 'B2', 'isbst': 'FALSE'}, 'prev': None}, 'origin':
+None}}
+ + Lab121 : {'frame': {'index': 1, 'active': False, 'pc': 90, 'upd': {'null_0': False, 'root_0': False, 'newNode_0': False,
+'tmp_0': False, 'current_0': False}, 'isnil': {'current_0': True, 'null_0': True, 'root_0': True, 'newNode_0': True,
+'tmp_0': True}, 'events': [], 'active_child': [{'key': 'right', 'value': False}, {'key': 'left', 'value': False}, {'key':
+'parent', 'value': False}], 'enum_vars': {'tmp_retpc_0': 'B2', 'current_isbst_0': 'FALSE', 'return_isbst_0': 'TRUE'},
+'enum_fields': {'isbstl': 'FALSE', 'isbstr': 'FALSE', 'retpc': 'B2', 'isbst': 'FALSE'}, 'prev': {'dir': {'type':
+'Internal'}, 'index': 1}}, 'origin': {'frame': {'index': 0, 'active': False, 'pc': 0, 'upd': {'null_0': False, 'root_0':
+False, 'newNode_0': False, 'tmp_0': False, 'current_0': False}, 'isnil': {'null_0': True, 'root_0': True, 'newNode_0': True,
+'tmp_0': True, 'current_0': True}, 'events': [], 'active_child': [{'key': 'right', 'value': True}, {'key': 'left', 'value':
+True}, {'key': 'parent', 'value': True}], 'enum_vars': {'tmp_retpc_0': 'B2', 'current_isbst_0': 'FALSE', 'return_isbst_0':
+'FALSE'}, 'enum_fields': {'isbstl': 'FALSE', 'isbstr': 'FALSE', 'retpc': 'B2', 'isbst': 'FALSE'}, 'prev': None}, 'origin':
+None}}
+ + Lab120 : {'frame': {'index': 1, 'active': False, 'pc': 89, 'upd': {'null_0': False, 'root_0': False, 'newNode_0': False,
+'tmp_0': False, 'current_0': False}, 'isnil': {'current_0': True, 'null_0': True, 'root_0': True, 'newNode_0': True,
+'tmp_0': True}, 'events': [], 'active_child': [{'key': 'right', 'value': False}, {'key': 'left', 'value': False}, {'key':
+'parent', 'value': False}], 'enum_vars': {'tmp_retpc_0': 'B2', 'current_isbst_0': 'FALSE', 'return_isbst_0': 'TRUE'},
+'enum_fields': {'isbstl': 'FALSE', 'isbstr': 'FALSE', 'retpc': 'B2', 'isbst': 'FALSE'}, 'prev': {'dir': {'type':
+'Internal'}, 'index': 1}}, 'origin': {'frame': {'index': 0, 'active': False, 'pc': 0, 'upd': {'null_0': False, 'root_0':
+False, 'newNode_0': False, 'tmp_0': False, 'current_0': False}, 'isnil': {'null_0': True, 'root_0': True, 'newNode_0': True,
+'tmp_0': True, 'current_0': True}, 'events': [], 'active_child': [{'key': 'right', 'value': True}, {'key': 'left', 'value':
+True}, {'key': 'parent', 'value': True}], 'enum_vars': {'tmp_retpc_0': 'B2', 'current_isbst_0': 'FALSE', 'return_isbst_0':
+'FALSE'}, 'enum_fields': {'isbstl': 'FALSE', 'isbstr': 'FALSE', 'retpc': 'B2', 'isbst': 'FALSE'}, 'prev': None}, 'origin':
+None}}

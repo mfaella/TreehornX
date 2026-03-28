@@ -1,9 +1,7 @@
-from collections import defaultdict, deque
-from dataclasses import dataclass, field, replace
-from enum import Enum
+from collections import deque
+from dataclasses import dataclass, replace
 from typing import Callable, override
 
-from treehornx.enum_labels.core.Dir import Internal
 from treehornx.enum_labels.core.Event import LOF
 from treehornx.enum_labels.core.Frame import Frame
 from treehornx.enum_labels.core.Label import Label
@@ -13,12 +11,6 @@ from .CompressedKnitter import CompressedKnitter
 from .IKnitter import IKnitter
 from .KnitResult import ExternalStepResult, InternalStepResult, KnitResult, StepFailed
 from .Pair import Pair
-
-
-class _VertexColor(Enum):
-    WHITE = 1
-    GRAY = 2
-    BLACK = 3
 
 
 @dataclass(init=False)
@@ -82,7 +74,7 @@ class CompressedBoundedInternalChainKnitter(IKnitter):
     def knit(self, pair: Pair) -> KnitResult:
         knit_result = self._knitter.knit(pair)
         match knit_result:
-            case InternalStepResult(ps):
+            case InternalStepResult(_):
                 return self._knit_internal_steps_chain(pair)
             case ExternalStepResult(p_):
                 self._on_new_external_step(pair, p_)

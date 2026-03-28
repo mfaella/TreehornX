@@ -1,11 +1,11 @@
 from dataclasses import dataclass
-from typing import Callable, Iterable
+from typing import Callable, Iterable, cast
 
 from frozendict import frozendict
 
 import treehornx.ir.expressions as ire
-from treehornx.enum_labels.core import *
-from treehornx.enum_labels.core import Frame, Label
+from treehornx.enum_labels.core.Label import Label
+from treehornx.enum_labels.core.Frame import Frame, FrameDescriptor
 from treehornx.enum_labels.core.Dir import *
 from treehornx.enum_labels.core.Event import *
 from treehornx.enum_labels.utils import normalized_expr
@@ -666,7 +666,7 @@ class CompressedKnitter(IKnitter):
             for ptr_name in self.pointers():
                 framed.upd[ptr_name] = False
         else:
-            a_ = next(f.index for f in reversed(sigma[1:]) if f.prev[0] == pair.dir())
+            a_ = next(f.index for f in reversed(sigma[1:]) if f.prev and f.prev[0] == pair.dir())
             for ptr_name in self.pointers():
                 framed.upd[ptr_name] = not framed.isnil[ptr_name] and (
                     any(Here(ptr_name) in f.events for f in sigma[a_:]) or any(f.upd[ptr_name] for f in sigma[a_ + 1 :])
@@ -700,7 +700,7 @@ class CompressedKnitter(IKnitter):
 
             frame = Frame(
                 index=ancestor_frame.index,
-                active=framed.active,
+                active=cast(bool, framed.active),
                 pc=framed.pc,
                 isnil=frozendict(framed.isnil),
                 upd=frozendict(framed.upd),
@@ -718,7 +718,7 @@ class CompressedKnitter(IKnitter):
         else:
             frame = Frame(
                 index=ancestor_frame.index + 1,
-                active=framed.active,
+                active=cast(bool, framed.active),
                 pc=framed.pc,
                 isnil=frozendict(framed.isnil),
                 upd=frozendict(framed.upd),
@@ -737,7 +737,7 @@ class CompressedKnitter(IKnitter):
     def extend_pair_with_external_frame(self, pair: Pair, framed: FrameDescriptor) -> Pair:
         frame = Frame(
             index=pair.follower().frame.index + 1,
-            active=framed.active,
+            active=cast(bool, framed.active),
             pc=framed.pc,
             isnil=frozendict(framed.isnil),
             upd=frozendict(framed.upd),
@@ -755,6 +755,7 @@ class CompressedKnitter(IKnitter):
         new_pair = Pair(new_parent, new_child, pair.child_key, new_leadership)
         return new_pair
 
+    @override
     def knit(self, pair: Pair) -> KnitResult:
         # special cases
         if pair.leader().frame.index == 0:

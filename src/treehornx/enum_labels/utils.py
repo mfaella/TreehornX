@@ -17,31 +17,7 @@ from treehornx.ir.expressions import (
     Var,
     sort_of,
 )
-from treehornx.ir.sorts import Sort
-
-from .core import Frame
-
-
-def _normalize_if_negated_comparison(expr: Expr) -> Expr:
-    match expr:
-        case Not(neg_expr):
-            match neg_expr:
-                case Eq(lhs, rhs):
-                    return Ne(lhs, rhs)
-                case Ne(lhs, rhs):
-                    return Eq(lhs, rhs)
-                case Le(lhs, rhs):
-                    return Gt(lhs, rhs)
-                case Lt(lhs, rhs):
-                    return Ge(lhs, rhs)
-                case Ge(lhs, rhs):
-                    return Lt(lhs, rhs)
-                case Gt(lhs, rhs):
-                    return Le(lhs, rhs)
-                case _:
-                    return expr
-        case _:
-            return expr
+from treehornx.enum_labels.core.Frame import Frame
 
 
 def normalized_expr(expr: Expr, f_prev: Frame) -> Expr:  # noqa: PLR0915

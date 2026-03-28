@@ -1,9 +1,7 @@
 from __future__ import annotations
 
-from collections import defaultdict
 from dataclasses import dataclass, field
-from itertools import count
-from typing import Callable, Iterable, override
+from typing import Iterable
 
 from treehornx.enum_labels._internal.knitter.Pair import LeadershipKind, Pair
 from treehornx.enum_labels.core.Frame import Frame

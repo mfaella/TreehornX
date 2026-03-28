@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from functools import cached_property
 from itertools import islice
 from typing import Iterable, cast, overload, override
 

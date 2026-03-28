@@ -1,9 +1,8 @@
-from collections import defaultdict, deque
-from dataclasses import dataclass, field, replace
+from collections import defaultdict
+from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, override
 
-from treehornx.enum_labels.core.Dir import Internal
 from treehornx.enum_labels.core.Frame import Frame
 from treehornx.enum_labels.core.Label import Label
 from treehornx.ir.function import Function
@@ -83,7 +82,7 @@ class CompressedUnboundedInternalChainKnitter(IKnitter):
             return self._internal_steps_cache[pair.leader()]
         knit_result = self._knitter.knit(pair)
         match knit_result:
-            case InternalStepResult(ps):
+            case InternalStepResult(_):
                 result = self._knit_internal_steps_chain(pair)
                 self._internal_steps_cache[pair.leader()] = result
                 return result

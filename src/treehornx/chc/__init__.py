@@ -1,13 +1,11 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
-from typing import Iterable, TextIO
 
 from pychc.chc_system import CHCSystem
 from pysmt import logics
 
-from treehornx.chc._internal.CHCFactory import LabFactory
-from treehornx.chc._internal.smtlib import assert_, decl_fun
+from treehornx.chc._internal.LabFactory import LabFactory
 from treehornx.enum_labels import LaceOverApproximation
 from treehornx.enum_labels.core.Dir import Down, Internal, Up
 from treehornx.enum_labels.core.Event import ERR, LOF, OOM

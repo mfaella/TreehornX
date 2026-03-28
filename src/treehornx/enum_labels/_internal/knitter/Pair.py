@@ -5,7 +5,6 @@ from enum import Enum
 
 from treehornx.enum_labels._internal.knitter.StepKind import StepKind
 from treehornx.enum_labels.core.Dir import Dir, Down, Internal, Up
-from treehornx.enum_labels.core.Frame import Frame
 from treehornx.enum_labels.core.Label import Label
 
 

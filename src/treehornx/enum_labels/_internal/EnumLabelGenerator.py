@@ -6,7 +6,8 @@ from typing import Iterable
 
 from frozendict import frozendict
 
-from treehornx.enum_labels.core import Frame, FrameDescriptor, Label
+from treehornx.enum_labels.core.Frame import Frame, FrameDescriptor
+from treehornx.enum_labels.core.Label import Label
 from treehornx.enum_labels.core.Dir import Internal
 from treehornx.enum_labels.core.Event import NOP, Here
 from treehornx.ir.expressions import Var
@@ -85,8 +86,8 @@ class EnumLabelGenerator:
         # enum_values_product = self.enums_products(self.enum_vars())
         # enum_fields_product = self.enums_products(self.enum_fields())
         # for enum_values, enum_fields in product(enum_values_product, enum_fields_product):
-        enum_values = frozendict({v.name: tuple(v.sort.flags)[0] for v in self._enum_vars})
-        enum_fields = frozendict({f.name: tuple(f.sort.flags)[0] for f in self._enum_fields})
+        enum_values: frozendict[str, str] = frozendict({v.name: tuple(v.sort.flags)[0] for v in self._enum_vars})
+        enum_fields: frozendict[str, str] = frozendict({f.name: tuple(f.sort.flags)[0] for f in self._enum_fields})
         for active_child in self.active_child_products():
             if active_child.get("parent", False):
                 continue
