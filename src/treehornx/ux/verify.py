@@ -60,8 +60,8 @@ def handle_smt2_scripts_creation(
     for exit_code in exit_codes:
 
         def display_smt2_script_creation_progress(console: Console) -> None:
-            with open(f"{function.name}_{exit_code.name}.smt2", "w") as f:
-                _, elapsed_time = take_time(lambda: script_builder.dump(f, exit_code))
+            file_path = f"{function.name}_{exit_code.name}.smt2"
+            _, elapsed_time = take_time(lambda: script_builder.dump(file_path, exit_code))
             console.print(f"SMT2 script for {exit_code.name} created in {format_timespan(elapsed_time)}.")
 
         progress(f"Creating SMT2 script for {exit_code.name}", display_smt2_script_creation_progress)

@@ -21,7 +21,7 @@ dependencies = [
     # frontend
     "pycparser",
     # sat
-    "z3-solver",
+    "pychc @ git+https://github.com/nicola-gentile/pychc.git@build-system",
     "networkx",
     "types-networkx>=3.6.1.20260321"
 ]
@@ -97,6 +97,7 @@ group_by_package = true
 color_output = true
 
 [tool.pyright]
+stubPath = "typings"
 include = ["src", "tests"]
 pythonVersion = "3.12"
 extraPaths = ["src"]

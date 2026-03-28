@@ -1,8 +1,12 @@
 from dataclasses import dataclass, field
 from enum import Enum
+from pathlib import Path
 from typing import Iterable, TextIO
 
-from treehornx.chc._internal.CHCFactory import CHCFactory
+from pychc.chc_system import CHCSystem
+from pysmt import logics
+
+from treehornx.chc._internal.CHCFactory import LabFactory
 from treehornx.chc._internal.smtlib import assert_, decl_fun
 from treehornx.enum_labels import LaceOverApproximation
 from treehornx.enum_labels.core.Dir import Down, Internal, Up
@@ -33,25 +37,26 @@ class SMT2ScriptPrinter:
             case ExitCodeKind.LABEL_OVERFLOW:
                 return LOF() in lab.frame.events
 
-    def script_lines(self, exit_code: ExitCodeKind) -> Iterable[str]:
-        factory = CHCFactory(self.function, self.tree_node_sort, self.lace_over_approx)
+    def dump(
+        self,
+        file_path: str | Path,
+        exit_code: ExitCodeKind,
+    ):
+        factory = LabFactory(self.function, self.tree_node_sort, self.lace_over_approx)
 
-        yield "(set-logic HORN)"
+        H = CHCSystem(logic=logics.QF_UFLIA) # noqa: N806
 
         for lab in self.lace_over_approx.labels():
-            name, return_sort, args_sorts = factory.predicate(lab)
-            decl = decl_fun(name, return_sort, args_sorts)
-            yield decl
+            predicate = factory.predicate(lab)
+            H.add_predicate(predicate)
 
         for lab in self.lace_over_approx.backbone_labels():
             chc = factory.chc_I(lab)
-            assertion = assert_(chc)
-            yield assertion
+            H.add_clause(chc)
 
         for lab in self.lace_over_approx.start_labels():
             chc = factory.chc_II(lab)
-            assertion = assert_(chc)
-            yield assertion
+            H.add_clause(chc)
 
         for step in self.lace_over_approx.steps():
             match step.dir:
@@ -61,31 +66,11 @@ class SMT2ScriptPrinter:
                     chc = factory.chc_IV(step)
                 case Up():
                     chc = factory.chc_V(step)
-            assertion = assert_(chc)
-            yield assertion
+            H.add_clause(chc)
 
         for lab in self.lace_over_approx.labels():
             if self._query_required(lab, exit_code):
                 chc = factory.query(lab)
-                assertion = assert_(chc)
-                yield assertion
+                H.add_clause(chc)
 
-        yield "(check-sat)"
-        yield "(exit)"
-
-    def dump(
-        self,
-        file: TextIO,
-        exit_code: ExitCodeKind,
-    ):
-        lines_iter = self.script_lines(exit_code)
-        for line in lines_iter:
-            file.write(line + "\n")
-
-    def dump_to_file(
-        self,
-        file_path: str,
-        exit_code: ExitCodeKind,
-    ):
-        with open(file_path, "w") as f:
-            self.dump(f, exit_code)
+        H.serialize(Path(file_path))
