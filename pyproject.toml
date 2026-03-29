@@ -18,8 +18,9 @@ dependencies = [
     "types-humanfriendly",
     # report generation
     "pydot",
-    # frontend
+    # parsing
     "pycparser",
+    "antlr4-python3-runtime",
     # sat
     "pychc @ git+https://github.com/nicola-gentile/pychc.git@build-system",
     "networkx",
@@ -39,6 +40,7 @@ dev = [
     "sphinx-rtd-theme",
     "sphinx-autodoc-typehints",
     "snakeviz>=2.2.2",
+    "antlr4-tools"
 ]
 
 [project.scripts]
@@ -99,6 +101,7 @@ color_output = true
 [tool.pyright]
 stubPath = "typings"
 include = ["src", "tests"]
+exclude = ["src/treehornx/chc/pplang"]
 pythonVersion = "3.12"
 extraPaths = ["src"]
 typeCheckingMode = "strict"
@@ -155,6 +158,7 @@ reportInvalidStubStatement = true
 reportInvalidStringEscapeSequence = true
 
 [tool.taskipy.tasks]
+generate-pplang = "uv run antlr4 -Dlanguage=Python3 -visitor -no-listener -o src/treehornx/chc/pplang/ grammar/PrePostLang.g4"
 unit-test = "pytest"
 coverage = "coverage run -m pytest --cov=src/treehornx --cov-report=term-missing --cov-report=html --cov-fail-under=85 --cov-branch tests/unit"
 format = "ruff format && isort . "
