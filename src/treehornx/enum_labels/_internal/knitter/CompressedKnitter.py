@@ -4,10 +4,10 @@ from typing import Callable, Iterable, cast
 from frozendict import frozendict
 
 import treehornx.ir.expressions as ire
-from treehornx.enum_labels.core.Label import Label
-from treehornx.enum_labels.core.Frame import Frame, FrameDescriptor
 from treehornx.enum_labels.core.Dir import *
 from treehornx.enum_labels.core.Event import *
+from treehornx.enum_labels.core.Frame import Frame, FrameDescriptor
+from treehornx.enum_labels.core.Label import Label
 from treehornx.enum_labels.utils import normalized_expr
 from treehornx.ir.function import Function
 from treehornx.ir.instructions import *
@@ -328,7 +328,7 @@ class CompressedKnitter(IKnitter):
         exp = normalized_expr(exp, f1)
         if isinstance(exp, ire.EnumConst):
             assert isinstance(exp, ire.EnumConst)
-            f2.enum_values[d.name] = exp.value
+            f2.enum_values[d.name] = exp.variant
             return f2, None
         elif isinstance(exp, ire.Var) and sort_of(exp).is_enum():
             flag_name = f1.enum_vars[exp.name]

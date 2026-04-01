@@ -42,7 +42,7 @@ class SMT2ScriptPrinter:
     ):
         factory = LabFactory(self.function, self.tree_node_sort, self.lace_over_approx)
 
-        H = CHCSystem(logic=logics.QF_UFLIA) # noqa: N806
+        H = CHCSystem(logic=logics.AUTO)  # noqa: N806
 
         for lab in self.lace_over_approx.labels():
             predicate = factory.predicate(lab)

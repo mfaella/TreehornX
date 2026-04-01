@@ -1,5 +1,2 @@
-simplify and precisely define IR
-remove base from FrameBuilder and add check for fields integrity
-enum fields and enum vars default value
-
-sll_safe_insert_sorted.c: 2557/3710 sono coppie eliminabili
+Enforce ir-expression consistency into the types annotations
+Map enumerated values as enum-const instead of strings.

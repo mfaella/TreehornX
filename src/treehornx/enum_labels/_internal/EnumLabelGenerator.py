@@ -6,10 +6,10 @@ from typing import Iterable
 
 from frozendict import frozendict
 
-from treehornx.enum_labels.core.Frame import Frame, FrameDescriptor
-from treehornx.enum_labels.core.Label import Label
 from treehornx.enum_labels.core.Dir import Internal
 from treehornx.enum_labels.core.Event import NOP, Here
+from treehornx.enum_labels.core.Frame import Frame, FrameDescriptor
+from treehornx.enum_labels.core.Label import Label
 from treehornx.ir.expressions import Var
 from treehornx.ir.function import Function
 from treehornx.ir.instructions import *

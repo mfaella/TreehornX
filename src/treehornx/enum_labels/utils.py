@@ -1,3 +1,4 @@
+from treehornx.enum_labels.core.Frame import Frame
 from treehornx.ir.expressions import (
     FALSE,
     TRUE,
@@ -17,7 +18,6 @@ from treehornx.ir.expressions import (
     Var,
     sort_of,
 )
-from treehornx.enum_labels.core.Frame import Frame
 
 
 def normalized_expr(expr: Expr, f_prev: Frame) -> Expr:  # noqa: PLR0915

@@ -45,7 +45,7 @@ class ExprVisitor(c_ast.NodeVisitor):
     def visit_ID(self, node: c_ast.ID) -> Var | EnumConst:
         for enum in self.enums:
             if node.name in enum.flags:
-                return EnumConst(sort=enum, value=node.name)
+                return EnumConst(sort=enum, variant=node.name)
 
         if node.name == "true":
             return TRUE
