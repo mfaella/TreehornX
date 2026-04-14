@@ -1,4 +1,6 @@
+from treehornx.enum_labels.core.Dir import Internal
 from treehornx.enum_labels.core.Frame import Frame
+from treehornx.enum_labels.core.Label import Label
 from treehornx.ir.expressions import (
     FALSE,
     TRUE,

@@ -269,7 +269,6 @@ class EnumLabelGenerator:
                             new_p = Pair(parent, child, child_key, leadership)
                             self._add_pair(new_p)
                             qappend(new_p)
-                            self._add_pair(new_p)
                 case ExternalStepResult(pair=Pair(parent, child, child_key, leadership)):
                     qappend(knit_result.pair)
 

@@ -238,7 +238,7 @@ def FALSE() -> FNode:
     """
     ...
 
-def And(*args: Union[FNode, Iterable[FNode]]) -> FNode:
+def And(*args: FNode) -> FNode:
     r""".. math:: \varphi_0 \land \cdots \land \varphi_n"""
     ...
 

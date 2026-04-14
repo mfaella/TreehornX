@@ -3,7 +3,7 @@ from typing import Iterable
 import pydot
 from humanfriendly import format_timespan
 
-from treehornx.chc import ExitCodeKind
+from treehornx.chc.core import ExitCodeKind
 from treehornx.report.visualization import DependencyGraphBuilder, DependencyGraphKind
 from treehornx.ux.tui import console, critical, fail, info, progress, success, warning
 from treehornx.ux.utils import take_time

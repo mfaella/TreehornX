@@ -48,7 +48,7 @@ class FNode:
         """Return the set of atoms appearing in the formula."""
         ...
 
-    def simplify(self):
+    def simplify(self) -> FNode:
         """Return a simplified version of the formula."""
         ...
 

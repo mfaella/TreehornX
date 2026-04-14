@@ -5,7 +5,7 @@ from typing import Iterable
 
 import pydot
 
-from treehornx.enum_labels import LaceOverApproximation, Step
+from treehornx.enum_labels import KnittedTrees, Step
 from treehornx.enum_labels.core.Dir import Dir, Down, Internal, Up
 from treehornx.enum_labels.core.Event import ERR, LOF, OOM, Exit
 from treehornx.enum_labels.core.Label import Label
@@ -29,7 +29,7 @@ class DependencyGraphInfo:
 @dataclass
 class DependencyGraphBuilder:
     function: Function
-    lace_over_approx: LaceOverApproximation
+    lace_over_approx: KnittedTrees
 
     def _id(self, label: Label) -> int:
         return self.lace_over_approx.id(label)

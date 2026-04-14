@@ -24,7 +24,8 @@ dependencies = [
     # sat
     "pychc @ git+https://github.com/nicola-gentile/pychc.git@build-system",
     "networkx",
-    "types-networkx>=3.6.1.20260321"
+    "types-networkx>=3.6.1.20260321",
+    "z3-solver",
 ]
 
 [dependency-groups]

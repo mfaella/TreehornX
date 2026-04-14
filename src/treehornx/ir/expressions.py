@@ -70,26 +70,10 @@ class EnumConst:
     variant: str
     value: int = field(init=False)
 
-    _pool: ClassVar[dict[EnumConst, EnumConst]] = {}
-
-    def __new__(cls, sort: Enum, variant: str) -> EnumConst:
-        """Create or retrieve an interned EnumConst instance.
-
-        Args:
-            sort: The sort of the enumeration.
-            value: The value of the enumeration.
-        """
-        instance = object.__new__(cls)
-        object.__setattr__(instance, "sort", sort)
-        object.__setattr__(instance, "variant", variant)
-        object.__setattr__(instance, "variant", sort.flags[variant])
-        if instance not in cls._pool:
-            cls._pool[instance] = instance
-        return cls._pool[instance]
-
     def __post_init__(self):
         if not self.sort.exists(self.variant):
             raise ValueError(f"value '{self.variant}' not in enum sort {self.sort}")
+        object.__setattr__(self, "value", self.sort.flags[self.variant])
 
     def __deepcopy__(self, _):
         # EnumConst instances are immutable and interned, so we can return the same instance

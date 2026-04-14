@@ -431,8 +431,8 @@ class CompressedKnitter(IKnitter):
                     tau_b = FrameDescriptor()
                     tau_b = self.advance_pc(sigma.frame, tau_b)
                     match exp:
-                        case ire.EnumConst(value=value):
-                            tau_b.enum_fields[pfield] = value
+                        case ire.EnumConst(variant=variant, value=_):
+                            tau_b.enum_fields[pfield] = variant
                         case ire.Var(name=name):
                             flag_name = sigma.frame.enum_fields[name]
                             tau_b.enum_fields[pfield] = flag_name

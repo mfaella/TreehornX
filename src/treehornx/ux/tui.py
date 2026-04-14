@@ -1,6 +1,5 @@
 from typing import Callable, override
 
-import typer
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, Task, TextColumn, TimeElapsedColumn
 from rich.text import Text
