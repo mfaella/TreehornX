@@ -32,7 +32,7 @@ class KnittedTrees:
         labels: Iterable[Label],
         endless_loop_pivots: Iterable[Label],
         steps: Iterable[Step],
-        pairs: Iterable[tuple[Label, Label, int|str]],
+        pairs: Iterable[tuple[Label, Label, int | str]],
     ):
         self.k = k
         self.m = m
@@ -70,14 +70,14 @@ class KnittedTrees:
                 if p != self._root_name and not isnil:
                     return False
 
-            for j in range(self.k, self.k+self.m):
+            for j in range(self.k, self.k + self.m):
                 if lab[1].active_child[j]:
                     return False
         else:
             if lab[1].events != frozenset({}):
                 return False
             if any(not isnil for isnil in lab[1].isnil.values()):
-               return False
+                return False
 
             if any(active_child for active_child in lab[1].active_child.values()):
                 return False
@@ -105,12 +105,17 @@ class KnittedTrees:
     def is_endless_loop_pivot(self, lab: Label) -> bool:
         return lab in self._endless_loop_pivots
 
-    def pairs_by_parent_and_child_key(self, parent: Label, child_key: int | str) -> Iterable[tuple[Label, Label, int|str]]:
-        return filter(lambda p: p[0] == parent and p[2] == child_key, self._pairs)
+    def pairs_by_parent_and_child_key(
+        self, parent: Label, child_key: int | str
+    ) -> Iterable[tuple[Label, Label, int | str]]:
+        return filter(lambda p: p[0] == parent and p[2] == child_key, self.pairs())
 
     @cached_property
     def child_keys(self) -> set[int | str]:
         return set(p[2] for p in self._pairs)
+
+    def pairs(self) -> Iterable[tuple[Label, Label, int | str]]:
+        return iter(self._pairs)
 
 
 def _get_steps(states: StatesDB) -> Iterable[Step]:

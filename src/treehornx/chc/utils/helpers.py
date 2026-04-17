@@ -1,6 +1,5 @@
-
-from pysmt.fnode import FNode
 import pysmt.shortcuts as smt
+from pysmt.fnode import FNode
 
 from treehornx.chc.core import ExitCodeKind
 from treehornx.enum_labels.core.Event import ERR, LOF, OOM, Exit
@@ -16,3 +15,7 @@ def label_exit(label: Label, exit_codes: set[ExitCodeKind]) -> FNode:
     }
     exit_events = {m[code] for code in exit_codes}
     return smt.Bool(bool(label.frame.events.intersection(exit_events)))
+
+
+def end_of_lace(label: Label) -> bool:
+    return bool(label.frame.events.intersection({ERR(), LOF(), OOM(), Exit()}))

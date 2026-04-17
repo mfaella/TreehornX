@@ -1,5 +1,6 @@
 from enum import Enum
 
+
 class ExitCodeKind(Enum):
     ERR = 1
     OOM = 2

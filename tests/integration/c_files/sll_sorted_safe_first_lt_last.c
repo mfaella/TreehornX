@@ -4,7 +4,7 @@ struct Node {
     struct Node *next;
 };
 
-void sll_sorted_unsafe_first_lt_last(struct Node *root) {
+void sll_sorted_first_lt_last(struct Node *root) {
     struct Node *tmp;
     int first_data;
     int last_data;
@@ -21,7 +21,7 @@ void sll_sorted_unsafe_first_lt_last(struct Node *root) {
         root = root->next;
     }
     last_data = tmp->data;
-    if (first_data < last_data) {
+    if (first_data >= last_data) {
         first_data = root->data;
     }
 }

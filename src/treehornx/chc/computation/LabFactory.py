@@ -7,8 +7,9 @@ import pysmt.shortcuts as smt
 import pysmt.typing as smtty
 from pysmt.fnode import FNode
 
-from treehornx.enum_labels import KnittedTrees, Step
-from treehornx.enum_labels.core.Dir import Dir, Down, Up
+from treehornx.chc.utils import CHCFragmentFactory
+from treehornx.enum_labels import Step
+from treehornx.enum_labels.core.Dir import Down, Up
 from treehornx.enum_labels.core.Label import Label
 from treehornx.enum_labels.utils import normalized_expr
 from treehornx.ir.expressions import (
@@ -45,65 +46,19 @@ from treehornx.ir.sorts import BOOL, INT, REAL, Sort, Struct
 @dataclass
 class LabFactory:
     function: Function
-    tree_node_sort: Struct
-    trees: KnittedTrees
+    fragment_factory: CHCFragmentFactory
 
-    @cached_property
-    def ir_type_to_smt2_sort(self) -> dict[Sort, smtty.PySMTType]:
-        return {INT: smtty.INT, REAL: smtty.REAL}
+    def _data_field(self, name: str) -> Var:
+        return next(field for field in self.fragment_factory.data_fields if field.name == name)
 
-    def _data_variables(self) -> Iterable[Var]:
-        return (v for v in self.function.vars if not (v.sort.is_enum() or v.sort.is_ptr()))
-
-    def _data_fields(self) -> Iterable[Var]:
-        return (v for v in self.tree_node_sort.fields.values() if not (v.sort.is_enum() or v.sort.is_ptr()))
-
-    def _id(self, lab: Label) -> int:
-        return self.trees.id(lab)
-
-    def _symbol(self, var: Var, lab: Label, prefix: str = "") -> FNode:
-        symbol_name = f"{prefix}{self._id(lab)}_{var.name}"
-        symbol_type = self.ir_type_to_smt2_sort[var.sort]
-        return smt.Symbol(symbol_name, symbol_type)
-
-    def _var_symbol(self, var: Var, lab: Label, prefix: str = "") -> FNode:
-        return self._symbol(var, lab, f"{prefix}v")
-
-    def _field_symbol(self, field: Var, lab: Label, prefix: str = "") -> FNode:
-        return self._symbol(field, lab, f"{prefix}f")
-
-    def last_frame_field_symbols(self, lab: Label, prefix: str = "") -> Iterable[FNode]:
-        for field in self._data_fields():
-            yield self._field_symbol(field, lab, prefix)
-
-    def last_frame_var_symbols(self, lab: Label, prefix: str = "") -> Iterable[FNode]:
-        for var in self._data_variables():
-            yield self._var_symbol(var, lab, prefix)
-
-    def last_frame_symbols(self, lab: Label, prefix: str = "") -> Iterable[FNode]:
-        yield from self.last_frame_var_symbols(lab, prefix)
-        yield from self.last_frame_field_symbols(lab, prefix)
-
-    def label_vars_symbols(self, lab: Label) -> Iterable[FNode]:
-        for origin in lab.iter_origins():
-            yield from self.last_frame_var_symbols(origin)
-
-    def label_field_symbols(self, lab: Label) -> Iterable[FNode]:
-        for origin in lab.iter_origins():
-            yield from self.last_frame_field_symbols(origin)
-
-    def label_bounded_symbols(self, lab: Label, prefix: str = "") -> Iterable[FNode]:
-        for origin in lab.iter_origins():
-            yield from self.last_frame_symbols(origin, prefix)
+    def _data_variable(self, name: str) -> Var:
+        return next(var for var in self.fragment_factory.data_variables if var.name == name)
 
     def predicate(self, lab: Label) -> FNode:
-        bounded_variables = self.label_bounded_symbols(lab)
-        return chc.Predicate(f"Lab{self._id(lab)}", [var.get_type() for var in bounded_variables])
+        return self.fragment_factory.predicate("Lab", lab)
 
     def apply(self, lab: Label, variables_prefix: str = "") -> FNode:
-        bounded_variables = self.label_bounded_symbols(lab, variables_prefix)
-        predicate = self.predicate(lab)
-        return chc.Apply(predicate, list(bounded_variables))
+        return self.fragment_factory.apply("Lab", lab, variables_prefix=variables_prefix)
 
     def fact(self, lab: Label) -> FNode:
         predicate_application = self.apply(lab)
@@ -113,11 +68,7 @@ class LabFactory:
         return self.fact(lab)
 
     def chc_II(self, lab: Label) -> FNode:  # noqa: N802
-        if len(lab) != 2:
-            raise ValueError("chc_II should only be called on start labels, which should have exactly 2 components.")
-        if not self.trees.is_start_label(lab):
-            raise ValueError("chc_II should only be called on start labels.")
-        constraints = list(self._internal_equality_constraints(lab.origin_at(0), lab))
+        constraints = list(self._internal_equality_constraints(lab.origin_at(0), lab.origin_at(1)))
         body = smt.And(*constraints)
         head = self.apply(lab)
         formula = chc.Clause(body, head)
@@ -126,7 +77,10 @@ class LabFactory:
     def _internal_equality_constraints(
         self, inlab: Label, outlab: Label, exclude_symbols: set[FNode] = set()
     ) -> Iterable[FNode]:
-        for left, right in zip(self.last_frame_symbols(inlab), self.last_frame_symbols(outlab)):
+        for left, right in zip(
+            self.fragment_factory.last_frame_symbols(inlab),
+            self.fragment_factory.last_frame_symbols(outlab)
+        ):
             if left not in exclude_symbols and right not in exclude_symbols:
                 yield smt.Equals(left, right)
 
@@ -152,10 +106,10 @@ class LabFactory:
         }
         match expr:
             case Var(name, _):
-                return self._symbol(expr, inlab, prefix="v")
+                return self.fragment_factory.var_symbol(expr, inlab)
             case Field(_, name):
-                var = self.tree_node_sort.fields[name]
-                return self._symbol(var, inlab, prefix="f")
+                field = self._data_field(expr.name)
+                return self.fragment_factory.field_symbol(field, inlab)
             case int():
                 return smt.Int(expr)
             case float():
@@ -203,14 +157,15 @@ class LabFactory:
             case VarAssignExpr(var, expr):
                 expr = normalized_expr(expr, inlab.frame)
                 if isinstance(expr, Field):
-                    field_var = self.tree_node_sort.fields[expr.name]
-                    expr_smt = self._symbol(field_var, inlab, prefix="f")
+                    field_var = self._data_field(expr.name)
+                    expr_smt = self.fragment_factory.field_symbol(field_var, inlab)
                 else:
                     expr_smt = self._expr_to_smt(expr, inlab)
-                var_smt = self._symbol(var, outlab, prefix="v")
+                var_smt = self.fragment_factory.var_symbol(var, outlab)
                 constraints.append(smt.Equals(var_smt, expr_smt))
                 constraints.extend(
-                    constraint for constraint in self._internal_equality_constraints(inlab, outlab, exclude_symbols={var_smt})
+                    constraint
+                    for constraint in self._internal_equality_constraints(inlab, outlab, exclude_symbols={var_smt})
                 )
             case FieldAssignExpr(field, expr) if sort_of(field) == BOOL:
                 if outlab.frame.enum_fields[field.name] == "FALSE":
@@ -220,16 +175,15 @@ class LabFactory:
                     expr_smt = self._expr_to_smt(expr, inlab)
                     constraints.append(expr_smt)
                 constraints.extend(self._internal_equality_constraints(inlab, outlab))
-            case FieldAssignExpr(field, expr) if sort_of(field).is_enum():
-                pass
-            case FieldAssignExpr(field, expr):
-                field_var = self.tree_node_sort.fields[field.name]
-                field_smt = self._symbol(field_var, outlab, prefix="f")
+            case FieldAssignExpr(field, expr) if not sort_of(field).is_enum():
+                field_var = self._data_field(field.name)
+                field_smt = self.fragment_factory.field_symbol(field_var, outlab)
                 expr = normalized_expr(expr, inlab.frame)
                 expr_smt = self._expr_to_smt(expr, inlab)
                 constraints.append(smt.Equals(field_smt, expr_smt))
                 constraints.extend(
-                    constraint for constraint in self._internal_equality_constraints(inlab, outlab, exclude_symbols={field_smt})
+                    constraint
+                    for constraint in self._internal_equality_constraints(inlab, outlab, exclude_symbols={field_smt})
                 )
             case _:
                 constraints.extend(self._internal_equality_constraints(inlab, outlab))
@@ -242,20 +196,6 @@ class LabFactory:
         formula = chc.Clause(body, head)
         return formula
 
-    def cross_data_constraints(self, parent: Label, child: Label, child_key: str|int, parent_variable_prefix: str = "", child_variable_prefix: str = "") -> Iterable[FNode]:
-        if parent.frame.prev is None or child.frame.prev is None:
-            return iter(())
-        for outlab in parent.iter_origins():
-            if outlab.frame.prev and outlab.frame.prev[0] == Down(child_key):
-                inlab = child.origin_at(outlab.frame.prev[1])
-                for left, right in zip(self.last_frame_var_symbols(inlab, prefix=child_variable_prefix), self.last_frame_var_symbols(outlab, prefix=parent_variable_prefix)):
-                    yield smt.Equals(left, right)
-        for outlab in child.iter_origins():
-            if outlab.frame.prev and outlab.frame.prev[0] == Up():
-                inlab = parent.origin_at(outlab.frame.prev[1])
-                for left, right in zip(self.last_frame_var_symbols(inlab, prefix=parent_variable_prefix), self.last_frame_var_symbols(outlab, prefix=child_variable_prefix)):
-                    yield smt.Equals(left, right)
-
     def _chc_external(self, step: Step) -> FNode:
         assert step.out_label.frame.prev is not None
         assert step.out_label.origin is not None
@@ -267,27 +207,31 @@ class LabFactory:
             outlab_prefix = "p"
             inlab_prefix = "c"
         elif isinstance(step.dir, Down):
-            child_key =  step.dir.child
+            child_key = step.dir.child
             parent = step.in_label
             child = step.out_label
             outlab_prefix = "c"
             inlab_prefix = "p"
         else:
             raise ValueError(f"Invalid direction for external step: {step.dir}")
-        data_constraints = list(self.cross_data_constraints(parent, child, child_key, parent_variable_prefix="p", child_variable_prefix="c"))
+        data_constraints = list(
+            self.fragment_factory.cross_data_constraints(
+                parent,
+                child,
+                child_key,
+                parent_variable_prefix="p", child_variable_prefix="c"
+            )
+        )
 
-        for field in self._data_fields():
-            left = self._field_symbol(field, step.out_label.origin, prefix=outlab_prefix)
-            right = self._field_symbol(field, step.out_label, prefix=outlab_prefix)
+        for field in self.fragment_factory.data_fields:
+            left = self.fragment_factory.field_symbol(field, step.out_label.origin, prefix=outlab_prefix)
+            right = self.fragment_factory.field_symbol(field, step.out_label, prefix=outlab_prefix)
             data_constraints.append(smt.Equals(left, right))
         inlab_app = self.apply(step.in_label, variables_prefix=inlab_prefix)
         outlab_origin_app = self.apply(step.out_label.origin, variables_prefix=outlab_prefix)
         body = smt.And(*data_constraints, inlab_app, outlab_origin_app)
         head = self.apply(step.out_label, variables_prefix=outlab_prefix)
-        formula = chc.Clause(
-            body,
-            head
-        )
+        formula = chc.Clause(body, head)
         return formula
 
     def chc_IV(self, step: Step) -> FNode:  # noqa: N802
