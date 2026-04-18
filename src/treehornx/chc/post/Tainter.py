@@ -1,4 +1,4 @@
-from collections import deque
+from collections import defaultdict, deque
 from dataclasses import dataclass, replace
 from functools import cached_property
 from typing import Iterable, Iterator
@@ -6,6 +6,7 @@ from typing import Iterable, Iterator
 from frozendict import frozendict
 from pysmt.shortcuts import StrCharAt
 
+from treehornx.chc.post.TaintDB import TaintDB
 from treehornx.chc.post.helpers import get_last_assignment_to_field, no_assignment_to_field, ptr_here
 from treehornx.chc.post.tainting import (
     DownTaintingPropagation,
@@ -53,11 +54,11 @@ class Tainter:
                 yield tainted_sigma2, i1
             case Up():
                 for p in P_Tainted:
-                    if self.tainte_label_equality(p.child, tainted_sigma2):
+                    if p.child == tainted_sigma2:
                         yield p.parent, i1
             case Down(j):
                 for p in P_Tainted:
-                    if self.tainte_label_equality(p.parent, tainted_sigma2) and p.child_key == j:
+                    if p.parent == tainted_sigma2 and p.child_key == j:
                         yield p.child, i1
 
     def _init_tainted_label(self, lab: Label) -> TaintedLabel:
@@ -161,27 +162,17 @@ class Tainter:
             new_tainted_sigma1 = replace(tainted_sigma1, taint_ptr=taint_ptr1_)
             return UpTaintingPropagation(parent=tainted_sigma1, child=tainted_sigma2, child_key=child_key, new_parent=new_tainted_sigma1)
 
-    def tainte_label_equality(self, tlab1: TaintedLabel, tlab2: TaintedLabel) -> bool:
-        if tlab1.taint_node != tlab2.taint_node:
-            return False
-        if tlab1.taint_ptr != tlab2.taint_ptr:
-            return False
-        # if self.trees.id(tlab1.label) == self.trees.id(tlab2.label):
-        #     assert tlab1.label is tlab2.label
-        #     return True
-        # return False
-        return tlab1.label is tlab2.label
 
     def _new_pairs_after_tainting(
         self,
         tainted_sigma1: TaintedLabel,
         new_tainted_sigma1: TaintedLabel,
-        P_Tainted: set[TaintedPair],  # noqa: N803
+        pairs: Iterable[TaintedPair],
     ):
-        for p in P_Tainted:
-            if self.tainte_label_equality(p.parent, tainted_sigma1):
+        for p in pairs:
+            if p.parent == tainted_sigma1:
                 yield replace(p, parent=new_tainted_sigma1)
-            if self.tainte_label_equality(p.child, tainted_sigma1):
+            if p.child == tainted_sigma1:
                 yield replace(p, child=new_tainted_sigma1)
 
     def _internal_tainting_steps(self, taintd_sigma: TaintedLabel) -> Iterable[TaintingStep]:
@@ -218,14 +209,14 @@ class Tainter:
 
     def taint(self) -> tuple[list[TaintingStep], set[TaintedLabel], set[TaintedPair]]:
         L_Terminal, P_Terminal = generate_L_P_Terminal(self.trees)  # noqa: N806
-        L_Tainted: dict[TaintedLabel, TaintedLabel] = dict()  # noqa: N806
-        P_Tainted: set[TaintedPair] = set()  # noqa: N806
+        db: TaintDB = TaintDB()
+
         tainting_steps: list[TaintingStep] = []
         for term_lab in L_Terminal:
             if self.trees.is_backbone_label(term_lab):
                 continue
             tainted_lab = self._init_tainted_label(term_lab)
-            L_Tainted[tainted_lab] = tainted_lab
+            db.add_label(tainted_lab)
             if end_of_lace(term_lab) and not term_lab.frame.isnil[self.root_name]:
                 step = LookingForRoot(tainted_label=tainted_lab)
             else:
@@ -237,22 +228,23 @@ class Tainter:
                 continue
             tainted_parent = self._init_tainted_label(p[0])
             tainted_child = self._init_tainted_label(p[1])
-            tainted_parent = L_Tainted[tainted_parent]
-            tainted_child = L_Tainted[tainted_child]
+            db.add_label(tainted_parent)
+            db.add_label(tainted_child)
             tainted_pair = TaintedPair(parent=tainted_parent, child=tainted_child, child_key=p[2])
-            P_Tainted.add(tainted_pair)
+            db.add_pair(tainted_pair)
 
-        queue: deque[TaintedLabel | TaintedPair] = deque([*L_Tainted, *P_Tainted])
+        queue: deque[TaintedLabel | TaintedPair] = deque([*db.labels(), *db.pairs()])
 
         def on_new_label(tlab: TaintedLabel, new_tlab: TaintedLabel):
-            L_Tainted[new_tlab] = new_tlab
+            db.add_label(new_tlab)
             temp_P_tainted: set[TaintedPair] = set() # noqa: N806
             queue.append(new_tlab)
-            for new_pair in self._new_pairs_after_tainting(tlab, new_tlab, P_Tainted):
-                if new_pair not in P_Tainted:
+            for new_pair in self._new_pairs_after_tainting(tlab, new_tlab, db.get_involved_pairs(tlab)):
+                if not db.contains_pair(new_pair):
                     temp_P_tainted.add(new_pair)
                     queue.append(new_pair)
-            P_Tainted.update(temp_P_tainted)
+            for new_pair in temp_P_tainted:
+                db.add_pair(new_pair)
 
         visited: set[TaintedLabel | TaintedPair] = set()
 
@@ -284,4 +276,4 @@ class Tainter:
                     case _:
                         assert False, "Unreachable branch"
                         pass
-        return tainting_steps, set(L_Tainted.values()), P_Tainted
+        return tainting_steps, set(db.labels()), set(db.pairs())

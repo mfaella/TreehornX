@@ -10,7 +10,6 @@ from treehornx.enum_labels.core.Label import Label
 
 @dataclass(slots=True)
 class _LabelInfo:
-    instance: Label
     ancestors: set[Label] = field(init=False, default_factory=set)
     extensions: set[Label] = field(init=False, default_factory=set)
     is_endless_loop_pivot: bool = field(init=False, default=False)
@@ -67,16 +66,12 @@ class StatesDB:
 
     def _save_label(self, lab: Label) -> Label:
         if lab not in self._labels:
-            self._labels[lab] = _LabelInfo(lab)
+            self._labels[lab] = _LabelInfo()
             if lab.origin is not None:
                 self._labels[lab.origin].extensions.add(lab)
             return lab
         else:
-            return self._labels[lab].instance
-
-    def make_label(self, origin: Label | None, frame: Frame) -> Label:
-        lab = Label(origin=origin, frame=frame)
-        return self._save_label(lab)
+            return lab
 
     def add_label(self, lab: Label):
         self._save_label(lab)

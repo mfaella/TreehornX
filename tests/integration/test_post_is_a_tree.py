@@ -78,3 +78,7 @@ def test_sll_safe_reverse():
 def test_bst_safe_remove_root():
     result = check_sat("bst_safe_remove_root.c")
     assert result == Status.SAT
+
+def test_bst_safe_insert():
+    result = check_sat("bst_safe_insert.c")
+    assert result == Status.SAT

@@ -2,20 +2,35 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from itertools import islice
-from typing import Iterable, cast, overload, override
+from functools import cache
+from itertools import count, islice
+from typing import Callable, Iterable, cast, overload, override
 
 # from .dir import Down
 from .Frame import Frame
 
+@dataclass
+class LabelFactory:
+    cache: dict[tuple[Frame, Label | None], Label] = field(default_factory=dict, init=False)
+
+    def create(self, frame: Frame, origin: Label | None = None) -> Label:
+        key = (frame, origin)
+        if key not in self.cache:
+            lab = Label(frame, origin)
+            object.__setattr__(lab, "_factory", self)
+            self.cache[key] = lab
+        return self.cache[key]
 
 @dataclass(frozen=True, slots=True)
 class Label:
     frame: Frame
     origin: Label | None = field(default=None)
     _cached_hash: int | None = field(default=None, init=False, hash=False, compare=False)
+    _factory: LabelFactory | None = field(default=None, init=False, hash=False, compare=False)
 
     def append(self, frame: Frame) -> Label:
+        if self._factory:
+            return self._factory.create(frame, self)
         return Label(frame, self)
 
     def __iter__(self) -> Iterable[Frame]:
@@ -58,6 +73,8 @@ class Label:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Label):
             return NotImplemented
+        if self._factory is other._factory and self._factory and other._factory:
+            return self is other
         return self.frame == other.frame and self.origin == other.origin
 
     def iter_origins(self) -> Iterable[Label]:

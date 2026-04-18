@@ -9,7 +9,7 @@ from frozendict import frozendict
 from treehornx.enum_labels.core.Dir import Internal
 from treehornx.enum_labels.core.Event import NOP, Here
 from treehornx.enum_labels.core.Frame import Frame, FrameDescriptor
-from treehornx.enum_labels.core.Label import Label
+from treehornx.enum_labels.core.Label import Label, LabelFactory
 from treehornx.ir.expressions import Var
 from treehornx.ir.function import Function
 from treehornx.ir.instructions import *
@@ -32,6 +32,7 @@ class EnumLabelGenerator:
     internal_chain_bound: int | None = None
     k: int = field(init=False)
     db: StatesDB = field(init=False, default_factory=StatesDB)
+    label_factory: LabelFactory = field(init=False, default_factory=LabelFactory)
 
     def __post_init__(self):
         assert isinstance(self.root.sort, Pointer)
@@ -103,7 +104,9 @@ class EnumLabelGenerator:
                 enum_fields=enum_fields,
                 prev=None,
             )
-            yield self.db.make_label(None, active_frame)
+            lab = self.label_factory.create(active_frame, None)
+            self.db.add_label(lab)
+            yield lab
         inactive_frame = Frame(
             index=0,
             active=False,
@@ -116,7 +119,9 @@ class EnumLabelGenerator:
             enum_fields=enum_fields,
             prev=None,
         )
-        yield self.db.make_label(None, inactive_frame)
+        lab = self.label_factory.create(inactive_frame, None)
+        self.db.add_label(lab)
+        yield lab
 
     def start_labels(self) -> Iterable[Label]:
         for backbone_label in self.backbone_labels():
@@ -149,7 +154,9 @@ class EnumLabelGenerator:
                 else frozendict({key: False for key in self._children_keys}),
                 prev=(Internal(), 1),
             )
-            yield self.db.make_label(backbone_label, second_frame)
+            lab = self.label_factory.create(second_frame, backbone_label)
+            self.db.add_label(lab)
+            yield lab
 
     def initial_root_pairs(self) -> Iterable[Pair]:
         for parent, child, child_key in product(self.start_labels(), self.backbone_labels(), self._children_keys):
@@ -181,7 +188,9 @@ class EnumLabelGenerator:
 
     def _make_knitter(self) -> IKnitter:
         def make_label(o: Label | None, f: Frame) -> Label:
-            return self.db.make_label(o, f)
+            lab = self.label_factory.create(f, o)
+            self.db.add_label(lab)
+            return lab
 
         def on_new_internal_step(ancestor_pair: Pair, lab_pair: Pair):
             self._add_ancestor(lab_pair.leader(), ancestor_pair.leader())
