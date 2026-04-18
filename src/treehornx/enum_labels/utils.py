@@ -1,5 +1,3 @@
-from treehornx.enum_labels.core.Dir import Internal
-from treehornx.enum_labels.core.Frame import Frame
 from treehornx.enum_labels.core.Label import Label
 from treehornx.enum_labels.helpers import are_equal_after_rewind
 from treehornx.ir.expressions import (

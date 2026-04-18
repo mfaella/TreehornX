@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import operator
 from dataclasses import dataclass, field, is_dataclass
-from functools import reduce
 from itertools import chain
 from typing import (
     Callable,
@@ -15,7 +13,7 @@ from typing import (
 )
 
 from ._internal.sorts.Enum import BOOL, Enum
-from ._internal.sorts.natives import INT, REAL, Pointer
+from ._internal.sorts.natives import INT, REAL
 from ._internal.sorts.Sort import Sort
 
 

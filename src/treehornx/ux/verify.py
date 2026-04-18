@@ -75,23 +75,31 @@ def handle_smt2_scripts_creation(
     else:
         enable_post_is_tree = False
         root_name = None
-    system_factory = CHCSystemFactory(function, tree_node_sort, lace_over_approx, pre_ctx, enable_post_is_tree, root_name)
+    system_factory = CHCSystemFactory(
+        function, tree_node_sort, lace_over_approx, pre_ctx, enable_post_is_tree, root_name
+    )
     maybe_exit_codes = list(exit_codes) or [None]
     for exit_code in maybe_exit_codes:
 
         def display_smt2_script_creation_progress(console: Console) -> float:
-            file_path = Path(f"{function.name}{f"_{exit_code.name}" if exit_code else ""}.smt2")
+            file_path = Path(f"{function.name}{f'_{exit_code.name}' if exit_code else ''}.smt2")
             if output_dir is not None:
                 file_path = output_dir / file_path
+
             def serialize():
                 system = system_factory.make_system(exit_code)
                 system.serialize(file_path)
 
             _, elapsed_time = take_time(serialize)
-            console.print(f"SMT2 script{f" for {exit_code.name}" if exit_code else ""} created in {format_timespan(elapsed_time)}.")
+            console.print(
+                f"SMT2 script{f' for {exit_code.name}' if exit_code else ''} created in {format_timespan(elapsed_time)}."
+            )
             return elapsed_time
 
-        elapsed_time = progress(f"Creating SMT2 script{f" for {exit_code.name}" if exit_code else ""}", display_smt2_script_creation_progress)
+        elapsed_time = progress(
+            f"Creating SMT2 script{f' for {exit_code.name}' if exit_code else ''}",
+            display_smt2_script_creation_progress,
+        )
         match exit_code:
             case None:
                 pass

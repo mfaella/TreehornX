@@ -1,7 +1,6 @@
-
 from dataclasses import dataclass, field
 from itertools import product
-from typing import Callable, Iterable
+from typing import Iterable
 
 import pychc.shortcuts as chc
 import pysmt.shortcuts as smt
@@ -9,11 +8,23 @@ from pysmt.fnode import FNode
 
 from treehornx.chc.computation.LabFactory import LabFactory
 from treehornx.chc.post.helpers import last_assignment_to_field, no_assignment_to_field
-from treehornx.chc.post.tainting import DownTaintingPropagation, InternalTaintingPropagation, LookingForRoot, PointerTaintingEnd, StartOfPointerTainting, StructuralChildTainting, TaintedLabel, TaintedPair, TaintingInitialization, TaintingStep, UpTaintingPropagation
+from treehornx.chc.post.tainting import (
+    DownTaintingPropagation,
+    InternalTaintingPropagation,
+    LookingForRoot,
+    PointerTaintingEnd,
+    StartOfPointerTainting,
+    StructuralChildTainting,
+    TaintedLabel,
+    TaintedPair,
+    TaintingInitialization,
+    TaintingStep,
+    UpTaintingPropagation,
+)
 from treehornx.chc.utils.CHCFragmentFactory import CHCFragmentFactory
 from treehornx.enum_labels.core.Dir import Internal, Up
-from treehornx.enum_labels.core.Label import Label
 from treehornx.enum_labels.helpers import points_here
+
 
 @dataclass
 class TFactory:
@@ -26,7 +37,7 @@ class TFactory:
     def _predicate_name(self, tainted_label: TaintedLabel) -> str:
         taint_id = 1 if tainted_label.taint_node else 0
         taint_ptr = sorted(tainted_label.taint_ptr.items())
-        for (_, is_tainted) in taint_ptr:
+        for _, is_tainted in taint_ptr:
             taint_id = (taint_id << 1) | is_tainted
         return f"T_{self.fragment_factory.id_getter(tainted_label.label)}_{taint_id}"
 
@@ -41,17 +52,17 @@ class TFactory:
         symbols = list(self.fragment_factory.label_symbols(tainted_label.label, prefix))
         return chc.Apply(predicate, symbols)
 
-    def _T_looking_for_root(self, tainting_step: LookingForRoot) -> FNode: # noqa: N802
+    def _T_looking_for_root(self, tainting_step: LookingForRoot) -> FNode:  # noqa: N802
         body = self.lab_factory.apply(tainting_step.tainted_label.label)
         head = self.apply(tainting_step.tainted_label)
         return chc.Clause(body, head)
 
-    def _T_tainting_initialization(self, tainting_step: TaintingInitialization) -> FNode: # noqa: N802
+    def _T_tainting_initialization(self, tainting_step: TaintingInitialization) -> FNode:  # noqa: N802
         body = self.lab_factory.apply(tainting_step.tainted_label.label)
         head = self.apply(tainting_step.tainted_label)
         return chc.Clause(body, head)
 
-    def _T_structural_child_tainting(self, tainting_step: StructuralChildTainting) -> FNode: # noqa: N802
+    def _T_structural_child_tainting(self, tainting_step: StructuralChildTainting) -> FNode:  # noqa: N802
         sigma_app = self.apply(tainting_step.parent, prefix="p")
         tau_app = self.apply(tainting_step.child, prefix="c")
         constraints = self.fragment_factory.cross_data_constraints(
@@ -65,17 +76,17 @@ class TFactory:
         head = self.apply(tainting_step.new_child)
         return chc.Clause(body, head)
 
-    def _T_start_of_pointer_tainting(self, tainting_step: StartOfPointerTainting) -> FNode: # noqa: N802
+    def _T_start_of_pointer_tainting(self, tainting_step: StartOfPointerTainting) -> FNode:  # noqa: N802
         body = self.apply(tainting_step.lab)
         head = self.apply(tainting_step.new_lab)
         return chc.Clause(body, head)
 
-    def _T_internal_tainting_propagation(self, tainting_step: InternalTaintingPropagation) -> FNode: # noqa: N802
+    def _T_internal_tainting_propagation(self, tainting_step: InternalTaintingPropagation) -> FNode:  # noqa: N802
         body = self.apply(tainting_step.lab)
         head = self.apply(tainting_step.new_lab)
         return chc.Clause(body, head)
 
-    def _T_up_tainting_propagation(self, tainting_step: UpTaintingPropagation) -> FNode: # noqa: N802
+    def _T_up_tainting_propagation(self, tainting_step: UpTaintingPropagation) -> FNode:  # noqa: N802
         parent_app = self.apply(tainting_step.parent, prefix="p")
         child_app = self.apply(tainting_step.child, prefix="c")
         constraints = self.fragment_factory.cross_data_constraints(
@@ -89,7 +100,7 @@ class TFactory:
         head = self.apply(tainting_step.new_parent)
         return chc.Clause(body, head)
 
-    def _T_down_tainting_propagation(self, tainting_step: DownTaintingPropagation) -> FNode: # noqa: N802
+    def _T_down_tainting_propagation(self, tainting_step: DownTaintingPropagation) -> FNode:  # noqa: N802
         parent_app = self.apply(tainting_step.parent, prefix="p")
         child_app = self.apply(tainting_step.child, prefix="c")
         constraints = self.fragment_factory.cross_data_constraints(
@@ -103,12 +114,12 @@ class TFactory:
         head = self.apply(tainting_step.new_child)
         return chc.Clause(body, head)
 
-    def _T_pointer_tainting_end(self, tainting_step: PointerTaintingEnd) -> FNode: # noqa: N802
+    def _T_pointer_tainting_end(self, tainting_step: PointerTaintingEnd) -> FNode:  # noqa: N802
         body = self.apply(tainting_step.lab)
         head = self.apply(tainting_step.new_lab)
         return chc.Clause(body, head)
 
-    def T(self, tainting_step: TaintingStep) -> FNode: # noqa: N802
+    def T(self, tainting_step: TaintingStep) -> FNode:  # noqa: N802
         match tainting_step:
             case LookingForRoot():
                 return self._T_looking_for_root(tainting_step)
@@ -127,7 +138,7 @@ class TFactory:
             case PointerTaintingEnd():
                 return self._T_pointer_tainting_end(tainting_step)
 
-    def _query_1(self, tainted_label: TaintedLabel) -> FNode|None:
+    def _query_1(self, tainted_label: TaintedLabel) -> FNode | None:
         taint_ptr = tainted_label.taint_ptr
         for (p1, i1), (p2, i2) in product(
             tainted_label.taint_ptr.keys(),
@@ -154,7 +165,7 @@ class TFactory:
 
         return None
 
-    def _query_2_internal(self, tlabel: TaintedLabel) -> FNode|None:
+    def _query_2_internal(self, tlabel: TaintedLabel) -> FNode | None:
         taint_ptr = tlabel.taint_ptr
         taint_node = tlabel.taint_node
         sigma2 = tlabel.label
@@ -162,7 +173,7 @@ class TFactory:
         if not taint_node:
             return None
 
-        for (p, i2) in taint_ptr.keys():
+        for p, i2 in taint_ptr.keys():
             sigma2_i2_prev = sigma2[i2].prev
             assert sigma2_i2_prev is not None
             if sigma2_i2_prev[0] != Internal():
@@ -188,7 +199,7 @@ class TFactory:
 
         return None
 
-    def _query_2_up(self, tpair: TaintedPair) -> FNode|None:
+    def _query_2_up(self, tpair: TaintedPair) -> FNode | None:
         t_sigma1 = tpair.parent
         t_sigma2 = tpair.child
         sigma1 = t_sigma1.label
@@ -200,7 +211,7 @@ class TFactory:
         if not taint_node1:
             return None
 
-        for (p, i2) in taint_ptr2.keys():
+        for p, i2 in taint_ptr2.keys():
             sigma2_i2_prev = sigma2[i2].prev
             assert sigma2_i2_prev is not None
             if sigma2_i2_prev[0] != Up():
@@ -234,7 +245,7 @@ class TFactory:
 
         return None
 
-    def _query_2_down(self, tpair: TaintedPair) -> FNode|None:
+    def _query_2_down(self, tpair: TaintedPair) -> FNode | None:
         t_sigma1 = tpair.child
         t_sigma2 = tpair.parent
         sigma1 = t_sigma1.label
@@ -246,7 +257,7 @@ class TFactory:
         if not taint_node1:
             return None
 
-        for (p, i2) in taint_ptr2.keys():
+        for p, i2 in taint_ptr2.keys():
             sigma2_i2_prev = sigma2[i2].prev
             assert sigma2_i2_prev is not None
             if sigma2_i2_prev[0] != Up():
@@ -280,7 +291,7 @@ class TFactory:
 
         return None
 
-    def _query_3(self, tpair: TaintedPair) -> FNode|None:
+    def _query_3(self, tpair: TaintedPair) -> FNode | None:
         t_sigma = tpair.parent
         t_tau = tpair.child
         sigma = t_sigma.label
@@ -297,7 +308,7 @@ class TFactory:
         if not no_assignment_to_field(sigma, child_key):
             return None
 
-        for (p, i) in taint_ptr2.keys():
+        for p, i in taint_ptr2.keys():
             if not taint_ptr2[(p, i)]:
                 continue
 
@@ -322,7 +333,7 @@ class TFactory:
 
         return None
 
-    def query(self, tainted_object: TaintedLabel|TaintedPair) -> Iterable[FNode]:
+    def query(self, tainted_object: TaintedLabel | TaintedPair) -> Iterable[FNode]:
         match tainted_object:
             case TaintedLabel() as tlab:
                 if q := self._query_1(tlab):

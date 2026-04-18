@@ -2,12 +2,12 @@ from __future__ import annotations
 
 from collections import deque
 from dataclasses import dataclass, field
-from functools import cache
-from itertools import count, islice
-from typing import Callable, Iterable, cast, overload, override
+from itertools import islice
+from typing import Iterable, cast, overload, override
 
 # from .dir import Down
 from .Frame import Frame
+
 
 @dataclass
 class LabelFactory:
@@ -20,6 +20,12 @@ class LabelFactory:
             object.__setattr__(lab, "_factory", self)
             self.cache[key] = lab
         return self.cache[key]
+
+    def replace(self, label: Label, frame: Frame | None = None, origin: Label | None = None) -> Label:
+        new_frame = frame if frame is not None else label.frame
+        new_origin = origin if origin is not None else label.origin
+        return self.create(new_frame, new_origin)
+
 
 @dataclass(frozen=True, slots=True)
 class Label:

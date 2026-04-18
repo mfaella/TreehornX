@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import Iterable
 
 from treehornx.enum_labels._internal.knitter.Pair import LeadershipKind, Pair
-from treehornx.enum_labels.core.Frame import Frame
 from treehornx.enum_labels.core.Label import Label
 
 

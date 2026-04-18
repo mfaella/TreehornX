@@ -1,10 +1,8 @@
 from dataclasses import dataclass
-from functools import cached_property
 from typing import Callable, Iterable
 
 import pychc.shortcuts as chc
 import pysmt.shortcuts as smt
-import pysmt.typing as smtty
 from pysmt.fnode import FNode
 
 from treehornx.chc.utils import CHCFragmentFactory
@@ -40,7 +38,7 @@ from treehornx.ir.expressions import (
 )
 from treehornx.ir.function import Function
 from treehornx.ir.instructions import FieldAssignExpr, IfGoto, VarAssignExpr
-from treehornx.ir.sorts import BOOL, INT, REAL, Sort, Struct
+from treehornx.ir.sorts import BOOL
 
 
 @dataclass
@@ -78,8 +76,7 @@ class LabFactory:
         self, inlab: Label, outlab: Label, exclude_symbols: set[FNode] = set()
     ) -> Iterable[FNode]:
         for left, right in zip(
-            self.fragment_factory.last_frame_symbols(inlab),
-            self.fragment_factory.last_frame_symbols(outlab)
+            self.fragment_factory.last_frame_symbols(inlab), self.fragment_factory.last_frame_symbols(outlab)
         ):
             if left not in exclude_symbols and right not in exclude_symbols:
                 yield smt.Equals(left, right)
@@ -105,10 +102,10 @@ class LabFactory:
             Mul: smt.Times,
         }
         match expr:
-            case Var(name, _):
+            case Var(_, _):
                 return self.fragment_factory.var_symbol(expr, inlab)
             case Field(_, name):
-                field = self._data_field(expr.name)
+                field = self._data_field(name)
                 return self.fragment_factory.field_symbol(field, inlab)
             case int():
                 return smt.Int(expr)
@@ -216,10 +213,7 @@ class LabFactory:
             raise ValueError(f"Invalid direction for external step: {step.dir}")
         data_constraints = list(
             self.fragment_factory.cross_data_constraints(
-                parent,
-                child,
-                child_key,
-                parent_variable_prefix="p", child_variable_prefix="c"
+                parent, child, child_key, parent_variable_prefix="p", child_variable_prefix="c"
             )
         )
 

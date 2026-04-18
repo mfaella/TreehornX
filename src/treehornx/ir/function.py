@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Sequence
 from dataclasses import dataclass, field
-from typing import cast, override
+from typing import override
 
 from .errors import IncompatibleReturnTypeError
 from .expressions import Expr, Field, Operator, Var, sort_of
@@ -22,7 +22,7 @@ from .instructions import (
     Return,
     VarAssignExpr,
 )
-from .sorts import UNIT, Pointer, Sort
+from .sorts import UNIT, Sort
 
 
 @dataclass(frozen=True, slots=True)

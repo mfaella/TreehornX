@@ -1,18 +1,15 @@
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
-from itertools import product
-from typing import Callable, Iterable, Literal
+from typing import Iterable
 
 import pychc.shortcuts as chc
 import pysmt.shortcuts as smt
 import pysmt.typing as smty
 from pysmt.fnode import FNode
 
-from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.computation.LabFactory import LabFactory
+from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.pre.PreContext import PreContext
 from treehornx.chc.utils import label_exit
-from treehornx.enum_labels.core.Dir import Down
 from treehornx.enum_labels.core.Label import Label
 from treehornx.ir.expressions import Var
 from treehornx.ir.sorts import BOOL, Int
@@ -22,12 +19,10 @@ class PreFactoryError(Exception):
     pass
 
 
-
 @dataclass
 class PreFactory:
     ctx: PreContext
     lab_factory: LabFactory
-
 
     def __post_init__(self):
         self.fragment_factory = self.lab_factory.fragment_factory
@@ -87,11 +82,13 @@ class PreFactory:
         head = self._apply(label)
         return chc.Clause(body, head)
 
-    def pre_II(self, parent: Label, children: Iterable[tuple[str|int, Label]], exit_codes: set[ExitCodeKind]) -> FNode:  # noqa: N802
-
+    def pre_II(
+        self, parent: Label, children: Iterable[tuple[str | int, Label]], exit_codes: set[ExitCodeKind]
+    ) -> FNode:  # noqa: N802
         children = list(children)
-        assert set(tup[0] for tup in children) == set(child_key for child_key in parent.frame.active_child.keys()), \
-        "Children keys do not match the label's children keys."
+        assert set(tup[0] for tup in children) == set(child_key for child_key in parent.frame.active_child.keys()), (
+            "Children keys do not match the label's children keys."
+        )
 
         data_constraints: list[FNode] = []
         pres: list[FNode] = []

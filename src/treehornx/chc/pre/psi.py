@@ -1,13 +1,12 @@
-from dataclasses import dataclass
-from typing import Callable, override
+from typing import Callable
 
 import pysmt.shortcuts as smt
 from pysmt.fnode import FNode
 
-from treehornx.enum_labels.core.Label import Label
 
 type PsiType = Callable[[dict[str | int, dict[str, FNode] | None], dict[str, FNode], dict[str, FNode]], FNode]
 type PsiFType = Callable[[dict[str, FNode]], FNode]
+
 
 def psi_sll_sorted(
     children_states: dict[str | int, dict[str, FNode] | None], fields: dict[str, FNode], states: dict[str, FNode]

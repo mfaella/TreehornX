@@ -1,13 +1,12 @@
-from collections import defaultdict, deque
-from dataclasses import dataclass, replace
+from collections import deque
+from dataclasses import dataclass
 from functools import cached_property
 from typing import Iterable, Iterator
 
 from frozendict import frozendict
-from pysmt.shortcuts import StrCharAt
 
-from treehornx.chc.post.TaintDB import TaintDB
 from treehornx.chc.post.helpers import get_last_assignment_to_field, no_assignment_to_field, ptr_here
+from treehornx.chc.post.TaintDB import TaintDB
 from treehornx.chc.post.tainting import (
     DownTaintingPropagation,
     InternalTaintingPropagation,
@@ -16,7 +15,9 @@ from treehornx.chc.post.tainting import (
     StartOfPointerTainting,
     StructuralChildTainting,
     TaintedLabel,
+    TaintedLabelFactory,
     TaintedPair,
+    TaintedPairFactory,
     TaintingInitialization,
     TaintingStep,
     UpTaintingPropagation,
@@ -37,6 +38,14 @@ class Tainter:
     @cached_property
     def ptr_children(self) -> tuple[str, ...]:
         return tuple(child_key for child_key in self.trees.child_keys if isinstance(child_key, str))
+
+    @cached_property
+    def tainted_label_factory(self) -> TaintedLabelFactory:
+        return TaintedLabelFactory()
+
+    @cached_property
+    def tainted_pair_factory(self) -> TaintedPairFactory:
+        return TaintedPairFactory()
 
     def _lace_prevs_plus(
         self,
@@ -78,7 +87,7 @@ class Tainter:
             return None
         if not tau.label.frame.active:
             return None
-        new_tau = TaintedLabel(label=tau.label, taint_node=True, taint_ptr=tau.taint_ptr)
+        new_tau = self.tainted_label_factory.create(label=tau.label, taint_node=True, taint_ptr=tau.taint_ptr)
         return StructuralChildTainting(parent=sigma, child=tau, new_child=new_tau, child_key=child_key)
 
     def _start_of_pointer_tainting(self, tlab: TaintedLabel) -> StartOfPointerTainting | None:
@@ -95,7 +104,7 @@ class Tainter:
             taint_ptr_ = taint_ptr_.set((p, i), True)
         if taint_ptr_ is None:
             return None
-        new_tlab = TaintedLabel(label=tlab.label, taint_node=True, taint_ptr=taint_ptr_)
+        new_tlab = self.tainted_label_factory.create(label=tlab.label, taint_node=True, taint_ptr=taint_ptr_)
         return StartOfPointerTainting(lab=tlab, new_lab=new_tlab)
 
     def _end_of_pointer_tainting(self, tlab: TaintedLabel) -> PointerTaintingEnd | None:
@@ -103,12 +112,14 @@ class Tainter:
             return None
         for (p, i), taint_flag in tlab.taint_ptr.items():
             if taint_flag and ptr_here(tlab.label, i, p):
-                new_tlab = replace(tlab, taint_node=True)
+                new_tlab = self.tainted_label_factory.replace(tlab, taint_node=True)
                 return PointerTaintingEnd(lab=tlab, new_lab=new_tlab)
 
         return None
 
-    def _taint_ptr_propagation_update_by_dir(self, tainted_sigma2: TaintedLabel, dir: Dir) -> frozendict[tuple[str, int], bool]:
+    def _taint_ptr_propagation_update_by_dir(
+        self, tainted_sigma2: TaintedLabel, dir: Dir
+    ) -> frozendict[tuple[str, int], bool]:
         taint_ptr_update: dict[tuple[str, int], bool] = dict()
         for (p, i2), tainted in tainted_sigma2.taint_ptr.items():
             if not tainted:
@@ -132,12 +143,10 @@ class Tainter:
             return None
         else:
             taint_ptr1_ = tainted_sigma2.taint_ptr | taint_ptr1_update
-            new_tainted_sigma2 = replace(tainted_sigma2, taint_ptr=taint_ptr1_)
+            new_tainted_sigma2 = self.tainted_label_factory.replace(tainted_sigma2, taint_ptr=taint_ptr1_)
             return InternalTaintingPropagation(lab=tainted_sigma2, new_lab=new_tainted_sigma2)
 
-    def _parent_to_jth_child_ptr_taint_propagation(
-        self, pair: TaintedPair
-    ) -> DownTaintingPropagation | None:
+    def _parent_to_jth_child_ptr_taint_propagation(self, pair: TaintedPair) -> DownTaintingPropagation | None:
         tainted_sigma2 = pair.parent
         tainted_sigma1 = pair.child
         child_key = pair.child_key
@@ -147,8 +156,10 @@ class Tainter:
             return None
         else:
             taint_ptr1_ = tainted_sigma1.taint_ptr | taint_ptr1_update
-            new_tainted_sigma1 = replace(tainted_sigma1, taint_ptr=taint_ptr1_)
-            return DownTaintingPropagation(parent=pair.parent, child=pair.child, child_key=child_key, new_child=new_tainted_sigma1)
+            new_tainted_sigma1 = self.tainted_label_factory.replace(tainted_sigma1, taint_ptr=taint_ptr1_)
+            return DownTaintingPropagation(
+                parent=pair.parent, child=pair.child, child_key=child_key, new_child=new_tainted_sigma1
+            )
 
     def _child_to_parent_ptr_taint_propagation(self, pair: TaintedPair) -> UpTaintingPropagation | None:
         tainted_sigma2 = pair.child
@@ -159,9 +170,10 @@ class Tainter:
             return None
         else:
             taint_ptr1_ = tainted_sigma1.taint_ptr | taint_ptr1_update
-            new_tainted_sigma1 = replace(tainted_sigma1, taint_ptr=taint_ptr1_)
-            return UpTaintingPropagation(parent=tainted_sigma1, child=tainted_sigma2, child_key=child_key, new_parent=new_tainted_sigma1)
-
+            new_tainted_sigma1 = self.tainted_label_factory.replace(tainted_sigma1, taint_ptr=taint_ptr1_)
+            return UpTaintingPropagation(
+                parent=tainted_sigma1, child=tainted_sigma2, child_key=child_key, new_parent=new_tainted_sigma1
+            )
 
     def _new_pairs_after_tainting(
         self,
@@ -171,9 +183,9 @@ class Tainter:
     ):
         for p in pairs:
             if p.parent == tainted_sigma1:
-                yield replace(p, parent=new_tainted_sigma1)
+                yield self.tainted_pair_factory.replace(p, parent=new_tainted_sigma1)
             if p.child == tainted_sigma1:
-                yield replace(p, child=new_tainted_sigma1)
+                yield self.tainted_pair_factory.replace(p, child=new_tainted_sigma1)
 
     def _internal_tainting_steps(self, taintd_sigma: TaintedLabel) -> Iterable[TaintingStep]:
         start_ptr_tainting = self._start_of_pointer_tainting(taintd_sigma)
@@ -196,9 +208,7 @@ class Tainter:
             yield structural_child_tainting
 
         # parent to j-th child pointer tainting propagation
-        parent_to_jth_child_ptr_tainting_propagation = self._parent_to_jth_child_ptr_taint_propagation(
-            tainted_pair
-        )
+        parent_to_jth_child_ptr_tainting_propagation = self._parent_to_jth_child_ptr_taint_propagation(tainted_pair)
         if parent_to_jth_child_ptr_tainting_propagation is not None:
             yield parent_to_jth_child_ptr_tainting_propagation
 
@@ -213,8 +223,6 @@ class Tainter:
 
         tainting_steps: list[TaintingStep] = []
         for term_lab in L_Terminal:
-            if self.trees.is_backbone_label(term_lab):
-                continue
             tainted_lab = self._init_tainted_label(term_lab)
             db.add_label(tainted_lab)
             if end_of_lace(term_lab) and not term_lab.frame.isnil[self.root_name]:
@@ -224,20 +232,18 @@ class Tainter:
             tainting_steps.append(step)
 
         for p in P_Terminal:
-            if self.trees.is_backbone_label(p[0]) or self.trees.is_backbone_label(p[1]):
-                continue
             tainted_parent = self._init_tainted_label(p[0])
             tainted_child = self._init_tainted_label(p[1])
             db.add_label(tainted_parent)
             db.add_label(tainted_child)
-            tainted_pair = TaintedPair(parent=tainted_parent, child=tainted_child, child_key=p[2])
+            tainted_pair = self.tainted_pair_factory.create(parent=tainted_parent, child=tainted_child, child_key=p[2])
             db.add_pair(tainted_pair)
 
         queue: deque[TaintedLabel | TaintedPair] = deque([*db.labels(), *db.pairs()])
 
         def on_new_label(tlab: TaintedLabel, new_tlab: TaintedLabel):
             db.add_label(new_tlab)
-            temp_P_tainted: set[TaintedPair] = set() # noqa: N806
+            temp_P_tainted: set[TaintedPair] = set()  # noqa: N806
             queue.append(new_tlab)
             for new_pair in self._new_pairs_after_tainting(tlab, new_tlab, db.get_involved_pairs(tlab)):
                 if not db.contains_pair(new_pair):

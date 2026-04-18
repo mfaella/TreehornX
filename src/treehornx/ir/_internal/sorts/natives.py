@@ -7,7 +7,6 @@ POINTER, BOOL, UNIT) and enumerated sorts.
 
 from __future__ import annotations
 
-from copy import deepcopy
 from dataclasses import dataclass, field
 from typing import Any, ClassVar, override
 

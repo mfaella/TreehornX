@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Any, ClassVar, override
+from typing import override
 
 
 @dataclass(frozen=True)

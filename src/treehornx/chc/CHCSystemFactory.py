@@ -4,8 +4,8 @@ from functools import cached_property
 from pychc.chc_system import CHCSystem
 from pysmt import logics
 
-from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.computation import *
+from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.post import T_predicates, produce_T_no_query, produce_T_queries
 from treehornx.chc.post.TFactory import TFactory
 from treehornx.chc.pre import *
@@ -17,6 +17,7 @@ from treehornx.enum_labels.core.Event import ERR, LOF, OOM, Exit
 from treehornx.enum_labels.core.Label import Label
 from treehornx.ir._internal.sorts.Struct import Struct
 from treehornx.ir.function import Function
+
 
 @dataclass
 class CHCSystemFactory:
@@ -34,11 +35,13 @@ class CHCSystemFactory:
     @cached_property
     def fragment_factory(self):
         data_variables = tuple(var for var in self.function.vars if not var.sort.is_ptr() and not var.sort.is_enum())
-        data_fields = tuple(field for field in self.tree_node_sort.fields.values() if not field.sort.is_ptr() and not field.sort.is_enum())
+        data_fields = tuple(
+            field
+            for field in self.tree_node_sort.fields.values()
+            if not field.sort.is_ptr() and not field.sort.is_enum()
+        )
         fragment_factory = CHCFragmentFactory(
-            data_variables=data_variables,
-            data_fields=data_fields,
-            id_getter=lambda lab: str(self.trees.id(lab))
+            data_variables=data_variables, data_fields=data_fields, id_getter=lambda lab: str(self.trees.id(lab))
         )
         return fragment_factory
 
@@ -53,7 +56,7 @@ class CHCSystemFactory:
         return PreFactory(self.pre_ctx, self.lab_factory)
 
     @cached_property
-    def T_factory(self) -> TFactory: # noqa: N802
+    def T_factory(self) -> TFactory:  # noqa: N802
         return TFactory(self.lab_factory)
 
     def _query_required(self, lab: Label, exit_code: ExitCodeKind) -> bool:
@@ -109,8 +112,8 @@ class CHCSystemFactory:
         for chc in produce_pre_queries(self.trees, self.pre_factory, {exit_code}):
             system.add_clause(chc)
 
-    def _add_T(self, system: CHCSystem): # noqa: N802
-        T_factory = self.T_factory # noqa: N806
+    def _add_T(self, system: CHCSystem):  # noqa: N802
+        T_factory = self.T_factory  # noqa: N806
         assert isinstance(self.root_name, str)
 
         for pred in T_predicates(self.trees, self.root_name, T_factory):
@@ -119,14 +122,13 @@ class CHCSystemFactory:
         for chc in produce_T_no_query(self.trees, self.root_name, T_factory):
             system.add_clause(chc)
 
-    def _add_T_queries(self, system: CHCSystem): # noqa: N802
-        T_factory = self.T_factory # noqa: N806
+    def _add_T_queries(self, system: CHCSystem):  # noqa: N802
+        T_factory = self.T_factory  # noqa: N806
         assert isinstance(self.root_name, str)
         for chc in produce_T_queries(self.trees, self.root_name, T_factory):
             system.add_clause(chc)
 
-    def make_system(self, exit_code: ExitCodeKind|None = None) -> CHCSystem:
-
+    def make_system(self, exit_code: ExitCodeKind | None = None) -> CHCSystem:
         system = CHCSystem(logic=logics.QF_UFLIA)
 
         self._add_lab(system)

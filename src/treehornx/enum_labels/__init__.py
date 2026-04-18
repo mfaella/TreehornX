@@ -45,19 +45,9 @@ class KnittedTrees:
         self._ids = dict((lab, id) for id, lab in enumerate(self._labels))
         self._pairs = set(pairs)
 
-        for lab in self._labels:
-            actual_frames_index = list(f.index for f in iter(lab))
-            expected_frames_index = list(range(len(lab)))
-            assert actual_frames_index == expected_frames_index, f"Frames in label must be indexed from 0 to {len(self) - 1}, but got {actual_frames_index}."
-
-
     @cached_property
     def _safe_for(self) -> dict[ExitCodeKind, bool]:
-        safe_for = {
-            ExitCodeKind.ERR: True,
-            ExitCodeKind.LABEL_OVERFLOW: True,
-            ExitCodeKind.OOM: True
-        }
+        safe_for = {ExitCodeKind.ERR: True, ExitCodeKind.LABEL_OVERFLOW: True, ExitCodeKind.OOM: True}
         for lab in self._labels:
             if ERR() in lab.frame.events:
                 safe_for[ExitCodeKind.ERR] = False

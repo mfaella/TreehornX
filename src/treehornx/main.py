@@ -1,14 +1,19 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Literal
 
 import typer
 from rich.console import Console
 
-from treehornx.chc.core import ExitCodeKind
-from treehornx.chc.pre.PreContext import avl_ctx, avl_strict_ctx, bst_ctx, bst_strict_ctx, sll_sorted_ctx, sll_sorted_strict_ctx
+from treehornx.chc.pre.PreContext import (
+    avl_ctx,
+    avl_strict_ctx,
+    bst_ctx,
+    bst_strict_ctx,
+    sll_sorted_ctx,
+    sll_sorted_strict_ctx,
+)
 from treehornx.report.visualization import DependencyGraphBuilder, DependencyGraphKind
 from treehornx.ux.output import display_generation_results, display_verify_cmd_option_messages, render_dependency_graph
 from treehornx.ux.parsing import handle_function_parsing, handle_root_fetching

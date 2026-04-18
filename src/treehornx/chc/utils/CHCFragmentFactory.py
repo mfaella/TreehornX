@@ -1,5 +1,4 @@
 from dataclasses import dataclass
-from functools import cached_property
 from typing import Callable, Iterable
 
 import pychc.shortcuts as chc
