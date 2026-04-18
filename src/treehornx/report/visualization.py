@@ -130,6 +130,8 @@ class DependencyGraphBuilder:
         for step in self._steps():
             match step.dir:
                 case Internal():
+                    if self._id(step.out_label) == 48:
+                        pass
                     self.add_lace_step_dependency(step, graph)
                 case _:
                     self.add_lace_step_dependency(step, graph)

@@ -1,11 +1,12 @@
 from pathlib import Path
-from typing import Iterable, Literal
+from typing import Iterable
 
 from humanfriendly import format_timespan
 from rich.console import Console
 
-from treehornx.chc.CHCSystemFactory import CHCSystemFactory, PreKind, CHCSystem
+from treehornx.chc.CHCSystemFactory import CHCSystemFactory
 from treehornx.chc.core import ExitCodeKind
+from treehornx.chc.pre.PreContext import PreContext
 from treehornx.enum_labels import KnittedTrees, generate_labels
 from treehornx.enum_labels.core.Event import ERR, LOF, OOM
 from treehornx.ir._internal.sorts.natives import Pointer
@@ -32,6 +33,7 @@ def compute_trivially_sat(lace_over_approx: KnittedTrees) -> dict[ExitCodeKind, 
             trivially_sat[ExitCodeKind.OOM] = False
     return trivially_sat
 
+
 def handle_label_generation(
     function: Function,
     root: Var,
@@ -53,41 +55,46 @@ def handle_label_generation(
     stats.largest_label_length = largest_label_lenght
     return trees
 
+
 def handle_smt2_scripts_creation(
     function: Function,
     root: Var,
     lace_over_approx: KnittedTrees,
     exit_codes: Iterable[ExitCodeKind],
-    pre_kind: PreKind | None = None,
+    pre_ctx: PreContext | None = None,
+    post: bool = False,
     output_dir: Path | None = None,
 ):
     assert isinstance(root.sort, Pointer) and isinstance(root.sort.pointee, Struct), (
         "Root variable must be a pointer to a struct."
     )
     tree_node_sort = root.sort.pointee
-    system_factory = CHCSystemFactory(function, tree_node_sort, lace_over_approx)
-    for exit_code in exit_codes:
+    if post:
+        enable_post_is_tree = True
+        root_name = root.name
+    else:
+        enable_post_is_tree = False
+        root_name = None
+    system_factory = CHCSystemFactory(function, tree_node_sort, lace_over_approx, pre_ctx, enable_post_is_tree, root_name)
+    maybe_exit_codes = list(exit_codes) or [None]
+    for exit_code in maybe_exit_codes:
 
         def display_smt2_script_creation_progress(console: Console) -> float:
-            file_path = Path(f"{function.name}_{exit_code.name}.smt2")
+            file_path = Path(f"{function.name}{f"_{exit_code.name}" if exit_code else ""}.smt2")
             if output_dir is not None:
                 file_path = output_dir / file_path
-            if pre_kind is not None:
-                def func():
-                    assert pre_kind is not None
-                    system = system_factory.make_system_with_pre(exit_code, pre_kind)
-                    system.serialize(file_path)
-                _, elapsed_time = take_time(func)
-            else:
-                def func():
-                    system = system_factory.make_system(exit_code)
-                    system.serialize(file_path)
-                _, elapsed_time = take_time(func)
-            console.print(f"SMT2 script for {exit_code.name} created in {format_timespan(elapsed_time)}.")
+            def serialize():
+                system = system_factory.make_system(exit_code)
+                system.serialize(file_path)
+
+            _, elapsed_time = take_time(serialize)
+            console.print(f"SMT2 script{f" for {exit_code.name}" if exit_code else ""} created in {format_timespan(elapsed_time)}.")
             return elapsed_time
 
-        elapsed_time = progress(f"Creating SMT2 script for {exit_code.name}", display_smt2_script_creation_progress)
+        elapsed_time = progress(f"Creating SMT2 script{f" for {exit_code.name}" if exit_code else ""}", display_smt2_script_creation_progress)
         match exit_code:
+            case None:
+                pass
             case ExitCodeKind.ERR:
                 stats.smt2_err_scripts_dumping_elpased_time = elapsed_time
             case ExitCodeKind.OOM:

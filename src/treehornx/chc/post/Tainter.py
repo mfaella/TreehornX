@@ -1,0 +1,287 @@
+from collections import deque
+from dataclasses import dataclass, replace
+from functools import cached_property
+from typing import Iterable, Iterator
+
+from frozendict import frozendict
+from pysmt.shortcuts import StrCharAt
+
+from treehornx.chc.post.helpers import get_last_assignment_to_field, no_assignment_to_field, ptr_here
+from treehornx.chc.post.tainting import (
+    DownTaintingPropagation,
+    InternalTaintingPropagation,
+    LookingForRoot,
+    PointerTaintingEnd,
+    StartOfPointerTainting,
+    StructuralChildTainting,
+    TaintedLabel,
+    TaintedPair,
+    TaintingInitialization,
+    TaintingStep,
+    UpTaintingPropagation,
+    init_tainted_label,
+)
+from treehornx.chc.utils import generate_L_P_Terminal
+from treehornx.chc.utils.helpers import end_of_lace
+from treehornx.enum_labels import KnittedTrees
+from treehornx.enum_labels.core.Dir import Dir, Down, Internal, Up
+from treehornx.enum_labels.core.Label import Label
+
+
+@dataclass
+class Tainter:
+    root_name: str
+    trees: KnittedTrees
+
+    @cached_property
+    def ptr_children(self) -> tuple[str, ...]:
+        return tuple(child_key for child_key in self.trees.child_keys if isinstance(child_key, str))
+
+    def _lace_prevs_plus(
+        self,
+        tainted_sigma2: TaintedLabel,
+        i2: int,
+        P_Tainted: set[TaintedPair],  # noqa: N803
+    ) -> Iterator[tuple[TaintedLabel, int]]:
+        sigma2 = tainted_sigma2.label
+        sigma2_i2 = sigma2.origin_at(i2)
+        assert sigma2_i2.frame.prev is not None
+        assert sigma2_i2.origin is not None
+        i1 = sigma2_i2.frame.prev[1]
+        match sigma2_i2.frame.prev[0]:
+            case Internal():
+                yield tainted_sigma2, i1
+            case Up():
+                for p in P_Tainted:
+                    if self.tainte_label_equality(p.child, tainted_sigma2):
+                        yield p.parent, i1
+            case Down(j):
+                for p in P_Tainted:
+                    if self.tainte_label_equality(p.parent, tainted_sigma2) and p.child_key == j:
+                        yield p.child, i1
+
+    def _init_tainted_label(self, lab: Label) -> TaintedLabel:
+        return init_tainted_label(lab, self.root_name)
+
+    def _structural_child_tainting(self, pair: TaintedPair) -> StructuralChildTainting | None:
+        sigma = pair.parent
+        tau = pair.child
+        child_key = pair.child_key
+        if not sigma.taint_node:
+            return None
+        if tau.taint_node:
+            return None
+        if isinstance(child_key, int):
+            return None
+        if not no_assignment_to_field(sigma.label, child_key):
+            return None
+        if not tau.label.frame.active:
+            return None
+        new_tau = TaintedLabel(label=tau.label, taint_node=True, taint_ptr=tau.taint_ptr)
+        return StructuralChildTainting(parent=sigma, child=tau, new_child=new_tau, child_key=child_key)
+
+    def _start_of_pointer_tainting(self, tlab: TaintedLabel) -> StartOfPointerTainting | None:
+        if not tlab.taint_node:
+            return None
+        taint_ptr_: None | frozendict[tuple[str, int], bool] = None
+        for child_ptr in self.ptr_children:
+            last_assignemnt = get_last_assignment_to_field(tlab.label, child_ptr)
+            if last_assignemnt is None:
+                continue
+            p, i = last_assignemnt
+            if taint_ptr_ is None:
+                taint_ptr_ = tlab.taint_ptr
+            taint_ptr_ = taint_ptr_.set((p, i), True)
+        if taint_ptr_ is None:
+            return None
+        new_tlab = TaintedLabel(label=tlab.label, taint_node=True, taint_ptr=taint_ptr_)
+        return StartOfPointerTainting(lab=tlab, new_lab=new_tlab)
+
+    def _end_of_pointer_tainting(self, tlab: TaintedLabel) -> PointerTaintingEnd | None:
+        if not tlab.label.frame.active:
+            return None
+        for (p, i), taint_flag in tlab.taint_ptr.items():
+            if taint_flag and ptr_here(tlab.label, i, p):
+                new_tlab = replace(tlab, taint_node=True)
+                return PointerTaintingEnd(lab=tlab, new_lab=new_tlab)
+
+        return None
+
+    def _taint_ptr_propagation_update_by_dir(self, tainted_sigma2: TaintedLabel, dir: Dir) -> frozendict[tuple[str, int], bool]:
+        taint_ptr_update: dict[tuple[str, int], bool] = dict()
+        for (p, i2), tainted in tainted_sigma2.taint_ptr.items():
+            if not tainted:
+                continue
+            sigma2_i2 = tainted_sigma2.label.origin_at(i2)
+            if ptr_here(sigma2_i2, i2, p):
+                continue
+            assert sigma2_i2.frame.prev is not None
+            assert sigma2_i2.origin is not None
+            sigma2_i2_dir = sigma2_i2.frame.prev[0]
+            if sigma2_i2_dir != dir:
+                continue
+            i1 = sigma2_i2.frame.prev[1]
+            taint_ptr_update[(p, i1)] = True
+        return frozendict(taint_ptr_update)
+
+    def _internal_ptr_taint_propagation(self, tainted_sigma2: TaintedLabel) -> InternalTaintingPropagation | None:
+        taint_ptr1_update = self._taint_ptr_propagation_update_by_dir(tainted_sigma2, Internal())
+
+        if not taint_ptr1_update:
+            return None
+        else:
+            taint_ptr1_ = tainted_sigma2.taint_ptr | taint_ptr1_update
+            new_tainted_sigma2 = replace(tainted_sigma2, taint_ptr=taint_ptr1_)
+            return InternalTaintingPropagation(lab=tainted_sigma2, new_lab=new_tainted_sigma2)
+
+    def _parent_to_jth_child_ptr_taint_propagation(
+        self, pair: TaintedPair
+    ) -> DownTaintingPropagation | None:
+        tainted_sigma2 = pair.parent
+        tainted_sigma1 = pair.child
+        child_key = pair.child_key
+        taint_ptr1_update = self._taint_ptr_propagation_update_by_dir(tainted_sigma2, Down(child_key))
+
+        if not taint_ptr1_update:
+            return None
+        else:
+            taint_ptr1_ = tainted_sigma1.taint_ptr | taint_ptr1_update
+            new_tainted_sigma1 = replace(tainted_sigma1, taint_ptr=taint_ptr1_)
+            return DownTaintingPropagation(parent=pair.parent, child=pair.child, child_key=child_key, new_child=new_tainted_sigma1)
+
+    def _child_to_parent_ptr_taint_propagation(self, pair: TaintedPair) -> UpTaintingPropagation | None:
+        tainted_sigma2 = pair.child
+        tainted_sigma1 = pair.parent
+        taint_ptr1_update = self._taint_ptr_propagation_update_by_dir(pair.child, Up())
+        child_key = pair.child_key
+        if not taint_ptr1_update:
+            return None
+        else:
+            taint_ptr1_ = tainted_sigma1.taint_ptr | taint_ptr1_update
+            new_tainted_sigma1 = replace(tainted_sigma1, taint_ptr=taint_ptr1_)
+            return UpTaintingPropagation(parent=tainted_sigma1, child=tainted_sigma2, child_key=child_key, new_parent=new_tainted_sigma1)
+
+    def tainte_label_equality(self, tlab1: TaintedLabel, tlab2: TaintedLabel) -> bool:
+        if tlab1.taint_node != tlab2.taint_node:
+            return False
+        if tlab1.taint_ptr != tlab2.taint_ptr:
+            return False
+        # if self.trees.id(tlab1.label) == self.trees.id(tlab2.label):
+        #     assert tlab1.label is tlab2.label
+        #     return True
+        # return False
+        return tlab1.label is tlab2.label
+
+    def _new_pairs_after_tainting(
+        self,
+        tainted_sigma1: TaintedLabel,
+        new_tainted_sigma1: TaintedLabel,
+        P_Tainted: set[TaintedPair],  # noqa: N803
+    ):
+        for p in P_Tainted:
+            if self.tainte_label_equality(p.parent, tainted_sigma1):
+                yield replace(p, parent=new_tainted_sigma1)
+            if self.tainte_label_equality(p.child, tainted_sigma1):
+                yield replace(p, child=new_tainted_sigma1)
+
+    def _internal_tainting_steps(self, taintd_sigma: TaintedLabel) -> Iterable[TaintingStep]:
+        start_ptr_tainting = self._start_of_pointer_tainting(taintd_sigma)
+        if start_ptr_tainting is not None:
+            yield start_ptr_tainting
+
+        # internal pointer tainting propagation
+        internal_ptr_tainting_propagation = self._internal_ptr_taint_propagation(taintd_sigma)
+        if internal_ptr_tainting_propagation is not None:
+            yield internal_ptr_tainting_propagation
+
+        # end of pointer tainting
+        end_ptr_tainting = self._end_of_pointer_tainting(taintd_sigma)
+        if end_ptr_tainting is not None:
+            yield end_ptr_tainting
+
+    def _external_tainting_steps(self, tainted_pair: TaintedPair) -> Iterable[TaintingStep]:
+        structural_child_tainting = self._structural_child_tainting(tainted_pair)
+        if structural_child_tainting is not None:
+            yield structural_child_tainting
+
+        # parent to j-th child pointer tainting propagation
+        parent_to_jth_child_ptr_tainting_propagation = self._parent_to_jth_child_ptr_taint_propagation(
+            tainted_pair
+        )
+        if parent_to_jth_child_ptr_tainting_propagation is not None:
+            yield parent_to_jth_child_ptr_tainting_propagation
+
+        # child to parent pointer tainting propagation
+        child_to_parent_ptr_tainting_propagation = self._child_to_parent_ptr_taint_propagation(tainted_pair)
+        if child_to_parent_ptr_tainting_propagation is not None:
+            yield child_to_parent_ptr_tainting_propagation
+
+    def taint(self) -> tuple[list[TaintingStep], set[TaintedLabel], set[TaintedPair]]:
+        L_Terminal, P_Terminal = generate_L_P_Terminal(self.trees)  # noqa: N806
+        L_Tainted: dict[TaintedLabel, TaintedLabel] = dict()  # noqa: N806
+        P_Tainted: set[TaintedPair] = set()  # noqa: N806
+        tainting_steps: list[TaintingStep] = []
+        for term_lab in L_Terminal:
+            if self.trees.is_backbone_label(term_lab):
+                continue
+            tainted_lab = self._init_tainted_label(term_lab)
+            L_Tainted[tainted_lab] = tainted_lab
+            if end_of_lace(term_lab) and not term_lab.frame.isnil[self.root_name]:
+                step = LookingForRoot(tainted_label=tainted_lab)
+            else:
+                step = TaintingInitialization(tainted_label=tainted_lab)
+            tainting_steps.append(step)
+
+        for p in P_Terminal:
+            if self.trees.is_backbone_label(p[0]) or self.trees.is_backbone_label(p[1]):
+                continue
+            tainted_parent = self._init_tainted_label(p[0])
+            tainted_child = self._init_tainted_label(p[1])
+            tainted_parent = L_Tainted[tainted_parent]
+            tainted_child = L_Tainted[tainted_child]
+            tainted_pair = TaintedPair(parent=tainted_parent, child=tainted_child, child_key=p[2])
+            P_Tainted.add(tainted_pair)
+
+        queue: deque[TaintedLabel | TaintedPair] = deque([*L_Tainted, *P_Tainted])
+
+        def on_new_label(tlab: TaintedLabel, new_tlab: TaintedLabel):
+            L_Tainted[new_tlab] = new_tlab
+            temp_P_tainted: set[TaintedPair] = set() # noqa: N806
+            queue.append(new_tlab)
+            for new_pair in self._new_pairs_after_tainting(tlab, new_tlab, P_Tainted):
+                if new_pair not in P_Tainted:
+                    temp_P_tainted.add(new_pair)
+                    queue.append(new_pair)
+            P_Tainted.update(temp_P_tainted)
+
+        visited: set[TaintedLabel | TaintedPair] = set()
+
+        while queue:
+            tainted_object = queue.popleft()
+            if tainted_object in visited:
+                continue
+            visited.add(tainted_object)
+            match tainted_object:
+                case TaintedLabel() as tlab:
+                    temp_tainting_steps = self._internal_tainting_steps(tlab)
+                case TaintedPair() as tpair:
+                    temp_tainting_steps = self._external_tainting_steps(tpair)
+            for step in temp_tainting_steps:
+                tainting_steps.append(step)
+                match step:
+                    case StructuralChildTainting(new_child=new_child):
+                        on_new_label(step.child, new_child)
+                    case StartOfPointerTainting(new_lab=new_lab):
+                        on_new_label(step.lab, new_lab)
+                    case InternalTaintingPropagation(new_lab=new_lab):
+                        on_new_label(step.lab, new_lab)
+                    case UpTaintingPropagation(new_parent=new_parent):
+                        on_new_label(step.parent, new_parent)
+                    case DownTaintingPropagation(new_child=new_child):
+                        on_new_label(step.child, new_child)
+                    case PointerTaintingEnd(new_lab=new_lab):
+                        on_new_label(step.lab, new_lab)
+                    case _:
+                        assert False, "Unreachable branch"
+                        pass
+        return tainting_steps, set(L_Tainted.values()), P_Tainted

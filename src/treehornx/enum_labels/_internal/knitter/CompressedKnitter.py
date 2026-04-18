@@ -89,9 +89,10 @@ class CompressedKnitter(IKnitter):
 
     def _prev_of_internal_step(self, last_frame: Frame) -> tuple[Dir, int]:
         if self._replace_last_frame(last_frame):
-            return (Internal(), last_frame.index)
+            assert last_frame.prev is not None
+            return last_frame.prev
         else:
-            return (Internal(), last_frame.index + 1)
+            return (Internal(), last_frame.index)
 
     def set_ptr_here(self, f1: Frame, p: str) -> FrameDescriptor:
         f2 = FrameDescriptor()
@@ -179,13 +180,14 @@ class CompressedKnitter(IKnitter):
         f2 = default("active", "val", "d", "event", "active_child")(f1, f1, f2)
         return f2
 
-    def step_var_assign_exp(self, f1: Frame, d: Var, exp: Expr) -> tuple[FrameDescriptor, FrameDescriptor | None]:
+    def step_var_assign_exp(self, lab: Label, d: Var, exp: Expr) -> tuple[FrameDescriptor, FrameDescriptor | None]:
+        f1 = lab.frame
         f2 = FrameDescriptor()
         f2 = self.advance_pc(f1, f2)
         f2 = self._copy_all_enum_d_but_target(f1, f2, d.name)
         f2.prev = self._prev_of_internal_step(f1)
         f2 = default("active", "val", "isnil", "event", "active_child")(f1, f1, f2)
-        exp = normalized_expr(exp, f1)
+        exp = normalized_expr(exp, lab)
         if isinstance(exp, ire.EnumConst):
             assert isinstance(exp, ire.EnumConst)
             f2.enum_values[d.name] = exp.variant
@@ -230,7 +232,7 @@ class CompressedKnitter(IKnitter):
         inst = self.function.instructions[f1.pc]
         assert isinstance(inst, IfGoto)
         expr = inst.condition
-        expr = normalized_expr(expr, f1)
+        expr = normalized_expr(expr, sigma)
         ftrue, ffalse = None, None
         if expr == ire.TRUE or expr != ire.FALSE:
             ftrue = FrameDescriptor()
@@ -285,7 +287,7 @@ class CompressedKnitter(IKnitter):
         if sigma.frame.isnil[p]:
             return self.error(sigma.frame), None, StepKind.INTERNAL
         elif stop_rewind(sigma, p):
-            exp = normalized_expr(exp, sigma.frame)
+            exp = normalized_expr(exp, sigma)
             if sort_of(exp).is_enum():
                 if isinstance(exp, (ire.EnumConst, ire.Var)):  # enum values
                     tau_b = FrameDescriptor()
@@ -486,7 +488,7 @@ class CompressedKnitter(IKnitter):
                     return frame, None, kind
                 case VarAssignExpr(d, exp):
                     frame = FrameDescriptor()
-                    frame, frame_false = self.step_var_assign_exp(pair.leader().frame, d, exp)
+                    frame, frame_false = self.step_var_assign_exp(pair.leader(), d, exp)
                     return frame, frame_false, StepKind.INTERNAL
                 case FieldAssignExpr(pfield, exp):
                     frame, frame2, kind = self.step_field_assign_exp(pair, pfield.ptr.name, pfield.name, exp)
@@ -516,7 +518,7 @@ class CompressedKnitter(IKnitter):
             assert framed.prev == sigma.frame.prev
         else:
             framed.index = sigma.frame.index + 1
-            assert framed.prev == (Internal(), sigma.frame.index + 1)
+            assert framed.prev == (Internal(), sigma.frame.index)
         return framed
 
     def psi_external(self, pair: Pair, framed: FrameDescriptor) -> FrameDescriptor:

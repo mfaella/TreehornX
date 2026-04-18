@@ -1,7 +1,5 @@
-
-
-from dataclasses import dataclass
 import csv
+from dataclasses import dataclass
 from pathlib import Path
 
 
@@ -17,12 +15,14 @@ class Stats:
     largest_label_length: int = 0
     labels_count: int = 0
 
+
 stats = Stats()
 
+
 def dump_stats_to_csv(file_path: str | Path, stats: Stats):
-    with open(file_path, 'w', newline='') as csvfile:
+    with open(file_path, "w", newline="") as csvfile:
         writer = csv.writer(csvfile)
-        writer.writerow(['Metric', 'Value'])
+        writer.writerow(["Metric", "Value"])
         for field in stats.__dataclass_fields__:
             value = getattr(stats, field)
             writer.writerow([field, value])

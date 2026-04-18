@@ -1,6 +1,7 @@
 from treehornx.enum_labels.core.Dir import Internal
 from treehornx.enum_labels.core.Frame import Frame
 from treehornx.enum_labels.core.Label import Label
+from treehornx.enum_labels.helpers import are_equal_after_rewind
 from treehornx.ir.expressions import (
     FALSE,
     TRUE,
@@ -22,37 +23,38 @@ from treehornx.ir.expressions import (
 )
 
 
-def normalized_expr(expr: Expr, f_prev: Frame) -> Expr:  # noqa: PLR0915
+def normalized_expr(expr: Expr, lab_prev: Label) -> Expr:  # noqa: PLR0915
+    f_prev = lab_prev.frame
     match expr:
         case Var(name, sort) if sort.is_enum():
             flag_name = f_prev.enum_vars[name]
             return EnumConst(sort, flag_name)  # type: ignore
         case Not(Not(e)):
-            return normalized_expr(e, f_prev)
+            return normalized_expr(e, lab_prev)
         case Not(Eq(lhs, rhs)):
-            return normalized_expr(Ne(lhs, rhs), f_prev)
+            return normalized_expr(Ne(lhs, rhs), lab_prev)
         case Not(Ne(lhs, rhs)):
-            return normalized_expr(Eq(lhs, rhs), f_prev)
+            return normalized_expr(Eq(lhs, rhs), lab_prev)
         case Not(Le(lhs, rhs)):
-            return normalized_expr(Gt(lhs, rhs), f_prev)
+            return normalized_expr(Gt(lhs, rhs), lab_prev)
         case Not(Lt(lhs, rhs)):
-            return normalized_expr(Ge(lhs, rhs), f_prev)
+            return normalized_expr(Ge(lhs, rhs), lab_prev)
         case Not(Ge(lhs, rhs)):
-            return normalized_expr(Lt(lhs, rhs), f_prev)
+            return normalized_expr(Lt(lhs, rhs), lab_prev)
         case Not(Gt(lhs, rhs)):
-            return normalized_expr(Le(lhs, rhs), f_prev)
+            return normalized_expr(Le(lhs, rhs), lab_prev)
         case Not(e):
             if e == TRUE:
                 return FALSE
             elif e == FALSE:
                 return TRUE
-            normal_expr = normalized_expr(e, f_prev)
+            normal_expr = normalized_expr(e, lab_prev)
             if e == normal_expr:
                 return Not(normal_expr)
             else:
-                return normalized_expr(Not(normal_expr), f_prev)
+                return normalized_expr(Not(normal_expr), lab_prev)
         case And():
-            new_args = [normalized_expr(arg, f_prev) for arg in expr.args()]
+            new_args = [normalized_expr(arg, lab_prev) for arg in expr.args()]
             if FALSE in new_args:
                 return FALSE
             new_args = [arg for arg in new_args if arg != TRUE]
@@ -63,7 +65,7 @@ def normalized_expr(expr: Expr, f_prev: Frame) -> Expr:  # noqa: PLR0915
             else:
                 return And(*new_args)
         case Or():
-            new_args = [normalized_expr(arg, f_prev) for arg in expr.args()]
+            new_args = [normalized_expr(arg, lab_prev) for arg in expr.args()]
             if TRUE in new_args:
                 return TRUE
             new_args = [arg for arg in new_args if arg != FALSE]
@@ -74,8 +76,8 @@ def normalized_expr(expr: Expr, f_prev: Frame) -> Expr:  # noqa: PLR0915
             else:
                 return Or(*new_args)
         case Eq(lhs, rhs):
-            lhs = normalized_expr(lhs, f_prev)
-            rhs = normalized_expr(rhs, f_prev)
+            lhs = normalized_expr(lhs, lab_prev)
+            rhs = normalized_expr(rhs, lab_prev)
             if lhs == rhs:
                 return TRUE
             elif sort_of(lhs).is_enum():
@@ -99,12 +101,14 @@ def normalized_expr(expr: Expr, f_prev: Frame) -> Expr:  # noqa: PLR0915
                 return FALSE
             elif f_prev.isnil[p.name]:
                 return TRUE
+            elif are_equal_after_rewind(lab_prev, p.name, q.name):
+                return TRUE
             else:
-                return expr
+                return FALSE
 
         case Ne(lhs, rhs):
-            lhs = normalized_expr(lhs, f_prev)
-            rhs = normalized_expr(rhs, f_prev)
+            lhs = normalized_expr(lhs, lab_prev)
+            rhs = normalized_expr(rhs, lab_prev)
             if lhs == rhs:
                 return FALSE
             elif sort_of(lhs).is_enum():

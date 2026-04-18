@@ -38,50 +38,50 @@ def default_solver() -> CHCSolver:
     binary_path = INTEGRATION_TESTS_DIR / "solvers"
     return GolemSolver(binary_path=binary_path)
 
-def make_system(function: Function, root: Var, trees: KnittedTrees, pre_ctx: PreContext, exit_code: ExitCodeKind, n: int = DEFAULT_N, m: int = DEFAULT_M, c: int = DEFAULT_C):
+def make_system_with_pre(function: Function, root: Var, trees: KnittedTrees, pre_ctx: PreContext, exit_code: ExitCodeKind, n: int = DEFAULT_N, m: int = DEFAULT_M, c: int = DEFAULT_C):
     assert isinstance(root.sort, Pointer) and isinstance(root.sort.pointee, Struct)
     system_factory = CHCSystemFactory(function, root.sort.pointee, trees, pre_ctx)
     system = system_factory.make_system(exit_code)
     return system
 
-def check_sat(file_name: str, pre_ctx: PreContext, exit_code: ExitCodeKind, solver: CHCSolver = default_solver()) -> Status:
+def check_sat_with_pre(file_name: str, pre_ctx: PreContext, exit_code: ExitCodeKind, solver: CHCSolver = default_solver()) -> Status:
     function, root, trees = parse_and_generate_labels(file_name)
-    system = make_system(function, root, trees, pre_ctx, exit_code)
+    system = make_system_with_pre(function, root, trees, pre_ctx, exit_code)
     solver.load_system(system)
     result = solver.solve()
     return result
 
 def test_avl_safe_check_balance_and_root_height():
     pre_ctx = avl_strict_ctx()
-    result = check_sat("avl_safe_check_balance_and_root_height.c", pre_ctx, ExitCodeKind.ERR)
+    result = check_sat_with_pre("avl_safe_check_balance_and_root_height.c", pre_ctx, ExitCodeKind.ERR)
     assert result == Status.SAT, f"Expected SAT, got {result}"
 
 def test_avl_unsafe_check_balance():
     pre_ctx = avl_strict_ctx()
-    result = check_sat("avl_unsafe_check_balance.c", pre_ctx, ExitCodeKind.ERR)
+    result = check_sat_with_pre("avl_unsafe_check_balance.c", pre_ctx, ExitCodeKind.ERR)
     assert result == Status.UNSAT, f"Expected UNSAT, got {result}"
 
 def test_avl_unsafe_check_root_height():
     pre_ctx = avl_strict_ctx()
-    result = check_sat("avl_unsafe_check_root_height.c", pre_ctx, ExitCodeKind.ERR)
+    result = check_sat_with_pre("avl_unsafe_check_root_height.c", pre_ctx, ExitCodeKind.ERR)
     assert result == Status.UNSAT, f"Expected UNSAT, got {result}"
 
 def test_bst_safe_min_lt_max():
     pre_ctx = bst_strict_ctx()
-    result = check_sat("bst_safe_min_lt_max.c", pre_ctx, ExitCodeKind.ERR)
+    result = check_sat_with_pre("bst_safe_min_lt_max.c", pre_ctx, ExitCodeKind.ERR)
     assert result == Status.SAT, f"Expected SAT, got {result}"
 
 def test_bst_unsafe_min_lt_max():
     pre_ctx = bst_strict_ctx()
-    result = check_sat("bst_unsafe_min_lt_max.c", pre_ctx, ExitCodeKind.ERR)
+    result = check_sat_with_pre("bst_unsafe_min_lt_max.c", pre_ctx, ExitCodeKind.ERR)
     assert result == Status.UNSAT, f"Expected UNSAT, got {result}"
 
 def test_sll_sorted_safe_first_lt_last():
     pre_ctx = sll_sorted_strict_ctx()
-    result = check_sat("sll_sorted_safe_first_lt_last.c", pre_ctx, ExitCodeKind.ERR)
+    result = check_sat_with_pre("sll_sorted_safe_first_lt_last.c", pre_ctx, ExitCodeKind.ERR)
     assert result == Status.SAT, f"Expected SAT, got {result}"
 
 def test_sll_sorted_unsafe_first_lt_last():
     pre_ctx = sll_sorted_strict_ctx()
-    result = check_sat("sll_sorted_unsafe_first_lt_last.c", pre_ctx, ExitCodeKind.ERR)
+    result = check_sat_with_pre("sll_sorted_unsafe_first_lt_last.c", pre_ctx, ExitCodeKind.ERR)
     assert result == Status.UNSAT, f"Expected UNSAT, got {result}"

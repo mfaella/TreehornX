@@ -7,7 +7,8 @@ from typing import Annotated, Literal
 import typer
 from rich.console import Console
 
-from treehornx.chc.CHCSystemFactory import PreKind
+from treehornx.chc.core import ExitCodeKind
+from treehornx.chc.pre.PreContext import avl_ctx, avl_strict_ctx, bst_ctx, bst_strict_ctx, sll_sorted_ctx, sll_sorted_strict_ctx
 from treehornx.report.visualization import DependencyGraphBuilder, DependencyGraphKind
 from treehornx.ux.output import display_generation_results, display_verify_cmd_option_messages, render_dependency_graph
 from treehornx.ux.parsing import handle_function_parsing, handle_root_fetching
@@ -37,6 +38,7 @@ DEFAULT_N = 128
 DEFAULT_M = 0
 DEFAULT_C = 32
 
+
 @app.command("verify")
 def verify_cmd(
     input_file: Annotated[
@@ -64,9 +66,13 @@ def verify_cmd(
     full_dep_graph: Annotated[bool, typer.Option("--fdg", "--full-dep-graph")] = False,
     compressed_dep_graph: Annotated[bool, typer.Option("--cdg", "--compressed-dep-graph")] = False,
     internal_dependency_graph: Annotated[bool, typer.Option("--idg", "--internal-dep-graph")] = False,
-    pre: Annotated[Literal['bst', 'bst_strict', 'sll_sorted', 'sll_sorted_strict', 'avl', 'avl_strict']|None, typer.Option("--pre")] = None,
+    pre: Annotated[
+        Literal["bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl", "avl_strict"] | None,
+        typer.Option("--pre"),
+    ] = None,
+    post: Annotated[bool, typer.Option("--post")] = False,
     produce_csv: Annotated[bool, typer.Option("--csv")] = False,
-    produce_json: Annotated[bool, typer.Option("--json")] = False
+    produce_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
     display_verify_cmd_option_messages(
         function_name,
@@ -106,15 +112,15 @@ def verify_cmd(
     if smt2:
         exit_codes = [k for k, v in trivially_sat.items() if not v]
         pre_map = {
-            'bst': PreKind.BST,
-            'bst_strict': PreKind.BST_STRICT,
-            'sll_sorted': PreKind.SLL_SORTED,
-            'sll_sorted_strict': PreKind.SLL_SORTED_STRICT,
-            'avl': PreKind.AVL,
-            'avl_strict': PreKind.AVL_STRICT,
+            "bst": bst_ctx(),
+            "bst_strict": bst_strict_ctx(),
+            "sll_sorted": sll_sorted_ctx(),
+            "sll_sorted_strict": sll_sorted_strict_ctx(),
+            "avl": avl_ctx(),
+            "avl_strict": avl_strict_ctx(),
         }
-        pre_kind = pre_map[pre] if pre else None
-        handle_smt2_scripts_creation(function, root, trees, exit_codes, pre_kind)
+        pre_ctx = pre_map[pre] if pre else None
+        handle_smt2_scripts_creation(function, root, trees, exit_codes, pre_ctx, post)
 
     graph_builder = DependencyGraphBuilder(function, trees)
     if full_dep_graph:

@@ -85,7 +85,7 @@ class LabFactory:
                 yield smt.Equals(left, right)
 
     def _expr_to_smt(self, expr: Expr, inlab: Label) -> FNode:
-        expr = normalized_expr(expr, inlab.frame)
+        expr = normalized_expr(expr, inlab)
         op_converter_map: dict[type, Callable[..., FNode]] = {
             # unaries
             Not: smt.Not,
@@ -115,8 +115,8 @@ class LabFactory:
             case float():
                 return smt.Real(expr)
             case Ne(left, right) | Eq(left, right) if sort_of(left).is_enum():
-                left = normalized_expr(left, inlab.frame)
-                right = normalized_expr(right, inlab.frame)
+                left = normalized_expr(left, inlab)
+                right = normalized_expr(right, inlab)
                 return smt.Bool(left == right)
             case Not() | Eq() | Ne() | Lt() | Gt() | Le() | Ge() | Sub() | Div() | And() | Or() | Add() | Mul():
                 args = (self._expr_to_smt(arg, inlab) for arg in expr.args())
@@ -139,7 +139,7 @@ class LabFactory:
             case IfGoto(cond, _):
                 branch_case = outlab.frame.pc != inlab.frame.pc + 1
                 cond = cond if branch_case is True else Not(cond)
-                cond = normalized_expr(cond, inlab.frame)
+                cond = normalized_expr(cond, inlab)
                 if cond not in {TRUE, FALSE}:
                     cond_smt = self._expr_to_smt(cond, inlab)
                     constraints.append(cond_smt)
@@ -147,7 +147,7 @@ class LabFactory:
             case VarAssignExpr(var, expr) if var.sort == BOOL:
                 if outlab.frame.enum_vars[var.name] == "FALSE":
                     expr = Not(expr)
-                expr = normalized_expr(expr, inlab.frame)
+                expr = normalized_expr(expr, inlab)
                 if expr not in {TRUE, FALSE}:
                     expr_smt = self._expr_to_smt(expr, inlab)
                     constraints.append(expr_smt)
@@ -155,7 +155,7 @@ class LabFactory:
             case VarAssignExpr(var, expr) if var.sort.is_enum():
                 pass
             case VarAssignExpr(var, expr):
-                expr = normalized_expr(expr, inlab.frame)
+                expr = normalized_expr(expr, inlab)
                 if isinstance(expr, Field):
                     field_var = self._data_field(expr.name)
                     expr_smt = self.fragment_factory.field_symbol(field_var, inlab)
@@ -170,7 +170,7 @@ class LabFactory:
             case FieldAssignExpr(field, expr) if sort_of(field) == BOOL:
                 if outlab.frame.enum_fields[field.name] == "FALSE":
                     expr = Not(expr)
-                expr = normalized_expr(expr, inlab.frame)
+                expr = normalized_expr(expr, inlab)
                 if expr not in {TRUE, FALSE}:
                     expr_smt = self._expr_to_smt(expr, inlab)
                     constraints.append(expr_smt)
@@ -178,7 +178,7 @@ class LabFactory:
             case FieldAssignExpr(field, expr) if not sort_of(field).is_enum():
                 field_var = self._data_field(field.name)
                 field_smt = self.fragment_factory.field_symbol(field_var, outlab)
-                expr = normalized_expr(expr, inlab.frame)
+                expr = normalized_expr(expr, inlab)
                 expr_smt = self._expr_to_smt(expr, inlab)
                 constraints.append(smt.Equals(field_smt, expr_smt))
                 constraints.extend(
