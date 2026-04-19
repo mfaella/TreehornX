@@ -1,3 +1,4 @@
+from itertools import islice
 from treehornx.enum_labels.core.Event import FieldAssignP, FieldHere, Here
 from treehornx.enum_labels.core.Label import Label
 
@@ -9,19 +10,16 @@ def no_assignment_to_field(label: Label, field_name: str) -> bool:
     return True
 
 
-def get_last_assignment_to_field(label: Label, field_name: str) -> tuple[str, int] | None:
-    for frame in reversed(label):
-        for e in frame.events:
-            if isinstance(e, FieldAssignP) and e.pfield == field_name and e.p is not None:
-                return (e.p, frame.index)
-    return None
-
-
 def last_assignment_to_field(label: Label, field_name: str, ptr_name: str, i: int) -> bool:
-    last_ass = get_last_assignment_to_field(label, field_name)
-    if last_ass is None:
+    frame = label[i]
+    if FieldAssignP(field_name, ptr_name) not in frame.events:
         return False
-    return (ptr_name, i) == last_ass
+
+    for frame in label[i+1:]:
+        if frame.events.intersection([FieldAssignP(field_name, ptr_name), FieldAssignP(field_name, None), FieldHere(field_name)]):
+            return False
+
+    return True
 
 
 def ptr_here(label: Label, i: int, ptr_name: str) -> bool:

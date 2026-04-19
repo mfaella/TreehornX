@@ -553,10 +553,25 @@ class CompressedKnitter(IKnitter):
                     events = {
                         e
                         for e in events
-                        if not (isinstance(e, FieldAssignP) or (isinstance(e, FieldAssignP) and e.p == pfield))
+                        if (
+                            (not (isinstance(e, FieldAssignP) or (isinstance(e, FieldAssignP) and e.pfield == pfield))) and
+                            (not (isinstance(e, FieldHere) or (isinstance(e, FieldHere) and e.pfield == pfield)))
+                        )
+                    }
+                case FieldHere(pfield):
+                    events = {
+                        e
+                        for e in events
+                        if not (
+                            (isinstance(e, FieldAssignP) and e.pfield == pfield)
+                            or (isinstance(e, FieldHere) and e.pfield == pfield)
+                        )
                     }
                 case _:
                     pass
+            for p, isnil in framed.isnil.items():
+                if isnil:
+                    events.discard(Here(p))
             if framed.event != NOP():
                 events.add(framed.event)
 

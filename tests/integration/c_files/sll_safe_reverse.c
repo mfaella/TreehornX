@@ -16,4 +16,6 @@ void sll_safe_reverse(struct Node *root) {
         y = first;
         first = tmp;
     }
+
+    root = y;
 }

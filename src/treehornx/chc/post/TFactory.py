@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 from itertools import product
+from logging import Logger
 from typing import Iterable
 
 import pychc.shortcuts as chc
@@ -7,7 +8,7 @@ import pysmt.shortcuts as smt
 from pysmt.fnode import FNode
 
 from treehornx.chc.computation.LabFactory import LabFactory
-from treehornx.chc.post.helpers import last_assignment_to_field, no_assignment_to_field
+from treehornx.chc.post.helpers import last_assignment_to_field, no_assignment_to_field, ptr_here
 from treehornx.chc.post.tainting import (
     DownTaintingPropagation,
     InternalTaintingPropagation,
@@ -22,8 +23,8 @@ from treehornx.chc.post.tainting import (
     UpTaintingPropagation,
 )
 from treehornx.chc.utils.CHCFragmentFactory import CHCFragmentFactory
-from treehornx.enum_labels.core.Dir import Internal, Up
-from treehornx.enum_labels.helpers import points_here
+from treehornx.enum_labels.core.Dir import Down, Internal, Up
+from treehornx.enum_labels.core.Event import FieldAssignP, FieldHere, Here
 
 
 @dataclass
@@ -73,7 +74,7 @@ class TFactory:
             child_variable_prefix="c",
         )
         body = smt.And(sigma_app, tau_app, *constraints)
-        head = self.apply(tainting_step.new_child)
+        head = self.apply(tainting_step.new_child, prefix="c")
         return chc.Clause(body, head)
 
     def _T_start_of_pointer_tainting(self, tainting_step: StartOfPointerTainting) -> FNode:  # noqa: N802
@@ -84,6 +85,7 @@ class TFactory:
     def _T_internal_tainting_propagation(self, tainting_step: InternalTaintingPropagation) -> FNode:  # noqa: N802
         body = self.apply(tainting_step.lab)
         head = self.apply(tainting_step.new_lab)
+        assert tainting_step.new_lab.label is tainting_step.lab.label
         return chc.Clause(body, head)
 
     def _T_up_tainting_propagation(self, tainting_step: UpTaintingPropagation) -> FNode:  # noqa: N802
@@ -97,7 +99,7 @@ class TFactory:
             child_variable_prefix="c",
         )
         body = smt.And(parent_app, child_app, *constraints)
-        head = self.apply(tainting_step.new_parent)
+        head = self.apply(tainting_step.new_parent, prefix="p")
         return chc.Clause(body, head)
 
     def _T_down_tainting_propagation(self, tainting_step: DownTaintingPropagation) -> FNode:  # noqa: N802
@@ -111,12 +113,13 @@ class TFactory:
             child_variable_prefix="c",
         )
         body = smt.And(parent_app, child_app, *constraints)
-        head = self.apply(tainting_step.new_child)
+        head = self.apply(tainting_step.new_child, prefix="c")
         return chc.Clause(body, head)
 
     def _T_pointer_tainting_end(self, tainting_step: PointerTaintingEnd) -> FNode:  # noqa: N802
         body = self.apply(tainting_step.lab)
         head = self.apply(tainting_step.new_lab)
+        assert tainting_step.new_lab.label is tainting_step.lab.label
         return chc.Clause(body, head)
 
     def T(self, tainting_step: TaintingStep) -> FNode:  # noqa: N802
@@ -153,10 +156,10 @@ class TFactory:
             if not taint_ptr[(p2, i2)]:
                 continue
 
-            if not points_here(tainted_label.label, i1, p1):
+            if not ptr_here(tainted_label.label, i1, p1):
                 continue
 
-            if not points_here(tainted_label.label, i2, p2):
+            if not ptr_here(tainted_label.label, i2, p2):
                 continue
 
             body = self.apply(tainted_label)
@@ -182,7 +185,7 @@ class TFactory:
             if not taint_ptr[(p, i2)]:
                 continue
 
-            if points_here(sigma2, i2, p):
+            if ptr_here(sigma2, i2, p):
                 continue
 
             i1 = sigma2_i2_prev[1]
@@ -220,7 +223,7 @@ class TFactory:
             if not taint_ptr2[(p, i2)]:
                 continue
 
-            if points_here(sigma2, i2, p):
+            if ptr_here(sigma2, i2, p):
                 continue
 
             i1 = sigma2_i2_prev[1]
@@ -229,7 +232,13 @@ class TFactory:
                 if isinstance(child_key, int):
                     continue
 
-                if last_assignment_to_field(sigma1, child_key, p, i1):
+                # In the paper the condition includes only last_assignment_to_field. This query specifically check if a pointer is tainted (the search for that pointer is started)
+                # and the backwarding search encounter a field of another node which has been last assigned to the same pointer and in the meantime the pointer is not been updated.
+                # Since in the compressed encoding all the events consecutively executed on the same node are merged into a single set of events, it's not enough to check that a pointer is been assigned to that field,
+                # but also that the pointer is not been uppdated int the meantime. Checking "Here(p) not in frame.events" it is enough to ensure that the pointer is been updated after being assigne to the field.
+                # Otherwise the pointer would point to the current node and the events set would contain FieldHere(pfield) instead of FieldAssignP(pfield, p) which is automatically discarded by last_assignemnt_to_field.
+                #
+                if last_assignment_to_field(sigma1, child_key, p, i1) and Here(p) not in sigma1.frame.events:
                     sigma1_app = self.apply(t_sigma1, prefix="p")
                     sigma2_app = self.apply(t_sigma2, prefix="c")
                     constraints = self.fragment_factory.cross_data_constraints(
@@ -260,13 +269,13 @@ class TFactory:
         for p, i2 in taint_ptr2.keys():
             sigma2_i2_prev = sigma2[i2].prev
             assert sigma2_i2_prev is not None
-            if sigma2_i2_prev[0] != Up():
+            if sigma2_i2_prev[0] != Down(child_key):
                 continue
 
             if not taint_ptr2[(p, i2)]:
                 continue
 
-            if points_here(sigma2, i2, p):
+            if ptr_here(sigma2, i2, p):
                 continue
 
             i1 = sigma2_i2_prev[1]
@@ -275,7 +284,7 @@ class TFactory:
                 if isinstance(child_key, int):
                     continue
 
-                if last_assignment_to_field(sigma1, child_key, p, i1):
+                if last_assignment_to_field(sigma1, child_key, p, i1) and Here(p) not in sigma1.frame.events:
                     sigma1_app = self.apply(t_sigma1, prefix="c")
                     sigma2_app = self.apply(t_sigma2, prefix="p")
                     constraints = self.fragment_factory.cross_data_constraints(
@@ -299,7 +308,7 @@ class TFactory:
         taint_ptr2 = t_tau.taint_ptr
         child_key = tpair.child_key
 
-        if not tpair.parent.taint_node:
+        if not t_sigma.taint_node:
             return None
 
         if isinstance(child_key, int):
@@ -312,7 +321,7 @@ class TFactory:
             if not taint_ptr2[(p, i)]:
                 continue
 
-            if not points_here(tau, i, p):
+            if not ptr_here(tau, i, p):
                 continue
 
             if not tau.frame.active:
@@ -333,17 +342,48 @@ class TFactory:
 
         return None
 
+    def _child_points_here(self, t_lab: TaintedLabel, child_name: str) -> bool:
+        for frame in reversed(t_lab.label):
+            if frame.events.intersection({FieldHere(child_name)}):
+                return True
+            if any(isinstance(e, FieldAssignP) and e.pfield == child_name for e in frame.events):
+                return False
+        return False
+
+    def _query_4(self, t_lab: TaintedLabel) -> FNode | None:
+        if not t_lab.taint_node:
+            return None
+
+        for child_key in t_lab.label.frame.active_child.keys():
+            if isinstance(child_key, int):
+                continue
+
+            if self._child_points_here(t_lab, child_key):
+                body = self.apply(t_lab)
+                head = smt.FALSE()
+                return chc.Clause(body, head)
+
+        return None
+
     def query(self, tainted_object: TaintedLabel | TaintedPair) -> Iterable[FNode]:
         match tainted_object:
             case TaintedLabel() as tlab:
                 if q := self._query_1(tlab):
+                    print("Query 1 triggered")
                     yield q
                 if q := self._query_2_internal(tlab):
+                    print("Query 2 internal triggered")
+                    yield q
+                if q := self._query_4(tlab):
+                    print("Query 4 triggered")
                     yield q
             case TaintedPair() as tpair:
                 if q := self._query_2_up(tpair):
+                    print("Query 2 up triggered")
                     yield q
                 if q := self._query_2_down(tpair):
+                    print("Query 2 down triggered")
                     yield q
                 if q := self._query_3(tpair):
+                    print("Query 3 triggered")
                     yield q

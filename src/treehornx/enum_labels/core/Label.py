@@ -95,4 +95,6 @@ class Label:
     def origin_at(self, index: int) -> Label:
         if index < 0:
             index = len(self) + index
+        if not (0 <= index < len(self)):
+            raise IndexError("Label index out of range")
         return next(islice(self.iter_origins(), index, index + 1))
