@@ -59,6 +59,24 @@ class CHCSystemFactory:
     def T_factory(self) -> TFactory:  # noqa: N802
         return TFactory(self.lab_factory)
 
+    @cached_property
+    def trivially_safe_for_err(self) -> bool:
+        return not any(ERR() in lab.frame.events for lab in self.trees.labels())
+
+    @cached_property
+    def trivially_safe_for_oom(self) -> bool:
+        return not any(OOM() in lab.frame.events for lab in self.trees.labels())
+
+    @cached_property
+    def trivially_safe_for_lof(self) -> bool:
+        return not any(LOF() in lab.frame.events for lab in self.trees.labels())
+
+    @cached_property
+    def trivially_safe_for_post_is_tree(self) -> bool:
+        if self.root_name is None:
+            raise ValueError("Root name must be provided to determine if the program is trivially safe for postcondition generation.")
+        return next(iter(produce_T_queries(self.trees, self.root_name, self.T_factory)), None) is None
+
     def _query_required(self, lab: Label, exit_code: ExitCodeKind) -> bool:
         match exit_code:
             case ExitCodeKind.ERR:

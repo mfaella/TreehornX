@@ -8,6 +8,7 @@ from treehornx.enum_labels.core.Label import Label
 
 from .PreFactory import PreFactory
 from .psi import *
+from .PreContext import PreContext
 
 
 def pre_predicates(trees: KnittedTrees, pre_factory: PreFactory) -> Iterable[FNode]:
