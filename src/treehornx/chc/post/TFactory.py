@@ -369,21 +369,15 @@ class TFactory:
         match tainted_object:
             case TaintedLabel() as tlab:
                 if q := self._query_1(tlab):
-                    print("Query 1 triggered")
                     yield q
                 if q := self._query_2_internal(tlab):
-                    print("Query 2 internal triggered")
                     yield q
                 if q := self._query_4(tlab):
-                    print("Query 4 triggered")
                     yield q
             case TaintedPair() as tpair:
                 if q := self._query_2_up(tpair):
-                    print("Query 2 up triggered")
                     yield q
                 if q := self._query_2_down(tpair):
-                    print("Query 2 down triggered")
                     yield q
                 if q := self._query_3(tpair):
-                    print("Query 3 triggered")
                     yield q

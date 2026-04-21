@@ -149,9 +149,7 @@ class LabFactory:
                     expr_smt = self._expr_to_smt(expr, inlab)
                     constraints.append(expr_smt)
                 constraints.extend(self._internal_equality_constraints(inlab, outlab))
-            case VarAssignExpr(var, expr) if var.sort.is_enum():
-                pass
-            case VarAssignExpr(var, expr):
+            case VarAssignExpr(var, expr) if not var.sort.is_enum():
                 expr = normalized_expr(expr, inlab)
                 if isinstance(expr, Field):
                     field_var = self._data_field(expr.name)

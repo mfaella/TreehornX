@@ -245,11 +245,11 @@ class Tainter:
         if child_to_parent_ptr_tainting_propagation is not None:
             yield child_to_parent_ptr_tainting_propagation
 
-    def taint(self) -> tuple[list[TaintingStep], set[TaintedLabel], set[TaintedPair]]:
+    def taint(self) -> tuple[set[TaintingStep], set[TaintedLabel], set[TaintedPair]]:
         L_Terminal, P_Terminal = generate_L_P_Terminal(self.trees)  # noqa: N806
         db: TaintDB = TaintDB()
 
-        tainting_steps: list[TaintingStep] = []
+        tainting_steps: set[TaintingStep] = set()
         for term_lab in L_Terminal:
             tainted_lab = self._init_tainted_label(term_lab)
             db.add_label(tainted_lab)
@@ -257,7 +257,7 @@ class Tainter:
                 step = LookingForRoot(tainted_label=tainted_lab)
             else:
                 step = TaintingInitialization(tainted_label=tainted_lab)
-            tainting_steps.append(step)
+            tainting_steps.add(step)
 
         for p in P_Terminal:
             tainted_parent = self._init_tainted_label(p[0])
@@ -293,7 +293,7 @@ class Tainter:
                 case TaintedPair() as tpair:
                     temp_tainting_steps = self._external_tainting_steps(tpair)
             for step in temp_tainting_steps:
-                tainting_steps.append(step)
+                tainting_steps.add(step)
                 match step:
                     case StructuralChildTainting(new_child=new_child):
                         on_new_label(step.child, new_child)
