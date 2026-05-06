@@ -49,7 +49,7 @@ void bst_safe_min_lt_max_hcpre(struct Node* root) {
         tmp_value = current->data;
 		if(tmp) {
             current->min = return_min; //risale
-            if(tmp_value < return_max) {
+            if(tmp_value <= return_max) {
                 return;
             }
        	}
@@ -75,7 +75,7 @@ void bst_safe_min_lt_max_hcpre(struct Node* root) {
         tmp_value = current->data;
         if(tmp) {
             current->max = return_max;
-            if(tmp_value > return_min) {
+            if(tmp_value >= return_min) {
                 return;
             }
        	}
