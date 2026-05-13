@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from functools import cached_property
 from typing import Iterable
 
 import pychc.shortcuts as chc
@@ -8,7 +9,7 @@ from pysmt.fnode import FNode
 
 from treehornx.chc.computation.LabFactory import LabFactory
 from treehornx.chc.core import ExitCodeKind
-from treehornx.chc.pre.PreContext import PreContext
+from treehornx.chc.SDTAContext import SDTAContext
 from treehornx.chc.utils import label_exit
 from treehornx.enum_labels.core.Label import Label
 from treehornx.ir.expressions import Var
@@ -21,7 +22,7 @@ class PreFactoryError(Exception):
 
 @dataclass
 class PreFactory:
-    ctx: PreContext
+    ctx: SDTAContext
     lab_factory: LabFactory
 
     def __post_init__(self):
@@ -82,9 +83,9 @@ class PreFactory:
         head = self._apply(label)
         return chc.Clause(body, head)
 
-    def pre_II(
+    def pre_II( # noqa: N802
         self, parent: Label, children: Iterable[tuple[str | int, Label]], exit_codes: set[ExitCodeKind]
-    ) -> FNode:  # noqa: N802
+    ) -> FNode:
         children = list(children)
         assert set(tup[0] for tup in children) == set(child_key for child_key in parent.frame.active_child.keys()), (
             "Children keys do not match the label's children keys."
@@ -92,10 +93,13 @@ class PreFactory:
 
         data_constraints: list[FNode] = []
         pres: list[FNode] = []
-        children_states: dict[str | int, dict[str, FNode] | None] = dict()
+        children_states: dict[str, dict[str, FNode] | None] = dict()
         es: list[FNode] = []
         parent_var_prefix = "p"
         for child_index, (child_key, child) in enumerate(children):
+            if isinstance(child_key, int):
+                continue
+
             child_var_prefix = f"c{child_index}"
 
             pre = self._apply(child, var_prefix=child_var_prefix)
@@ -129,7 +133,8 @@ class PreFactory:
                 )
             )
             states = self._states_dict(parent, prefix=parent_var_prefix)
-            psi = self.ctx.psi(children_states, fields, states)
+            enum_fields = dict(parent[0].enum_fields)
+            psi = self.ctx.psi(children_states, fields, enum_fields, states)
 
         e = self._e_symbol(parent, var_prefix=parent_var_prefix)
         lab = self.lab_factory.apply(parent, parent_var_prefix)

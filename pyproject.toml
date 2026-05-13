@@ -16,6 +16,7 @@ dependencies = [
     "rich",
     "humanfriendly",
     "types-humanfriendly",
+    "func-timeout",
     # report generation
     "pydot",
     # parsing

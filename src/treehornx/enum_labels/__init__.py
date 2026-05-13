@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Iterable
+from typing import Any, Callable, Iterable
 
 from treehornx.chc.core import ExitCodeKind
 from treehornx.enum_labels._internal.EnumLabelGenerator import EnumLabelGenerator
@@ -135,6 +135,10 @@ class KnittedTrees:
     def pairs(self) -> Iterable[tuple[Label, Label, int | str]]:
         return iter(self._pairs)
 
+    @cached_property
+    def root_name(self) -> str:
+        return self._root_name
+
 
 def _get_steps(states: StatesDB) -> Iterable[Step]:
     for pair in states.find_all_pairs():
@@ -153,10 +157,29 @@ def _get_steps(states: StatesDB) -> Iterable[Step]:
                 yield Step(ancestors, lab, Internal())
 
 
-def generate_labels(func: Function, root: Var, m: int, n: int, c: int | None = None) -> KnittedTrees:
+def generate_labels(
+    func: Function,
+    root: Var,
+    m: int,
+    n: int,
+    c: int | None = None,
+    backbone_label_filter: Callable[[Label, bool], bool] | None = None,
+    backbone_pair_filter: Callable[[tuple[Label, Label, int | str], bool], bool] | None = None,
+) -> KnittedTrees:
     if root not in func.vars:
         raise RootRefVariableNotFoundError(f"Root reference variable '{root.name}' not found in the function.")
-    generator = EnumLabelGenerator(func, root, m, n, c)
+    def default_filter(arg: Any, is_root: bool) -> bool:
+        return True
+
+    generator = EnumLabelGenerator(
+        func,
+        root,
+        m,
+        n,
+        c,
+        backbone_label_filter=backbone_label_filter or default_filter,
+        backbone_pair_filter=backbone_pair_filter or default_filter,
+    )
     generator.generate()
     result = KnittedTrees(
         generator.k,

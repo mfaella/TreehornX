@@ -235,9 +235,8 @@ class TFactory:
                 # In the paper the condition includes only last_assignment_to_field. This query specifically check if a pointer is tainted (the search for that pointer is started)
                 # and the backwarding search encounter a field of another node which has been last assigned to the same pointer and in the meantime the pointer is not been updated.
                 # Since in the compressed encoding all the events consecutively executed on the same node are merged into a single set of events, it's not enough to check that a pointer is been assigned to that field,
-                # but also that the pointer is not been uppdated int the meantime. Checking "Here(p) not in frame.events" it is enough to ensure that the pointer is been updated after being assigne to the field.
+                # but also that the pointer is not been uppdated int the meantime. Checking "Here(p) not in frame.events" it is enough to ensure that the pointer is been updated after being assigned to the field.
                 # Otherwise the pointer would point to the current node and the events set would contain FieldHere(pfield) instead of FieldAssignP(pfield, p) which is automatically discarded by last_assignemnt_to_field.
-                #
                 if last_assignment_to_field(sigma1, child_key, p, i1) and Here(p) not in sigma1.frame.events:
                     sigma1_app = self.apply(t_sigma1, prefix="p")
                     sigma2_app = self.apply(t_sigma2, prefix="c")

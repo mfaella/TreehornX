@@ -8,7 +8,7 @@ from pysmt.environment import reset_env
 
 from treehornx.chc.CHCSystemFactory import CHCSystemFactory
 from treehornx.chc.core import ExitCodeKind
-from treehornx.chc.pre.PreContext import PreContext, avl_strict_ctx, bst_strict_ctx, sll_sorted_strict_ctx
+from treehornx.chc.SDTAContext import SDTAContext, avl_strict_ctx, bst_strict_ctx, sll_sorted_strict_ctx
 from treehornx.enum_labels import KnittedTrees, generate_labels
 from treehornx.ir.expressions import Var
 from treehornx.ir.function import Function
@@ -46,7 +46,7 @@ def make_system_with_pre(
     function: Function,
     root: Var,
     trees: KnittedTrees,
-    pre_ctx: PreContext,
+    pre_ctx: SDTAContext,
     exit_code: ExitCodeKind,
     n: int = DEFAULT_N,
     m: int = DEFAULT_M,
@@ -59,7 +59,7 @@ def make_system_with_pre(
 
 
 def check_sat_with_pre(
-    file_name: str, pre_ctx: PreContext, exit_code: ExitCodeKind, solver: CHCSolver = default_solver()
+    file_name: str, pre_ctx: SDTAContext, exit_code: ExitCodeKind, solver: CHCSolver = default_solver()
 ) -> Status:
     function, root, trees = parse_and_generate_labels(file_name)
     system = make_system_with_pre(function, root, trees, pre_ctx, exit_code)

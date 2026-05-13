@@ -3,7 +3,7 @@ from dataclasses import dataclass, field
 
 from typing_extensions import Iterable
 
-from treehornx.chc.post.tainting import TaintedLabel, TaintedPair
+from .core import TaintedLabel, TaintedPair
 
 
 @dataclass

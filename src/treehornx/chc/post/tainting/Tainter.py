@@ -7,7 +7,7 @@ from typing import Iterable, Iterator
 from frozendict import frozendict
 
 from treehornx.chc.post.helpers import last_assignment_to_field, no_assignment_to_field, ptr_here
-from treehornx.chc.post.TaintDB import TaintDB
+from treehornx.chc.post.tainting import TaintDB
 from treehornx.chc.post.tainting import (
     DownTaintingPropagation,
     InternalTaintingPropagation,
@@ -209,6 +209,7 @@ class Tainter:
         new_tainted_sigma1: TaintedLabel,
         pairs: Iterable[TaintedPair],
     ):
+        # add a control for the direction
         for p in pairs:
             if p.parent == tainted_sigma1:
                 yield self.tainted_pair_factory.replace(p, parent=new_tainted_sigma1)
@@ -295,8 +296,8 @@ class Tainter:
             for step in temp_tainting_steps:
                 tainting_steps.add(step)
                 match step:
-                    case StructuralChildTainting(new_child=new_child):
-                        on_new_label(step.child, new_child)
+                    case StructuralChildTainting(child=child, new_child=new_child):
+                        on_new_label(child, new_child)
                     case StartOfPointerTainting(lab=lab, new_lab=new_lab):
                         on_new_label(lab, new_lab)
                     case InternalTaintingPropagation(lab=lab, new_lab=new_lab):

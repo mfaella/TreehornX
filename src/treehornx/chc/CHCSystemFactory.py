@@ -6,10 +6,11 @@ from pysmt import logics
 
 from treehornx.chc.computation import *
 from treehornx.chc.core import ExitCodeKind
-from treehornx.chc.post import T_predicates, produce_T_no_query, produce_T_queries
+from treehornx.chc.post import S_predicates, T_predicates, produce_S, produce_T_no_query, produce_T_queries
+from treehornx.chc.post.SFactory import SFactory
 from treehornx.chc.post.TFactory import TFactory
 from treehornx.chc.pre import *
-from treehornx.chc.pre.PreContext import PreContext
+from treehornx.chc.SDTAContext import SDTAContext
 from treehornx.chc.utils.CHCFragmentFactory import CHCFragmentFactory
 from treehornx.enum_labels import KnittedTrees
 from treehornx.enum_labels.core.Dir import Down, Internal, Up
@@ -24,12 +25,12 @@ class CHCSystemFactory:
     function: Function
     tree_node_sort: Struct
     trees: KnittedTrees
-    pre_ctx: PreContext | None = None
-    enable_post_is_tree: bool = False
+    pre_ctx: SDTAContext | None = None
+    post_ctx: SDTAContext | bool | None = None
     root_name: str | None = None
 
     def __post_init__(self):
-        if self.enable_post_is_tree and self.root_name is None:
+        if self.post_ctx and self.root_name is None:
             raise ValueError("Root name must be provided if postcondition generation is enabled.")
 
     @cached_property
@@ -58,6 +59,12 @@ class CHCSystemFactory:
     @cached_property
     def T_factory(self) -> TFactory:  # noqa: N802
         return TFactory(self.lab_factory)
+
+    @cached_property
+    def S_factory(self) -> SFactory:  # noqa: N802
+        if isinstance(self.post_ctx, (type(None), bool)):
+            raise ValueError("No context provided for postcondition generation.")
+        return SFactory(self.trees, self.post_ctx, self.T_factory)
 
     @cached_property
     def trivially_safe_for_err(self) -> bool:
@@ -146,6 +153,16 @@ class CHCSystemFactory:
         for chc in produce_T_queries(self.trees, self.root_name, T_factory):
             system.add_clause(chc)
 
+    def _add_S(self, system: CHCSystem): # noqa: N802
+        S_factory = self.S_factory  # noqa: N806
+        assert isinstance(self.root_name, str)
+
+        for pred in S_predicates(self.trees, self.root_name, S_factory):
+            system.add_predicate(pred)
+
+        for chc in produce_S(self.trees, self.root_name, S_factory):
+            system.add_clause(chc)
+
     def make_system(self, exit_code: ExitCodeKind | None = None) -> CHCSystem:
         system = CHCSystem(logic=logics.QF_UFLIA)
 
@@ -157,8 +174,11 @@ class CHCSystemFactory:
             self._add_pre(system, exit_code)
             self._add_pre_queries(system, exit_code)
 
-        if self.enable_post_is_tree:
+        if self.post_ctx:
             self._add_T(system)
             self._add_T_queries(system)
+
+            if self.post_ctx is not True:
+                self._add_S(system)
 
         return system

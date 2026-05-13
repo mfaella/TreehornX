@@ -42,7 +42,7 @@ class DependencyGraphBuilder:
 
     def _label_name(self, label: Label) -> str:
         lab_id = self._id(label)
-        return f"Lab{lab_id}"
+        return f"Lab{lab_id}_"
 
     def _ancestors(self, lab: Label) -> Iterable[Label]:
         for step in self._steps():

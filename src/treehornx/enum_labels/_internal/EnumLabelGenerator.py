@@ -2,7 +2,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from functools import cache, cached_property
 from itertools import chain, product
-from typing import Iterable
+from typing import Callable, Iterable
 
 from frozendict import frozendict
 
@@ -33,6 +33,8 @@ class EnumLabelGenerator:
     k: int = field(init=False)
     db: StatesDB = field(init=False, default_factory=StatesDB)
     label_factory: LabelFactory = field(init=False, default_factory=LabelFactory)
+    backbone_label_filter: Callable[[Label, bool], bool] = lambda l, b: True
+    backbone_pair_filter: Callable[[tuple[Label, Label, str|int], bool], bool] = lambda p, b: True
 
     def __post_init__(self):
         assert isinstance(self.root.sort, Pointer)
@@ -69,7 +71,7 @@ class EnumLabelGenerator:
 
     def enums_products(self, vars: Iterable[Var]) -> Iterable[frozendict[str, str]]:
         vars = list(vars)
-        assert all(isinstance(v.sort, Enum) for v in vars)
+        assert all(v.sort.is_enum() for v in vars)
         values: Iterable[tuple[str, ...]] = (tuple(var.sort.flags.keys()) for var in vars)  # type: ignore
         for prod in product(*values):
             yield frozendict({var.name: val for var, val in zip(vars, prod)})
@@ -85,11 +87,11 @@ class EnumLabelGenerator:
         isnil: frozendict[str, bool] = frozendict({p.name: True for p in self._pointers})
 
         # enum_values_product = self.enums_products(self.enum_vars())
-        # enum_fields_product = self.enums_products(self.enum_fields())
+        enum_fields_product = self.enums_products(self._enum_fields)
         # for enum_values, enum_fields in product(enum_values_product, enum_fields_product):
         enum_values: frozendict[str, str] = frozendict({v.name: tuple(v.sort.flags)[0] for v in self._enum_vars})
-        enum_fields: frozendict[str, str] = frozendict({f.name: tuple(f.sort.flags)[0] for f in self._enum_fields})
-        for active_child in self.active_child_products():
+        #enum_fields: frozendict[str, str] = frozendict({f.name: tuple(f.sort.flags)[0] for f in self._enum_fields})
+        for active_child, enum_fields in product(self.active_child_products(), enum_fields_product):
             if active_child.get("parent", False):
                 continue
             active_frame = Frame(
@@ -106,7 +108,8 @@ class EnumLabelGenerator:
             )
             lab = self.label_factory.create(active_frame, None)
             self.db.add_label(lab)
-            yield lab
+            if self.backbone_label_filter(lab, False):
+                yield lab
         inactive_frame = Frame(
             index=0,
             active=False,
@@ -121,7 +124,8 @@ class EnumLabelGenerator:
         )
         lab = self.label_factory.create(inactive_frame, None)
         self.db.add_label(lab)
-        yield lab
+        if self.backbone_label_filter(lab, False):
+            yield lab
 
     def start_labels(self) -> Iterable[Label]:
         for backbone_label in self.backbone_labels():
@@ -156,19 +160,27 @@ class EnumLabelGenerator:
             )
             lab = self.label_factory.create(second_frame, backbone_label)
             self.db.add_label(lab)
-            yield lab
+            assert lab.origin
+            if self.backbone_label_filter(lab.origin, True):
+                yield lab
 
     def initial_root_pairs(self) -> Iterable[Pair]:
         for parent, child, child_key in product(self.start_labels(), self.backbone_labels(), self._children_keys):
             # parent_active = parent[1].active_child.get("parent", False)
-            if parent[1].active_child[child_key] == child[0].active:  # and not parent_active:
+            if (
+                parent[1].active_child[child_key] == child[0].active and
+                self.backbone_pair_filter((parent, child, child_key), True)
+            ):  # and not parent_active:
                 pair = Pair(parent=parent, child=child, child_key=child_key)
                 yield pair
 
     def initial_internal_node_pairs(self) -> Iterable[Pair]:
         for parent, child, child_key in product(self.backbone_labels(), self.backbone_labels(), self._children_keys):
             # parent_active = parent[0].active_child.get("parent", False)
-            if parent[0].active_child[child_key] == child[0].active:  # and not parent_active:
+            if (
+                parent[0].active_child[child_key] == child[0].active and
+                self.backbone_pair_filter((parent, child, child_key), False)
+            ):
                 pair = Pair(parent=parent, child=child, child_key=child_key)
                 yield pair
 

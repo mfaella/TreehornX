@@ -1,14 +1,14 @@
 from itertools import product
 from typing import Iterable
 
+from pysmt.fnode import FNode
+
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.utils.terminals_discovery import generate_L_P_Terminal
 from treehornx.enum_labels import KnittedTrees
 from treehornx.enum_labels.core.Label import Label
 
 from .PreFactory import PreFactory
-from .psi import *
-from .PreContext import PreContext
 
 
 def pre_predicates(trees: KnittedTrees, pre_factory: PreFactory) -> Iterable[FNode]:
