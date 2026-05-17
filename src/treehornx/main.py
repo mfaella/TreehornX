@@ -1,16 +1,19 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Annotated, Literal
+from typing import Annotated, Literal, TypeAlias
 
 import typer
 from rich.console import Console
 
-from treehornx.chc.pre.PreContext import (
+from treehornx.chc.SDTAContext import SDTAContext
+from treehornx.chc.SDTAContext import (
     avl_ctx,
     avl_strict_ctx,
     bst_ctx,
     bst_strict_ctx,
+    rb_ctx,
+    rb_strict_ctx,
     sll_sorted_ctx,
     sll_sorted_strict_ctx,
 )
@@ -43,6 +46,7 @@ DEFAULT_N = 128
 DEFAULT_M = 0
 DEFAULT_C = 32
 
+PostType: TypeAlias = Literal["tree", "bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl", "avl_strict", "rb", "rb_strict"]
 
 @app.command("verify")
 def verify_cmd(
@@ -72,10 +76,10 @@ def verify_cmd(
     compressed_dep_graph: Annotated[bool, typer.Option("--cdg", "--compressed-dep-graph")] = False,
     internal_dependency_graph: Annotated[bool, typer.Option("--idg", "--internal-dep-graph")] = False,
     pre: Annotated[
-        Literal["bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl", "avl_strict"] | None,
+        Literal["bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl", "avl_strict", "rb", "rb_strict"] | None,
         typer.Option("--pre"),
     ] = None,
-    post: Annotated[bool, typer.Option("--post")] = False,
+    post: Annotated[PostType|None, typer.Option("--post")] = None,
     produce_csv: Annotated[bool, typer.Option("--csv")] = False,
     produce_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -107,7 +111,35 @@ def verify_cmd(
         typer.Exit(1)
         return  # useless but mypy/pyright doesn't know that typer.Exit exits the program
 
-    trees = handle_label_generation(function, root, n, m, c)
+    pre_map: dict[str, SDTAContext] = {
+        "bst": bst_ctx(),
+        "bst_strict": bst_strict_ctx(),
+        "sll_sorted": sll_sorted_ctx(),
+        "sll_sorted_strict": sll_sorted_strict_ctx(),
+        "avl": avl_ctx(),
+        "avl_strict": avl_strict_ctx(),
+        "rb": rb_ctx(),
+        "rb_strict": rb_strict_ctx(),
+    }
+    pre_ctx = pre_map[pre] if pre else None
+
+    post_map: dict[str, SDTAContext | bool] = {
+        "tree": True,
+        "bst": bst_ctx(),
+        "bst_strict": bst_strict_ctx(),
+        "sll_sorted": sll_sorted_ctx(),
+        "sll_sorted_strict": sll_sorted_strict_ctx(),
+        "avl": avl_ctx(),
+        "avl_strict": avl_strict_ctx(),
+        "rb": rb_ctx(),
+        "rb_strict": rb_strict_ctx(),
+    }
+    post_ctx = post_map[post] if post else None
+
+    if pre_ctx is None:
+        trees = handle_label_generation(function, root, n, m, c)
+    else:
+        trees = handle_label_generation(function, root, n, m, c, pre_ctx.label_filter, pre_ctx.pair_filter)
     trivially_sat = compute_trivially_sat(trees)
 
     display_generation_results(
@@ -116,16 +148,9 @@ def verify_cmd(
     )
     if smt2:
         exit_codes = [k for k, v in trivially_sat.items() if not v]
-        pre_map = {
-            "bst": bst_ctx(),
-            "bst_strict": bst_strict_ctx(),
-            "sll_sorted": sll_sorted_ctx(),
-            "sll_sorted_strict": sll_sorted_strict_ctx(),
-            "avl": avl_ctx(),
-            "avl_strict": avl_strict_ctx(),
-        }
-        pre_ctx = pre_map[pre] if pre else None
-        handle_smt2_scripts_creation(function, root, trees, exit_codes, pre_ctx, post)
+        assert pre_ctx
+        assert post_ctx
+        handle_smt2_scripts_creation(function, root, trees, exit_codes, pre_ctx, post_ctx)
 
     graph_builder = DependencyGraphBuilder(function, trees)
     if full_dep_graph:

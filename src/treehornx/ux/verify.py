@@ -1,14 +1,15 @@
 from pathlib import Path
-from typing import Iterable
+from typing import Callable, Iterable
 
 from humanfriendly import format_timespan
 from rich.console import Console
 
 from treehornx.chc.CHCSystemFactory import CHCSystemFactory
 from treehornx.chc.core import ExitCodeKind
-from treehornx.chc.pre.PreContext import PreContext
+from treehornx.chc.SDTAContext import SDTAContext
 from treehornx.enum_labels import KnittedTrees, generate_labels
 from treehornx.enum_labels.core.Event import ERR, LOF, OOM
+from treehornx.enum_labels.core.Label import Label
 from treehornx.ir._internal.sorts.natives import Pointer
 from treehornx.ir.expressions import Var
 from treehornx.ir.function import Function
@@ -40,9 +41,11 @@ def handle_label_generation(
     n: int,
     m: int,
     c: int | None,
+    label_filter: Callable[[Label, bool], bool] | None = None,
+    pair_filter: Callable[[tuple[Label, Label, int | str], bool], bool] | None = None,
 ) -> KnittedTrees:
     def display_label_generation_progress(console: Console) -> KnittedTrees:
-        lace_over_approx, elapsed_time = take_time(lambda: generate_labels(function, root, m, n, c))
+        lace_over_approx, elapsed_time = take_time(lambda: generate_labels(function, root, m, n, c, label_filter, pair_filter))
         console.print(f"Label generation completed in {format_timespan(elapsed_time)}.")
         stats.generation_elapsed_time = elapsed_time
         return lace_over_approx
@@ -61,22 +64,17 @@ def handle_smt2_scripts_creation(
     root: Var,
     lace_over_approx: KnittedTrees,
     exit_codes: Iterable[ExitCodeKind],
-    pre_ctx: PreContext | None = None,
-    post: bool = False,
+    pre_ctx: SDTAContext | None = None,
+    post_ctx: SDTAContext|bool|None = None,
     output_dir: Path | None = None,
 ):
     assert isinstance(root.sort, Pointer) and isinstance(root.sort.pointee, Struct), (
         "Root variable must be a pointer to a struct."
     )
     tree_node_sort = root.sort.pointee
-    if post:
-        enable_post_is_tree = True
-        root_name = root.name
-    else:
-        enable_post_is_tree = False
-        root_name = None
+    root_name = root.name
     system_factory = CHCSystemFactory(
-        function, tree_node_sort, lace_over_approx, pre_ctx, enable_post_is_tree, root_name
+        function, tree_node_sort, lace_over_approx, pre_ctx, post_ctx, root_name
     )
     maybe_exit_codes = list(exit_codes) or [None]
     for exit_code in maybe_exit_codes:

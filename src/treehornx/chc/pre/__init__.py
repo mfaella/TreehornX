@@ -4,7 +4,8 @@ from typing import Iterable
 from pysmt.fnode import FNode
 
 from treehornx.chc.core import ExitCodeKind
-from treehornx.chc.utils.terminals_discovery import generate_L_P_Terminal
+from treehornx.chc.utils.helpers import end_of_lace
+from treehornx.chc.utils.terminals_discovery import Pair, generate_terminals, generate_terminals_from_trees
 from treehornx.enum_labels import KnittedTrees
 from treehornx.enum_labels.core.Label import Label
 
@@ -17,15 +18,15 @@ def pre_predicates(trees: KnittedTrees, pre_factory: PreFactory) -> Iterable[FNo
 
 
 def _pairs_by_parent_and_child_key(
-    pairs: set[tuple[Label, Label, str | int]], lab: Label, child_key: int | str
-) -> Iterable[tuple[Label, Label, int | str]]:
-    return filter(lambda p: p[0] == lab and p[2] == child_key, pairs)
+    pairs: set[Pair[Label]], lab: Label, child_key: int | str
+) -> Iterable[Pair[Label]]:
+    return filter(lambda p: p.parent == lab and p.child_key == child_key, pairs)
 
 
 def produce_pre_no_query(
     trees: KnittedTrees, pre_factory: PreFactory, exit_codes: set[ExitCodeKind]
 ) -> Iterable[FNode]:
-    L_Terminal, P_Terminal = generate_L_P_Terminal(trees)  # noqa: N806
+    L_Terminal, P_Terminal = generate_terminals_from_trees(trees)  # noqa: N806
 
     for lab in L_Terminal:
         if not lab[0].active and not trees.is_root_label(lab):
@@ -35,13 +36,13 @@ def produce_pre_no_query(
         else:
             pairs_pow_set = [list(_pairs_by_parent_and_child_key(P_Terminal, lab, key)) for key in trees.child_keys]
             for pairs in product(*pairs_pow_set):
-                children = [(child_key, child) for _, child, child_key in pairs]
+                children = [(p.child_key, p.child) for p in pairs]
                 chc = pre_factory.pre_II(lab, children, exit_codes)
                 yield chc
 
 
 def produce_pre_queries(trees: KnittedTrees, pre_factory: PreFactory, exit_codes: set[ExitCodeKind]) -> Iterable[FNode]:
-    L_Terminal, _ = generate_L_P_Terminal(trees)  # noqa: N806
+    L_Terminal, _ = generate_terminals_from_trees(trees)  # noqa: N806
 
     for lab in L_Terminal:
         if trees.is_root_label(lab):

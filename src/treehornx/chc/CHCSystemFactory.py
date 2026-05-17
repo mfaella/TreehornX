@@ -170,7 +170,8 @@ class CHCSystemFactory:
 
         if self.pre_ctx is None and exit_code is not None:
             self._add_lab_queries(system, exit_code)
-        elif exit_code is not None:
+        elif exit_code is not None or self.pre_ctx is not None:
+            exit_code = exit_code or ExitCodeKind.CLEAN
             self._add_pre(system, exit_code)
             self._add_pre_queries(system, exit_code)
 
