@@ -66,5 +66,5 @@ def render_dependency_graph(graph_builder: DependencyGraphBuilder, kind: Depende
         g.write(f"{file_name}.svg", format="svg")
         return g
 
-    _, elapsed_time = progress(f"Rendering {kind_name} dependency graph", lambda _: take_time(render))
+    _, elapsed_time = progress(f"Rendering {kind_name} dependency graph", lambda: take_time(render))
     console.print(f"{kind_name.title()} dependency graph rendered in {format_timespan(elapsed_time)}.")

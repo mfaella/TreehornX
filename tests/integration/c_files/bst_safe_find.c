@@ -1,5 +1,5 @@
 struct Node {
-    int value;
+    int data;
     struct Node *left;
     struct Node *right;
 };
@@ -12,7 +12,7 @@ void bst_safe_find(struct Node* root, int key) {
     current = root;
 
     while (current) {
-        value = current->value;
+        value = current->data;
         if (value == key) {
             result = current;
             current = null;

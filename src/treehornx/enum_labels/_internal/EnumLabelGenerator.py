@@ -117,7 +117,7 @@ class EnumLabelGenerator:
             upd=upd,
             isnil=isnil,
             events=frozenset(),
-            active_child=frozendict({key: True for key in self._children_keys}),
+            active_child=frozendict(chain(((key, False) for key in self._named_children_keys), ((key, True) for key in self._indexed_children_keys))),
             enum_vars=enum_values,
             enum_fields=enum_fields,
             prev=None,
@@ -169,6 +169,7 @@ class EnumLabelGenerator:
             # parent_active = parent[1].active_child.get("parent", False)
             if (
                 parent[1].active_child[child_key] == child[0].active and
+                (isinstance(child_key, str) or not child[0].active) and
                 self.backbone_pair_filter((parent, child, child_key), True)
             ):  # and not parent_active:
                 pair = Pair(parent=parent, child=child, child_key=child_key)
@@ -178,7 +179,9 @@ class EnumLabelGenerator:
         for parent, child, child_key in product(self.backbone_labels(), self.backbone_labels(), self._children_keys):
             # parent_active = parent[0].active_child.get("parent", False)
             if (
+                parent[0].active and
                 parent[0].active_child[child_key] == child[0].active and
+                (isinstance(child_key, str) or not child[0].active) and
                 self.backbone_pair_filter((parent, child, child_key), False)
             ):
                 pair = Pair(parent=parent, child=child, child_key=child_key)

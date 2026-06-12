@@ -25,11 +25,11 @@ class _DiscoveredAsChild:
 
 
 @dataclass(slots=True, frozen=True)
-class _DiscoveredAsEndOfLace:
+class _DiscoveredAsEndOfProcess:
     pass
 
 
-type _DiscoveryKind = _DiscoveredAsParent | _DiscoveredAsChild | _DiscoveredAsEndOfLace
+type _DiscoveryKind = _DiscoveredAsParent | _DiscoveredAsChild | _DiscoveredAsEndOfProcess
 
 
 def _get_only_terminals[T](items: set[T], get_origin: Callable[[T], T | None]) -> set[T]:
@@ -78,7 +78,7 @@ def generate_terminals[T](pairs: set[Pair[T]], end_of_process: Callable[[T], boo
         child_keys.add(pair.child_key)
     visited: set[tuple[T, _DiscoveryKind]] = set()
     queue: deque[tuple[T, _DiscoveryKind]] = deque(
-        (item, _DiscoveredAsEndOfLace()) for item in items if end_of_process(item)
+        (item, _DiscoveredAsEndOfProcess()) for item in items if end_of_process(item)
     )
 
     while queue:
@@ -87,7 +87,7 @@ def generate_terminals[T](pairs: set[Pair[T]], end_of_process: Callable[[T], boo
             continue
         visited.add((item, discovery_kind))
         match discovery_kind:
-            case _DiscoveredAsEndOfLace():
+            case _DiscoveredAsEndOfProcess():
                 excluded_dir = None
             case _DiscoveredAsChild():
                 excluded_dir = Up()
@@ -95,6 +95,7 @@ def generate_terminals[T](pairs: set[Pair[T]], end_of_process: Callable[[T], boo
                 excluded_dir = Down(child_key)
         for dir in _discovery_directions(child_keys, excluded_dir):
             for discovered_lab, new_discovery_kind in _discover_terminals_by_direction(pairs, item, dir, get_origin):
+                # print("lez go")
                 if dir == Up():
                     assert isinstance(new_discovery_kind, _DiscoveredAsParent)
                     P_Terminal.add(Pair(discovered_lab, item, new_discovery_kind.child_key))

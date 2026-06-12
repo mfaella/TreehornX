@@ -1,3 +1,4 @@
+from collections import defaultdict
 import csv
 from enum import Enum
 import time
@@ -5,12 +6,15 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
+from func_timeout import FunctionTimedOut, func_timeout
+
 from pychc.solvers.chc_solver import CHCSolver, Status # pyright: ignore[reportMissingTypeStubs]
 from pychc.solvers.golem import GolemSolver # pyright: ignore[reportMissingTypeStubs]
 from pysmt.shortcuts import reset_env
 
 from treehornx.chc.CHCSystemFactory import CHCSystemFactory
 from treehornx.chc.core import ExitCodeKind
+from treehornx.chc.post import taint
 from treehornx.chc.pre import PreContext
 from treehornx.chc.pre.PreContext import avl_strict_ctx, bst_strict_ctx, sll_sorted_strict_ctx
 from treehornx.enum_labels import generate_labels
@@ -42,23 +46,17 @@ class BenchmarkConfig:
 
 @dataclass
 class BenchmarkResult:
-    trivially_safe_for_err: bool | None = None
-    trivially_safe_for_oom: bool | None = None
-    trivially_safe_for_lof: bool | None = None
-    trivially_safe_for_post_is_tree: bool | None = None
+    trivially_safe_for: defaultdict[str, bool|None] = field(default_factory=lambda: defaultdict(lambda: None))
     labels_generation_elapsed_time: float | None = None
-    solving_for_err_elapsed_time: float | None = None
-    solving_for_oom_elapsed_time: float | None = None
-    solving_for_lof_elapsed_time: float | None = None
-    solving_for_post_is_tree_elapsed_time: float | None = None
-    system_err_creation_elapsed_time: float | None = None
-    system_oom_creation_elapsed_time: float | None = None
-    system_lof_creation_elapsed_time: float | None = None
-    system_post_is_tree_creation_elapsed_time: float | None = None
-    outcome_for_err: VerificationOutcome | None = None
-    outcome_for_oom: VerificationOutcome | None = None
-    outcome_for_lof: VerificationOutcome | None = None
-    outcome_for_post_is_tree: VerificationOutcome | None = None
+    labels_generation_timed_out: bool = False
+    solving_elapsed_time_for: defaultdict[str, float|None] = field(default_factory=lambda: defaultdict(lambda: None))
+    solving_timed_out_for: defaultdict[str, bool|None] = field(default_factory=lambda: defaultdict(lambda: None))
+    system_creation_elapsed_time_for: defaultdict[str, float|None] = field(default_factory=lambda: defaultdict(lambda: None))
+    system_creation_timed_out_for: defaultdict[str, bool|None] = field(default_factory=lambda: defaultdict(lambda: None))
+    outcome_for: defaultdict[str, VerificationOutcome|None] = field(default_factory=lambda: defaultdict(lambda: None))
+    number_of_labels: int | None = None
+    longest_label_len: int | None = None
+    number_of_tainted_labels: int | None = None
 
 def status_to_outcome(status: Status) -> VerificationOutcome:
     if status == Status.SAT:
@@ -68,16 +66,83 @@ def status_to_outcome(status: Status) -> VerificationOutcome:
     else:
         return VerificationOutcome.UNKNOWN
 
-def run_benchmark(config: BenchmarkConfig):
+def trivially_safe_for(system_factory: CHCSystemFactory, key: str) -> bool:
+    match key:
+        case "err":
+            return system_factory.trivially_safe_for_err
+        case "oom":
+            return system_factory.trivially_safe_for_oom
+        case "lof":
+            return system_factory.trivially_safe_for_lof
+        case "post_is_tree":
+            return system_factory.trivially_safe_for_post_is_tree
+        case _:
+            raise ValueError(f"Unknown key: {key}")
+
+def key_to_exit_code_kind(key: str) -> ExitCodeKind|None:
+    match key:
+        case "err":
+            return ExitCodeKind.ERR
+        case "oom":
+            return ExitCodeKind.OOM
+        case "lof":
+            return ExitCodeKind.LABEL_OVERFLOW
+        case "post_is_tree":
+            return None
+        case _:
+            raise ValueError(f"Unknown key: {key}")
+
+def solve_for_key(config: BenchmarkConfig, system_factory: CHCSystemFactory, key: str, result: BenchmarkResult, timeout: int):
+    if not trivially_safe_for(system_factory, key):
+        result.trivially_safe_for[key] = False
+        try:
+            exit_code_kind = key_to_exit_code_kind(key)
+            start = time.perf_counter()
+            system = func_timeout(timeout, system_factory.make_system, args=(exit_code_kind,))
+            end = time.perf_counter()
+            result.system_creation_timed_out_for[key] = False
+            result.system_creation_elapsed_time_for[key] = end - start
+        except FunctionTimedOut:
+            result.system_creation_timed_out_for[key] = True
+            return
+
+
+        try:
+            def load_and_solve():
+                start = time.perf_counter()
+                config.solver.load_system(system)
+                input_file = config.solver.get_input_file()
+                end = time.perf_counter()
+                remaining_timeout = timeout - int(end - start)
+                return config.solver.run(input_file, timeout=remaining_timeout)
+            start = time.perf_counter()
+            status = func_timeout(timeout, load_and_solve)
+            end = time.perf_counter()
+            result.outcome_for[key] = status_to_outcome(status)
+            result.solving_timed_out_for[key] = False
+            result.solving_elapsed_time_for[key] = end - start
+        except FunctionTimedOut:
+            result.solving_timed_out_for[key] = True
+            return
+    else:
+        result.outcome_for[key] = VerificationOutcome.SAFE
+        result.trivially_safe_for[key] = True
+
+def run_benchmark(config: BenchmarkConfig, timeout: int) -> BenchmarkResult:
     parser = CParser()
     function = next(iter(parser.parse_file(str(config.file_name))))
     root = next(var for var in function.vars if var.name == "root_0")
     assert isinstance(root.sort, Pointer) and isinstance(root.sort.pointee, Struct)
     result = BenchmarkResult()
-    start_time = time.perf_counter()
-    trees = generate_labels(function, root, config.m, config.n, config.c)
-    end_time = time.perf_counter()
-    result.labels_generation_elapsed_time = end_time - start_time
+    try:
+        start_time = time.perf_counter()
+        trees = func_timeout(timeout, generate_labels, args=(function, root, config.m, config.n, config.c))
+        end_time = time.perf_counter()
+        result.labels_generation_timed_out = False
+        result.labels_generation_elapsed_time = end_time - start_time
+    except FunctionTimedOut:
+        result.labels_generation_timed_out = True
+        return result
     system_factory = CHCSystemFactory(
         function,
         root.sort.pointee,
@@ -86,74 +151,26 @@ def run_benchmark(config: BenchmarkConfig):
         config.post_is_tree,
         root.name
     )
-    if config.post_is_tree:
-        result.trivially_safe_for_post_is_tree = system_factory.trivially_safe_for_post_is_tree
 
-    if not system_factory.trivially_safe_for_err:
-        result.trivially_safe_for_err = False
-        start = time.perf_counter()
-        system = system_factory.make_system(ExitCodeKind.ERR)
-        end = time.perf_counter()
-        result.system_err_creation_elapsed_time = end - start
-        start = time.perf_counter()
-        config.solver.load_system(system)
-        status = config.solver.solve()
-        result.outcome_for_err = status_to_outcome(status)
-        end = time.perf_counter()
-        result.solving_for_err_elapsed_time = end - start
-    else:
-        result.outcome_for_err = VerificationOutcome.SAFE
-        result.trivially_safe_for_err = True
+    solve_for_key(config, system_factory, "err", result, timeout)
 
-    if not system_factory.trivially_safe_for_oom:
-        result.trivially_safe_for_oom = False
-        start = time.perf_counter()
-        system = system_factory.make_system(ExitCodeKind.OOM)
-        end = time.perf_counter()
-        result.system_oom_creation_elapsed_time = end - start
-        start = time.perf_counter()
-        config.solver.load_system(system)
-        status = config.solver.solve()
-        end = time.perf_counter()
-        result.outcome_for_oom = status_to_outcome(status)
-        result.solving_for_oom_elapsed_time = end - start
-    else:
-        result.trivially_safe_for_oom = True
-        result.outcome_for_oom = VerificationOutcome.SAFE
+    solve_for_key(config, system_factory, "oom", result, timeout)
 
-    if not system_factory.trivially_safe_for_lof:
-        result.trivially_safe_for_lof = False
-        start = time.perf_counter()
-        system = system_factory.make_system(ExitCodeKind.LABEL_OVERFLOW)
-        end = time.perf_counter()
-        result.system_lof_creation_elapsed_time = end - start
-        start = time.perf_counter()
-        config.solver.load_system(system)
-        status = config.solver.solve()
-        end = time.perf_counter()
-        result.outcome_for_lof = status_to_outcome(status)
-        result.solving_for_lof_elapsed_time = end - start
-    else:
-        result.trivially_safe_for_lof = True
-        result.outcome_for_lof = VerificationOutcome.SAFE
+    solve_for_key(config, system_factory, "lof", result, timeout)
 
     if (
         system_factory.trivially_safe_for_err and
         system_factory.trivially_safe_for_oom and
         system_factory.trivially_safe_for_lof and
-        config.post_is_tree and
-        not result.trivially_safe_for_post_is_tree
+        config.post_is_tree
     ):
-        start = time.perf_counter()
-        system = system_factory.make_system()
-        end = time.perf_counter()
-        result.system_post_is_tree_creation_elapsed_time = end - start
-        start = time.perf_counter()
-        config.solver.load_system(system)
-        status = config.solver.solve()
-        end = time.perf_counter()
-        result.outcome_for_post_is_tree = status_to_outcome(status)
-        result.solving_for_post_is_tree_elapsed_time = end - start
+        solve_for_key(config, system_factory, "post_is_tree", result, timeout)
+
+    result.number_of_labels = len(list(trees.labels()))
+    result.longest_label_len = max(len(label) for label in trees.labels())
+    if config.post_is_tree:
+        result.trivially_safe_for["post_is_tree"] = system_factory.trivially_safe_for_post_is_tree
+        result.number_of_tainted_labels = len(taint(trees, root.name)[1]) if config.post_is_tree else None
 
     return result
 
@@ -161,7 +178,7 @@ def pre_ctx_name(pre_ctx: PreContext) -> str:
     if pre_ctx == avl_strict_ctx():
         return "avl strict"
     elif pre_ctx == bst_strict_ctx():
-        return "bst strict_ctx"
+        return "bst strict"
     elif pre_ctx == sll_sorted_strict_ctx():
         return "sll sorted strict"
     else:
@@ -179,18 +196,21 @@ benchamrks_config: list[BenchmarkConfig] = [
     BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_reverse.c", post_is_tree=True),
     BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_remove_root.c", post_is_tree=True),
     BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, post_is_tree=True),
-    # pre_ctx benchmarks
+    # # pre_ctx benchmarks
     BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_check_balance_and_root_height.c", pre_ctx=avl_strict_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "avl_unsafe_check_balance.c", pre_ctx=avl_strict_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "avl_unsafe_check_root_height.c", pre_ctx=avl_strict_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_min_lt_max.c", pre_ctx=bst_strict_ctx()),
+    # BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_min_lt_max_hcpre.c", c=128),
     BenchmarkConfig(file_name=C_FILES_DIR / "bst_unsafe_min_lt_max.c", pre_ctx=bst_strict_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "sll_sorted_safe_first_lt_last.c", pre_ctx=sll_sorted_strict_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "sll_sorted_unsafe_first_lt_last.c", pre_ctx=sll_sorted_strict_ctx()),
 ]
 
 def main():
-    with open("benchmarks.csv", "w") as f:
+    now = time.strftime("%Y-%m-%d_%H-%M-%S")
+    file_name = f"benchmarks_{now}.csv"
+    with open(file_name, "w") as f:
         fields = [
             "file_name",
             "n",
@@ -203,25 +223,37 @@ def main():
             "trivially_safe_for_lof",
             "trivially_safe_for_post_is_tree",
             "labels_generation_elapsed_time",
+            "labels_generation_timed_out",
             "system_err_creation_elapsed_time",
+            "system_err_creation_timed_out",
             "solving_for_err_elapsed_time",
+            "solving_for_err_timed_out",
             "system_oom_creation_elapsed_time",
+            "system_oom_creation_timed_out",
             "solving_for_oom_elapsed_time",
+            "solving_for_oom_timed_out",
             "system_lof_creation_elapsed_time",
+            "system_lof_creation_timed_out",
             "solving_for_lof_elapsed_time",
+            "solving_for_lof_timed_out",
             "system_post_is_tree_creation_elapsed_time",
+            "system_post_is_tree_creation_timed_out",
             "solving_for_post_is_tree_elapsed_time",
+            "solving_for_post_is_tree_timed_out",
             "outcome_for_err",
             "outcome_for_oom",
             "outcome_for_lof",
-            "outcome_for_post_is_tree"
+            "outcome_for_post_is_tree",
+            "number_of_labels",
+            "longest_label_len",
+            "number_of_tainted_labels"
         ]
         dict_writer = csv.DictWriter(f, fieldnames=fields)
         dict_writer.writeheader()
         for config in benchamrks_config:
             print(f"Running benchmark for {config.file_name}")
             reset_env()
-            result = run_benchmark(config)
+            result = run_benchmark(config, timeout=180)
             row = {
                 "file_name": config.file_name.name,
                 "n": config.n,
@@ -229,31 +261,48 @@ def main():
                 "c": config.c,
                 "pre_ctx": config.pre_ctx,
                 "post_is_tree": config.post_is_tree,
-                "trivially_safe_for_err": result.trivially_safe_for_err,
-                "trivially_safe_for_oom": result.trivially_safe_for_oom,
-                "trivially_safe_for_lof": result.trivially_safe_for_lof,
-                "trivially_safe_for_post_is_tree": result.trivially_safe_for_post_is_tree,
+                "trivially_safe_for_err": result.trivially_safe_for["err"],
+                "trivially_safe_for_oom": result.trivially_safe_for["oom"],
+                "trivially_safe_for_lof": result.trivially_safe_for["lof"],
+                "trivially_safe_for_post_is_tree": result.trivially_safe_for["post_is_tree"],
                 "labels_generation_elapsed_time": result.labels_generation_elapsed_time,
-                "system_err_creation_elapsed_time": result.system_err_creation_elapsed_time,
-                "solving_for_err_elapsed_time": result.solving_for_err_elapsed_time,
-                "system_oom_creation_elapsed_time": result.system_oom_creation_elapsed_time,
-                "solving_for_oom_elapsed_time": result.solving_for_oom_elapsed_time,
-                "system_lof_creation_elapsed_time": result.system_lof_creation_elapsed_time,
-                "solving_for_lof_elapsed_time": result.solving_for_lof_elapsed_time,
-                "system_post_is_tree_creation_elapsed_time": result.system_post_is_tree_creation_elapsed_time,
-                "solving_for_post_is_tree_elapsed_time": result.solving_for_post_is_tree_elapsed_time,
-                "outcome_for_err": result.outcome_for_err,
-                "outcome_for_oom": result.outcome_for_oom,
-                "outcome_for_lof": result.outcome_for_lof,
-                "outcome_for_post_is_tree": result.outcome_for_post_is_tree
+                "labels_generation_timed_out": result.labels_generation_timed_out,
+                "system_err_creation_elapsed_time": result.system_creation_elapsed_time_for["err"],
+                "system_err_creation_timed_out": result.system_creation_timed_out_for["err"],
+                "solving_for_err_elapsed_time": result.solving_elapsed_time_for["err"],
+                "solving_for_err_timed_out": result.solving_timed_out_for["err"],
+                "system_oom_creation_elapsed_time": result.system_creation_elapsed_time_for["oom"],
+                "system_oom_creation_timed_out": result.system_creation_timed_out_for["oom"],
+                "solving_for_oom_elapsed_time": result.solving_elapsed_time_for["oom"],
+                "solving_for_oom_timed_out": result.solving_timed_out_for["oom"],
+                "system_lof_creation_elapsed_time": result.system_creation_elapsed_time_for["lof"],
+                "system_lof_creation_timed_out": result.system_creation_timed_out_for["lof"],
+                "solving_for_lof_elapsed_time": result.solving_elapsed_time_for["lof"],
+                "solving_for_lof_timed_out": result.solving_timed_out_for["lof"],
+                "system_post_is_tree_creation_elapsed_time": result.system_creation_elapsed_time_for["post_is_tree"],
+                "system_post_is_tree_creation_timed_out": result.system_creation_timed_out_for["post_is_tree"],
+                "solving_for_post_is_tree_elapsed_time": result.solving_elapsed_time_for["post_is_tree"],
+                "solving_for_post_is_tree_timed_out": result.solving_timed_out_for["post_is_tree"],
+                "outcome_for_err": result.outcome_for["err"],
+                "outcome_for_oom": result.outcome_for["oom"],
+                "outcome_for_lof": result.outcome_for["lof"],
+                "outcome_for_post_is_tree": result.outcome_for["post_is_tree"],
+                "number_of_labels": result.number_of_labels,
+                "longest_label_len": result.longest_label_len,
+                "number_of_tainted_labels": result.number_of_tainted_labels
             }
             for key, value in row.items():
-                if value is None:
-                    row[key] = "N/A"
-                if isinstance(value, Enum):
-                    row[key] = value.value
-            if isinstance(row["pre_ctx"], PreContext):
-                row["pre_ctx"] = pre_ctx_name(row["pre_ctx"])
+                match value:
+                    case None:
+                        row[key] = "N/A"
+                    case Enum():
+                        row[key] = value.value
+                    case float():
+                        row[key] = round(value, 4)
+                    case PreContext():
+                        row[key] = pre_ctx_name(value)
+                    case _:
+                        pass
             dict_writer.writerow(row)
 
 if __name__ == "__main__":

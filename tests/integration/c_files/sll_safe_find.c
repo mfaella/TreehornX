@@ -1,5 +1,5 @@
 struct Node {
-    int value;
+    int data;
     struct Node *next;
 };
 
@@ -11,7 +11,7 @@ void sll_safe_find(struct Node *root, int key) {
     curr = root;
 
     while(curr) {
-        tmp_key = curr->value;
+        tmp_key = curr->data;
         if(tmp_key == key) {
             result = curr;
             curr = null;

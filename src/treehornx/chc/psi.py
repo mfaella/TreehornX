@@ -1,5 +1,6 @@
 from typing import Callable
 
+from loguru import logger
 import pysmt.shortcuts as smt
 from pysmt.fnode import FNode
 
@@ -25,6 +26,28 @@ def psi_sll_sorted(
     return smt.And(smt.GE(children_states["next"]["data"], fields["data"]), smt.Equals(states["data"], fields["data"]))
 
 
+def not_psi_sll_sorted(
+    children_states: dict[str, dict[str, FNode] | None],
+    fields: dict[str, FNode],
+    enum_fields: dict[str, str],
+    states: dict[str, FNode]
+) -> FNode:
+    logger.debug(f"children_states: {children_states}, fields: {fields}, enum_fields: {enum_fields}, states: {states}")
+    if children_states["next"] is None:
+        return smt.And(
+            smt.Equals(states["data"], fields["data"]),
+            smt.Not(states["error"])
+        )
+
+    return smt.And(
+        smt.Iff(states["error"], smt.Or(
+            smt.LT(children_states["next"]["data"], fields["data"]),
+            children_states["next"]["error"]
+        )),
+        smt.Equals(states["data"], fields["data"])
+    )
+
+
 def psi_sll_sorted_strict(
     children_states: dict[str, dict[str, FNode] | None],
     fields: dict[str, FNode],
@@ -35,6 +58,33 @@ def psi_sll_sorted_strict(
         return smt.Equals(states["data"], fields["data"])
 
     return smt.And(smt.GT(children_states["next"]["data"], fields["data"]), smt.Equals(states["data"], fields["data"]))
+
+
+def not_psi_sll_sorted_strict(
+    children_states: dict[str, dict[str, FNode] | None],
+    fields: dict[str, FNode],
+    enum_fields: dict[str, str],
+    states: dict[str, FNode]
+) -> FNode:
+    logger.debug(f"children_states: {children_states}, fields: {fields}, enum_fields: {enum_fields}, states: {states}")
+    if children_states["next"] is None:
+        logger.debug("Next state is None, returning base case for not_psi_sll_sorted_strict")
+        return smt.And(
+            smt.Equals(states["data"], fields["data"]),
+            smt.Not(states["error"])
+        )
+
+    logger.debug("Next state is not None, proceeding with recursive case for not_psi_sll_sorted_strict")
+
+    const = smt.And(
+        smt.EqualsOrIff(states["error"], smt.Or(
+            smt.LE(children_states["next"]["data"], fields["data"]),
+            children_states["next"]["error"]
+        )),
+        smt.Equals(states["data"], fields["data"])
+    )
+    logger.debug(f"Constructed condition for not_psi_sll_sorted_strict: {const}")
+    return const
 
 
 def psi_bst(
@@ -51,24 +101,62 @@ def psi_bst(
     if left_state is None and right_state is None:
         conditions.append(smt.Equals(states["min"], fields["data"]))
         conditions.append(smt.Equals(states["max"], fields["data"]))
-        return smt.TRUE()
+        return smt.And(*conditions)
 
     if left_state is not None:
         conditions.append(smt.LE(left_state["max"], fields["data"]))
-        conditions.append(smt.Equals(states["data"], fields["data"]))
         conditions.append(smt.Equals(states["min"], left_state["min"]))
     else:
         conditions.append(smt.Equals(states["min"], fields["data"]))
 
     if right_state is not None:
         conditions.append(smt.GE(right_state["min"], fields["data"]))
-        conditions.append(smt.Equals(states["data"], fields["data"]))
         conditions.append(smt.Equals(states["max"], right_state["max"]))
     else:
         conditions.append(smt.Equals(states["max"], fields["data"]))
 
+    conditions.append(smt.Equals(states["data"], fields["data"]))
     return smt.And(*conditions)
 
+
+def not_psi_bst(
+    children_states: dict[str, dict[str, FNode] | None],
+    fields: dict[str, FNode],
+    enum_fields: dict[str, str],
+    states: dict[str, FNode]
+) -> FNode:
+    left_state = children_states["left"]
+    right_state = children_states["right"]
+
+    conditions: list[FNode] = []
+
+    if left_state is None and right_state is None:
+        conditions.append(smt.And(
+            smt.Equals(states["min"], fields["data"]),
+            smt.Equals(states["max"], fields["data"]),
+            smt.Equals(states["data"], fields["data"]),
+            smt.Not(states["error"])
+        ))
+        return smt.And(*conditions)
+
+    if left_state is not None:
+        conditions.append(smt.Equals(states["min"], left_state["min"]))
+    else:
+        conditions.append(smt.Equals(states["min"], fields["data"]))
+
+    if right_state is not None:
+        conditions.append(smt.Equals(states["max"], right_state["max"]))
+    else:
+        conditions.append(smt.Equals(states["max"], fields["data"]))
+
+    conditions.append(smt.Equals(states["data"], fields["data"]))
+    conditions.append(smt.EqualsOrIff(states["error"], smt.Or(
+        smt.GT(left_state["max"], fields["data"]) if left_state is not None else smt.FALSE(),
+        smt.LT(right_state["min"], fields["data"]) if right_state is not None else smt.FALSE(),
+        left_state["error"] if left_state is not None else smt.FALSE(),
+        right_state["error"] if right_state is not None else smt.FALSE(),
+    )))
+    return smt.And(*conditions)
 
 def psi_bst_strict(
     children_states: dict[str, dict[str, FNode] | None],
@@ -99,6 +187,46 @@ def psi_bst_strict(
     else:
         conditions.append(smt.Equals(states["max"], fields["data"]))
 
+    return smt.And(*conditions)
+
+
+def not_psi_bst_strict(
+    children_states: dict[str, dict[str, FNode] | None],
+    fields: dict[str, FNode],
+    enum_fields: dict[str, str],
+    states: dict[str, FNode]
+) -> FNode:
+    left_state = children_states["left"]
+    right_state = children_states["right"]
+
+    conditions: list[FNode] = []
+    conditions.append(smt.Equals(states["data"], fields["data"]))
+
+    if left_state is None and right_state is None:
+        conditions.append(smt.And(
+            smt.Equals(states["min"], fields["data"]),
+            smt.Equals(states["max"], fields["data"]),
+            smt.Equals(states["data"], fields["data"]),
+            smt.Not(states["error"])
+        ))
+        return smt.And(*conditions)
+
+    if left_state is not None:
+        conditions.append(smt.Equals(states["min"], left_state["min"]))
+    else:
+        conditions.append(smt.Equals(states["min"], fields["data"]))
+
+    if right_state is not None:
+        conditions.append(smt.Equals(states["max"], right_state["max"]))
+    else:
+        conditions.append(smt.Equals(states["max"], fields["data"]))
+
+    conditions.append(smt.Or(
+        smt.GE(left_state["max"], fields["data"]) if left_state is not None else smt.FALSE(),
+        smt.LE(right_state["min"], fields["data"]) if right_state is not None else smt.FALSE(),
+        left_state["error"] if left_state is not None else smt.FALSE(),
+        right_state["error"] if right_state is not None else smt.FALSE(),
+    ))
     return smt.And(*conditions)
 
 
@@ -149,6 +277,50 @@ def psi_avl(
     return _psi_avl_template(children_states, fields, enum_fields, states, psi_bst)
 
 
+def not_psi_avl(
+    children_states: dict[str, dict[str, FNode] | None],
+    fields: dict[str, FNode],
+    enum_fields: dict[str, str],
+    states: dict[str, FNode],
+) -> FNode:
+    conditions: list[FNode] = []
+    error_conditions: list[FNode] = []
+
+    left_state = children_states["left"]
+    right_state = children_states["right"]
+
+    conditions.append(smt.Equals(states["height"], fields["height"]))
+    conditions.append(smt.Equals(states["data"], fields["data"]))
+
+    if left_state is None and right_state is None:
+        error_conditions.append(smt.Not(smt.Equals(states["height"], smt.Int(0))))
+        conditions.append(smt.Equals(states["min"], fields["data"]))
+        conditions.append(smt.Equals(states["max"], fields["data"]))
+
+    else:
+
+        if left_state is not None:
+            error_conditions.append(smt.NotEquals(smt.Plus(left_state["height"], smt.Int(1)), states["height"]))
+            error_conditions.append(smt.GT(left_state["max"], states["data"]))
+            error_conditions.append(left_state["error"])
+            conditions.append(smt.Equals(states["min"], left_state["min"]))
+        else:
+            conditions.append(smt.Equals(states["min"], states["data"]))
+
+        if right_state is not None:
+            error_conditions.append(smt.NotEquals(smt.Plus(right_state["height"], smt.Int(1)), states["height"]))
+            error_conditions.append(smt.LT(right_state["min"], states["data"]))
+            error_conditions.append(right_state["error"])
+            conditions.append(smt.Equals(states["max"], right_state["max"]))
+        else:
+            conditions.append(smt.Equals(states["max"], states["data"]))
+
+    error = smt.Iff(states["error"], smt.Or(*error_conditions))
+    conditions.append(error)
+
+    return smt.And(*conditions)
+
+
 def psi_avl_strict(
     children_states: dict[str, dict[str, FNode] | None],
     fields: dict[str, FNode],
@@ -157,6 +329,49 @@ def psi_avl_strict(
 ) -> FNode:
     return _psi_avl_template(children_states, fields, enum_fields, states, psi_bst_strict)
 
+
+def not_psi_avl_strict(
+    children_states: dict[str, dict[str, FNode] | None],
+    fields: dict[str, FNode],
+    enum_fields: dict[str, str],
+    states: dict[str, FNode],
+) -> FNode:
+    conditions: list[FNode] = []
+    error_conditions: list[FNode] = []
+
+    left_state = children_states["left"]
+    right_state = children_states["right"]
+
+    conditions.append(smt.Equals(states["height"], fields["height"]))
+    conditions.append(smt.Equals(states["data"], fields["data"]))
+
+    if left_state is None and right_state is None:
+        error_conditions.append(smt.Not(smt.Equals(states["height"], smt.Int(0))))
+        conditions.append(smt.Equals(states["min"], fields["data"]))
+        conditions.append(smt.Equals(states["max"], fields["data"]))
+
+    else:
+
+        if left_state is not None:
+            error_conditions.append(smt.NotEquals(smt.Plus(left_state["height"], smt.Int(1)), states["height"]))
+            error_conditions.append(smt.GE(left_state["max"], states["data"]))
+            error_conditions.append(left_state["error"])
+            conditions.append(smt.Equals(states["min"], left_state["min"]))
+        else:
+            conditions.append(smt.Equals(states["min"], states["data"]))
+
+        if right_state is not None:
+            error_conditions.append(smt.NotEquals(smt.Plus(right_state["height"], smt.Int(1)), states["height"]))
+            error_conditions.append(smt.LE(right_state["min"], states["data"]))
+            error_conditions.append(right_state["error"])
+            conditions.append(smt.Equals(states["max"], right_state["max"]))
+        else:
+            conditions.append(smt.Equals(states["max"], states["data"]))
+
+    error = smt.Iff(states["error"], smt.Or(*error_conditions))
+    conditions.append(error)
+
+    return smt.And(*conditions)
 
 def _psi_rb_template(
     children_states: dict[str, dict[str, FNode] | None],
@@ -250,6 +465,62 @@ def psi_rb(
 ) -> FNode:
     return _psi_rb_template(children_states, fields, enum_fields, states, psi_bst)
 
+
+def not_psi_rb(
+    children_states: dict[str, dict[str, FNode] | None],
+    fields: dict[str, FNode],
+    enum_fields: dict[str, str],
+    states: dict[str, FNode]
+) -> FNode:
+    conditions: list[FNode] = []
+    error_conditions: list[FNode] = []
+
+    left_state = children_states["left"]
+    right_state = children_states["right"]
+
+    conditions.append(smt.Equals(states["data"], fields["data"]))
+
+    if left_state is None and right_state is None:
+        if enum_fields["color"] == "RED":
+            conditions.append(smt.Equals(states["black_height"], smt.Int(0)))
+        else: # enum_fields["color"] == "BLACK"
+            conditions.append(smt.Equals(states["black_height"], smt.Int(1)))
+        conditions.append(smt.Equals(states["min"], fields["data"]))
+        conditions.append(smt.Equals(states["max"], fields["data"]))
+
+    else:
+
+        if left_state is not None:
+            if enum_fields["color"] == "RED":
+                conditions.append(smt.Equals(left_state["black_height"], states["black_height"]))
+                error_conditions.append(smt.GT(left_state["min"], states["data"]))
+            else: # BLACK
+                conditions.append(smt.Equals(smt.Plus(left_state["black_height"], smt.Int(1)), states["black_height"]))
+            conditions.append(smt.Equals(states["min"], left_state["min"]))
+            error_conditions.append(left_state["error"])
+        else:
+            conditions.append(smt.Equals(states["min"], states["data"]))
+
+        if right_state is not None:
+            if enum_fields["color"] == "RED":
+                conditions.append(smt.Equals(right_state["black_height"], states["black_height"]))
+                error_conditions.append(smt.LT(right_state["max"], states["data"]))
+            else: # BLACK
+                conditions.append(smt.Equals(smt.Plus(right_state["black_height"], smt.Int(1)), states["black_height"]))
+            conditions.append(smt.Equals(states["min"], right_state["min"]))
+            error_conditions.append(right_state["error"])
+        else:
+            conditions.append(smt.Equals(states["min"], states["data"]))
+
+        left_height  = left_state["black_height"] if left_state is not None else smt.Int(0)
+        right_height = right_state["black_height"] if right_state is not None else smt.Int(0)
+        error_conditions.append(smt.Equals(left_height, right_height))
+
+    error = smt.Iff(states["error"], smt.Or(*error_conditions))
+    conditions.append(error)
+    return smt.And(*conditions)
+
+
 def psi_rb_strict(
     children_states: dict[str, dict[str, FNode] | None],
     fields: dict[str, FNode],
@@ -259,5 +530,67 @@ def psi_rb_strict(
     return _psi_rb_template(children_states, fields, enum_fields, states, psi_bst_strict)
 
 
+def not_psi_rb_strict(
+    children_states: dict[str, dict[str, FNode] | None],
+    fields: dict[str, FNode],
+    enum_fields: dict[str, str],
+    states: dict[str, FNode]
+) -> FNode:
+    conditions: list[FNode] = []
+    error_conditions: list[FNode] = []
+
+    left_state = children_states["left"]
+    right_state = children_states["right"]
+
+    conditions.append(smt.Equals(states["data"], fields["data"]))
+
+    if left_state is None and right_state is None:
+        if enum_fields["color"] == "RED":
+            conditions.append(smt.Equals(states["black_height"], smt.Int(0)))
+        else: # enum_fields["color"] == "BLACK"
+            conditions.append(smt.Equals(states["black_height"], smt.Int(1)))
+        conditions.append(smt.Equals(states["min"], fields["data"]))
+        conditions.append(smt.Equals(states["max"], fields["data"]))
+
+    else:
+
+        if left_state is not None:
+            if enum_fields["color"] == "RED":
+                conditions.append(smt.Equals(left_state["black_height"], states["black_height"]))
+                error_conditions.append(smt.GT(left_state["min"], states["data"]))
+            else: # BLACK
+                conditions.append(smt.Equals(smt.Plus(left_state["black_height"], smt.Int(1)), states["black_height"]))
+            conditions.append(smt.Equals(states["min"], left_state["min"]))
+            error_conditions.append(left_state["error"])
+        else:
+            conditions.append(smt.Equals(states["min"], states["data"]))
+
+        if right_state is not None:
+            if enum_fields["color"] == "RED":
+                conditions.append(smt.Equals(right_state["black_height"], states["black_height"]))
+                error_conditions.append(smt.LT(right_state["max"], states["data"]))
+            else: # BLACK
+                conditions.append(smt.Equals(smt.Plus(right_state["black_height"], smt.Int(1)), states["black_height"]))
+            conditions.append(smt.Equals(states["min"], right_state["min"]))
+            error_conditions.append(right_state["error"])
+        else:
+            conditions.append(smt.Equals(states["min"], states["data"]))
+
+        left_height  = left_state["black_height"] if left_state is not None else smt.Int(0)
+        right_height = right_state["black_height"] if right_state is not None else smt.Int(0)
+        error_conditions.append(smt.Equals(left_height, right_height))
+
+    error = smt.Iff(states["error"], smt.Or(*error_conditions))
+    conditions.append(error)
+    return smt.And(*conditions)
+
+
 def psiF_empty(states: dict[str, FNode]) -> FNode:  # noqa: N802
     return smt.TRUE()
+
+
+def error_psiF(states: dict[str, FNode]) -> FNode:
+    return states["error"]
+
+
+    # return smt.And(smt.GE(children_states["next"]["data"], fields["data"]), smt.Equals(states["data"], fields["data"]))

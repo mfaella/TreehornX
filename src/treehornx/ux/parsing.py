@@ -2,7 +2,7 @@ from treehornx.ir.expressions import Var
 from treehornx.ir.function import Function
 from treehornx.parser._internal.cparser.errors import CParserError
 from treehornx.parser.CParser import CParser
-from treehornx.ux.tui import console, error
+from treehornx.ux.tui import error
 
 
 def handle_function_parsing(input_file: str, function_name: str | None) -> Function | None:
@@ -10,8 +10,7 @@ def handle_function_parsing(input_file: str, function_name: str | None) -> Funct
     try:
         functions_iterator = iter(parser.parse_file(input_file))
     except CParserError as e:
-        error(f"Error parsing {input_file}")
-        console.print(e)
+        error(f"Error parsing {input_file}: {e}")
         return None
     if function_name is None:
         function = next(functions_iterator, None)

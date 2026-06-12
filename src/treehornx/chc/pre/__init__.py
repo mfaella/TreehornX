@@ -1,5 +1,5 @@
 from itertools import product
-from typing import Iterable
+from typing import Callable, Iterable
 
 from pysmt.fnode import FNode
 
@@ -12,7 +12,7 @@ from treehornx.enum_labels.core.Label import Label
 from .PreFactory import PreFactory
 
 
-def pre_predicates(trees: KnittedTrees, pre_factory: PreFactory) -> Iterable[FNode]:
+def pre_predicates(trees: KnittedTrees, pre_factory: PreFactory[Label]) -> Iterable[FNode]:
     for lab in trees.labels():
         yield pre_factory.predicate(lab)
 
@@ -24,32 +24,32 @@ def _pairs_by_parent_and_child_key(
 
 
 def produce_pre_no_query(
-    trees: KnittedTrees, pre_factory: PreFactory, exit_codes: set[ExitCodeKind]
+    trees: KnittedTrees, pre_factory: PreFactory[Label]
 ) -> Iterable[FNode]:
     L_Terminal, P_Terminal = generate_terminals_from_trees(trees)  # noqa: N806
 
     for lab in L_Terminal:
         if not lab[0].active and not trees.is_root_label(lab):
-            chc = pre_factory.pre_I(lab, exit_codes)
+            chc = pre_factory.pre_I(lab)
             yield chc
 
         else:
             pairs_pow_set = [list(_pairs_by_parent_and_child_key(P_Terminal, lab, key)) for key in trees.child_keys]
             for pairs in product(*pairs_pow_set):
                 children = [(p.child_key, p.child) for p in pairs]
-                chc = pre_factory.pre_II(lab, children, exit_codes)
+                chc = pre_factory.pre_II(lab, children)
                 yield chc
 
 
-def produce_pre_queries(trees: KnittedTrees, pre_factory: PreFactory, exit_codes: set[ExitCodeKind]) -> Iterable[FNode]:
+def produce_pre_queries(trees: KnittedTrees, pre_factory: PreFactory[Label]) -> Iterable[FNode]:
     L_Terminal, _ = generate_terminals_from_trees(trees)  # noqa: N806
 
     for lab in L_Terminal:
         if trees.is_root_label(lab):
-            chc = pre_factory.pre_III(lab, exit_codes)
+            chc = pre_factory.pre_III(lab)
             yield chc
 
 
-def produce_pre(trees: KnittedTrees, pre_factory: PreFactory, exit_codes: set[ExitCodeKind]) -> Iterable[FNode]:
-    yield from produce_pre_no_query(trees, pre_factory, exit_codes)
-    yield from produce_pre_queries(trees, pre_factory, exit_codes)
+def produce_pre(trees: KnittedTrees, pre_factory: PreFactory[Label]) -> Iterable[FNode]:
+    yield from produce_pre_no_query(trees, pre_factory)
+    yield from produce_pre_queries(trees, pre_factory)

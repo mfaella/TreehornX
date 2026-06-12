@@ -6,7 +6,7 @@ from typing import Annotated, Literal, TypeAlias
 import typer
 from rich.console import Console
 
-from treehornx.chc.SDTAContext import SDTAContext
+from treehornx.chc.SDTAContext import SDTAContext, not_avl_ctx, not_avl_strict_ctx, not_bst_ctx, not_bst_strict_ctx, not_rb_ctx, not_rb_strict_ctx, not_sll_sorted_ctx, not_sll_sorted_strict_ctx
 from treehornx.chc.SDTAContext import (
     avl_ctx,
     avl_strict_ctx,
@@ -17,6 +17,7 @@ from treehornx.chc.SDTAContext import (
     sll_sorted_ctx,
     sll_sorted_strict_ctx,
 )
+from treehornx.chc.psi import not_psi_bst
 from treehornx.report.visualization import DependencyGraphBuilder, DependencyGraphKind
 from treehornx.ux.output import display_generation_results, display_verify_cmd_option_messages, render_dependency_graph
 from treehornx.ux.parsing import handle_function_parsing, handle_root_fetching
@@ -125,14 +126,14 @@ def verify_cmd(
 
     post_map: dict[str, SDTAContext | bool] = {
         "tree": True,
-        "bst": bst_ctx(),
-        "bst_strict": bst_strict_ctx(),
-        "sll_sorted": sll_sorted_ctx(),
-        "sll_sorted_strict": sll_sorted_strict_ctx(),
-        "avl": avl_ctx(),
-        "avl_strict": avl_strict_ctx(),
-        "rb": rb_ctx(),
-        "rb_strict": rb_strict_ctx(),
+        "bst": not_bst_ctx(),
+        "bst_strict": not_bst_strict_ctx(),
+        "sll_sorted": not_sll_sorted_ctx(),
+        "sll_sorted_strict": not_sll_sorted_strict_ctx(),
+        "avl": not_avl_ctx(),
+        "avl_strict": not_avl_strict_ctx(),
+        "rb": not_rb_ctx(),
+        "rb_strict": not_rb_strict_ctx(),
     }
     post_ctx = post_map[post] if post else None
 
@@ -148,8 +149,6 @@ def verify_cmd(
     )
     if smt2:
         exit_codes = [k for k, v in trivially_sat.items() if not v]
-        assert pre_ctx
-        assert post_ctx
         handle_smt2_scripts_creation(function, root, trees, exit_codes, pre_ctx, post_ctx)
 
     graph_builder = DependencyGraphBuilder(function, trees)

@@ -35,12 +35,23 @@ class TFactory:
     def __post_init__(self):
         self.fragment_factory = self.lab_factory.fragment_factory
 
-    def _predicate_name(self, tainted_label: TaintedLabel) -> str:
-        taint_id = 1 if tainted_label.taint_node else 0
+    def label_name(self, tainted_label: TaintedLabel) -> str:
+        taint_node_id = 1 if tainted_label.taint_node else 0
         taint_ptr = sorted(tainted_label.taint_ptr.items())
+        taint_ptr_id = 0
         for _, is_tainted in taint_ptr:
-            taint_id = (taint_id << 1) | is_tainted
-        return f"T_{self.fragment_factory.id_getter(tainted_label.label)}_{taint_id}"
+            taint_ptr_id = (taint_ptr_id << 1) | is_tainted
+        name = f"{self.fragment_factory.id_getter(tainted_label.label)}_{taint_node_id}_{taint_ptr_id}"
+        return name
+
+    def _predicate_name(self, tainted_label: TaintedLabel) -> str:
+        label_name = self.label_name(tainted_label)
+        name = f"T_{label_name}"
+        # if name == "T_29_3":
+        #     print(f"tainted_node: {tainted_label.taint_node}")
+        #     print(f"tainted_pair: {tainted_label.taint_ptr}")
+
+        return name
 
     def predicate(self, tainted_label: TaintedLabel) -> FNode:
         symbols = list(self.fragment_factory.label_symbols(tainted_label.label))
@@ -125,21 +136,23 @@ class TFactory:
     def T(self, tainting_step: TaintingStep) -> FNode:  # noqa: N802
         match tainting_step:
             case LookingForRoot():
-                return self._T_looking_for_root(tainting_step)
+                clause = self._T_looking_for_root(tainting_step)
             case TaintingInitialization():
-                return self._T_tainting_initialization(tainting_step)
+                clause = self._T_tainting_initialization(tainting_step)
             case StructuralChildTainting():
-                return self._T_structural_child_tainting(tainting_step)
+                clause = self._T_structural_child_tainting(tainting_step)
             case StartOfPointerTainting():
-                return self._T_start_of_pointer_tainting(tainting_step)
+                clause = self._T_start_of_pointer_tainting(tainting_step)
             case InternalTaintingPropagation():
-                return self._T_internal_tainting_propagation(tainting_step)
+                clause = self._T_internal_tainting_propagation(tainting_step)
             case UpTaintingPropagation():
-                return self._T_up_tainting_propagation(tainting_step)
+                clause = self._T_up_tainting_propagation(tainting_step)
             case DownTaintingPropagation():
-                return self._T_down_tainting_propagation(tainting_step)
+                clause = self._T_down_tainting_propagation(tainting_step)
             case PointerTaintingEnd():
-                return self._T_pointer_tainting_end(tainting_step)
+                clause = self._T_pointer_tainting_end(tainting_step)
+
+        return clause
 
     def _query_1(self, tainted_label: TaintedLabel) -> FNode | None:
         taint_ptr = tainted_label.taint_ptr

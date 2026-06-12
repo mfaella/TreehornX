@@ -1,5 +1,6 @@
 struct Node {
     int data;
+    int height;
     struct Node *left;
     struct Node *right;
 };

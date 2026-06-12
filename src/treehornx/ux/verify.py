@@ -50,7 +50,7 @@ def handle_label_generation(
         stats.generation_elapsed_time = elapsed_time
         return lace_over_approx
 
-    trees = progress("Generating labels", display_label_generation_progress)
+    trees = progress("Generating labels", lambda: display_label_generation_progress(Console()))
     labels_count = len(list(trees.labels()))
     largest_label_lenght = max(len(lab) for lab in trees.labels()) if labels_count > 0 else 0
     Console().print(f"Generated {labels_count} labels.\nLargest label length: {largest_label_lenght}.")
@@ -96,7 +96,7 @@ def handle_smt2_scripts_creation(
 
         elapsed_time = progress(
             f"Creating SMT2 script{f' for {exit_code.name}' if exit_code else ''}",
-            display_smt2_script_creation_progress,
+            lambda: display_smt2_script_creation_progress(Console()),
         )
         match exit_code:
             case None:

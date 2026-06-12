@@ -44,7 +44,7 @@ def default_solver() -> CHCSolver:
 
 def make_system(function: Function, root: Var, trees: KnittedTrees):
     assert isinstance(root.sort, Pointer) and isinstance(root.sort.pointee, Struct)
-    system_factory = CHCSystemFactory(function, root.sort.pointee, trees, enable_post_is_tree=True, root_name=root.name)
+    system_factory = CHCSystemFactory(function, root.sort.pointee, trees, post_ctx=True, root_name=root.name)
     system = system_factory.make_system()
     return system
 

@@ -46,10 +46,10 @@ class GreyTimeElapsedColumn(TimeElapsedColumn):
         return text
 
 
-def progress[T](description: str, func: Callable[[Console], T]) -> T:
+def progress[T](description: str, func: Callable[[], T]) -> T:
     with Progress(
         SpinnerColumn(), TextColumn("[progress.description]{task.description}"), GreyTimeElapsedColumn(), transient=True
-    ) as progress:
-        progress.add_task(description=description)
-        result = func(progress.console)
+    ) as _progress:
+        _progress.add_task(description=description)
+        result = func()
     return result

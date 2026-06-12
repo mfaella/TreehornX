@@ -11,6 +11,7 @@ requires-python = ">=3.12"
 dependencies = [
     # general purpose
     "frozendict",
+    "loguru",
     # tui
     "typer",
     "rich",
@@ -19,6 +20,7 @@ dependencies = [
     "func-timeout",
     # report generation
     "pydot",
+    "graphviz",
     # parsing
     "pycparser",
     "antlr4-python3-runtime",
