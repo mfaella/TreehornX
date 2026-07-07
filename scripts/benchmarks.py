@@ -251,7 +251,7 @@ benchamrks_config: list[BenchmarkConfig] = [
     BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_strict_ctx(), post_ctx=read_only_contract()),
     BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_find.c", pre_ctx=sll_sorted_strict_ctx(), post_ctx=read_only_contract()),
     BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_find.c", pre_ctx=sll_sorted_strict_ctx(), post_ctx=read_only_contract()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_insert.c", m=1, pre_ctx=avl_ctx(), post_ctx=read_only_contract()),
+    BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_find.c", m=1, pre_ctx=avl_ctx(), post_ctx=read_only_contract()),
 ]
 
 def main():
