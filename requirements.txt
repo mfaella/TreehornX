@@ -1,0 +1,31 @@
+# Auto-generated from pyproject.toml [project.dependencies]
+# Pinned to the versions resolved in uv.lock.
+# Install with: pip install -r requirements.txt
+
+# general purpose
+frozendict==2.4.7
+loguru==0.7.3
+
+# tui
+typer==0.24.1
+rich==14.3.3
+humanfriendly==10.0
+types-humanfriendly==10.0.1.20250319
+func-timeout==4.3.5
+
+# report generation
+pydot==4.0.1
+graphviz==0.21
+
+# parsing
+pycparser==2.23
+antlr4-python3-runtime==4.13.2
+
+# sat
+pychc @ git+https://github.com/nicola-gentile/pychc.git@build-system
+networkx==3.6.1
+types-networkx>=3.6.1.20260321
+z3-solver==4.16.0.0
+
+# transitive dependency of pychc, used directly by scripts/benchmarks.py
+pysmt==0.9.6
