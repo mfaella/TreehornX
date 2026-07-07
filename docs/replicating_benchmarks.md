@@ -5,12 +5,16 @@ This guide explains how to reproduce the results produced by
 
 ## 1. Get the code and its dependencies
 
+The benchmark results were produced on the `post` branch — check it out
+before installing dependencies.
+
 ### Option A — using `uv` (recommended, matches CI/dev workflow)
 
 ```bash
 pip install uv
 git clone https://github.com/mfaella/TreehornX.git
 cd TreehornX
+git checkout post
 uv sync
 ```
 
@@ -19,6 +23,7 @@ uv sync
 ```bash
 git clone https://github.com/mfaella/TreehornX.git
 cd TreehornX
+git checkout post
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
