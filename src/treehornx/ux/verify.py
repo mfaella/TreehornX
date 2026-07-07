@@ -5,8 +5,10 @@ from humanfriendly import format_timespan
 from rich.console import Console
 
 from treehornx.chc.CHCSystemFactory import CHCSystemFactory
+from treehornx.chc.contracts.Contract import Contract
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.SDTAContext import SDTAContext
+from treehornx.chc.post.tainting.core import TaintedLabel
 from treehornx.enum_labels import KnittedTrees, generate_labels
 from treehornx.enum_labels.core.Event import ERR, LOF, OOM
 from treehornx.enum_labels.core.Label import Label
@@ -43,9 +45,10 @@ def handle_label_generation(
     c: int | None,
     label_filter: Callable[[Label, bool], bool] | None = None,
     pair_filter: Callable[[tuple[Label, Label, int | str], bool], bool] | None = None,
+    parent_name: str | None = None,
 ) -> KnittedTrees:
     def display_label_generation_progress(console: Console) -> KnittedTrees:
-        lace_over_approx, elapsed_time = take_time(lambda: generate_labels(function, root, m, n, c, label_filter, pair_filter))
+        lace_over_approx, elapsed_time = take_time(lambda: generate_labels(function, root, m, n, c, label_filter, pair_filter, parent_name=parent_name))
         console.print(f"Label generation completed in {format_timespan(elapsed_time)}.")
         stats.generation_elapsed_time = elapsed_time
         return lace_over_approx
@@ -65,7 +68,7 @@ def handle_smt2_scripts_creation(
     lace_over_approx: KnittedTrees,
     exit_codes: Iterable[ExitCodeKind],
     pre_ctx: SDTAContext | None = None,
-    post_ctx: SDTAContext|bool|None = None,
+    post_ctx: SDTAContext|bool|None|Contract[TaintedLabel] = None,
     output_dir: Path | None = None,
 ):
     assert isinstance(root.sort, Pointer) and isinstance(root.sort.pointee, Struct), (

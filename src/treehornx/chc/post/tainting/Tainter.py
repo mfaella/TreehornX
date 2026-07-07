@@ -23,7 +23,6 @@ from treehornx.chc.post.tainting import (
     TaintingInitialization,
     TaintingStep,
     UpTaintingPropagation,
-    init_tainted_label,
 )
 from treehornx.chc.utils import generate_terminals
 from treehornx.chc.utils.helpers import end_of_lace
@@ -84,7 +83,13 @@ class Tainter:
                         yield p.child, i1
 
     def _init_tainted_label(self, lab: Label) -> TaintedLabel:
-        return init_tainted_label(lab, self.root_name)
+        lab_len = len(lab)
+        tainted_ptr: frozendict[tuple[str, int], bool] = frozendict(
+            {(ptr, i): False for i, ptr in product(range(1, lab_len), lab.frame.isnil.keys())}
+        )
+        if end_of_lace(lab) and not lab.frame.isnil[self.root_name]:
+            tainted_ptr = tainted_ptr.set((self.root_name, lab_len - 1), True)
+        return self.tainted_label_factory.create(label=lab, taint_node=False, taint_ptr=tainted_ptr)
 
     def _structural_child_tainting(self, pair: TaintedPair) -> StructuralChildTainting | None:
         sigma = pair.parent

@@ -23,6 +23,7 @@ class CompressedBoundedInternalChainKnitter(IKnitter):
         n: int,
         c: int,  # the bound on the internal steps chain length
         *,
+        parent: str | None = None,
         make_label: Callable[[Label | None, Frame], Label] = lambda o, f: Label(f, o),
         on_new_internal_step: Callable[[Pair, Pair], None] = lambda ancestor, lab: None,
         on_new_external_step: Callable[[Pair, Pair], None] = lambda previous, lab: None,
@@ -32,7 +33,7 @@ class CompressedBoundedInternalChainKnitter(IKnitter):
             raise ValueError("c must be a positive integer")
         self.c = c
         self._make_label = make_label
-        self._knitter: IKnitter = CompressedKnitter(function, k, m, n, make_label)
+        self._knitter: IKnitter = CompressedKnitter(function, k, m, n, parent, make_label)
         self._on_new_internal_step = on_new_internal_step
         self._on_new_external_step = on_new_external_step
         self._on_step_failed = on_step_failed

@@ -6,10 +6,9 @@ from typing import Annotated, Literal, TypeAlias
 import typer
 from rich.console import Console
 
-from treehornx.chc.SDTAContext import SDTAContext, not_avl_ctx, not_avl_strict_ctx, not_bst_ctx, not_bst_strict_ctx, not_rb_ctx, not_rb_strict_ctx, not_sll_sorted_ctx, not_sll_sorted_strict_ctx
+from treehornx.chc.SDTAContext import SDTAContext, avl_wbf_ctx, not_avl_ctx, not_avl_wbf_ctx, not_bst_ctx, not_bst_strict_ctx, not_rb_ctx, not_rb_strict_ctx, not_sll_sorted_ctx, not_sll_sorted_strict_ctx
 from treehornx.chc.SDTAContext import (
     avl_ctx,
-    avl_strict_ctx,
     bst_ctx,
     bst_strict_ctx,
     rb_ctx,
@@ -17,7 +16,11 @@ from treehornx.chc.SDTAContext import (
     sll_sorted_ctx,
     sll_sorted_strict_ctx,
 )
+from treehornx.chc.contracts.Contract import Contract, read_only_contract
+from treehornx.chc.post.tainting.core import TaintedLabel
 from treehornx.chc.psi import not_psi_bst
+from treehornx.ir.function import Function
+from treehornx.ir.sorts import Pointer, Sort, Struct
 from treehornx.report.visualization import DependencyGraphBuilder, DependencyGraphKind
 from treehornx.ux.output import display_generation_results, display_verify_cmd_option_messages, render_dependency_graph
 from treehornx.ux.parsing import handle_function_parsing, handle_root_fetching
@@ -43,11 +46,21 @@ def compile_cmd(
     console.print(f"Function {function.name} compiled to {output_file}.")
 
 
+def check_parent(parent: str | None, root_struct: Struct) -> bool:
+    if parent is not None and parent not in root_struct.fields:
+        console.print(f"[red]Error: Parent field '{parent}' not found in root struct fields {root_struct.fields}.[/red]")
+        return False
+    if parent is not None and parent in root_struct.fields and not isinstance(root_struct.fields[parent].sort, Pointer):
+        console.print(f"[red]Error: Parent field '{parent}' must be a pointer type.[/red]")
+        return False
+    return True
+
+
 DEFAULT_N = 128
 DEFAULT_M = 0
 DEFAULT_C = 32
 
-PostType: TypeAlias = Literal["tree", "bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl", "avl_strict", "rb", "rb_strict"]
+PostType: TypeAlias = Literal["tree", "bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl", "avl_wbf", "rb", "read_only"]
 
 @app.command("verify")
 def verify_cmd(
@@ -77,10 +90,11 @@ def verify_cmd(
     compressed_dep_graph: Annotated[bool, typer.Option("--cdg", "--compressed-dep-graph")] = False,
     internal_dependency_graph: Annotated[bool, typer.Option("--idg", "--internal-dep-graph")] = False,
     pre: Annotated[
-        Literal["bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl", "avl_strict", "rb", "rb_strict"] | None,
+        Literal["bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl", "avl_wbf", "rb"] | None,
         typer.Option("--pre"),
     ] = None,
     post: Annotated[PostType|None, typer.Option("--post")] = None,
+    parent: Annotated[str | None, typer.Option("--parent")] = None,
     produce_csv: Annotated[bool, typer.Option("--csv")] = False,
     produce_json: Annotated[bool, typer.Option("--json")] = False,
 ) -> None:
@@ -112,35 +126,40 @@ def verify_cmd(
         typer.Exit(1)
         return  # useless but mypy/pyright doesn't know that typer.Exit exits the program
 
+    assert isinstance(root.sort, Pointer), f"Root variable '{root_name}' must have a pointer type, but has sort {root.sort}"
+    assert isinstance(root.sort.pointee, Struct), f"Root variable '{root_name}' must have a struct type, but has sort {root.sort}"
+    if not check_parent(parent, root.sort.pointee):
+        typer.Exit(1)
+        return
+
     pre_map: dict[str, SDTAContext] = {
         "bst": bst_ctx(),
         "bst_strict": bst_strict_ctx(),
         "sll_sorted": sll_sorted_ctx(),
         "sll_sorted_strict": sll_sorted_strict_ctx(),
         "avl": avl_ctx(),
-        "avl_strict": avl_strict_ctx(),
-        "rb": rb_ctx(),
-        "rb_strict": rb_strict_ctx(),
+        "avl_wbf": avl_wbf_ctx(),
+        "rb": rb_ctx()
     }
     pre_ctx = pre_map[pre] if pre else None
 
-    post_map: dict[str, SDTAContext | bool] = {
+    post_map: dict[str, SDTAContext | bool | Contract[TaintedLabel]] = {
         "tree": True,
         "bst": not_bst_ctx(),
         "bst_strict": not_bst_strict_ctx(),
         "sll_sorted": not_sll_sorted_ctx(),
         "sll_sorted_strict": not_sll_sorted_strict_ctx(),
         "avl": not_avl_ctx(),
-        "avl_strict": not_avl_strict_ctx(),
+        "avl_wbf": not_avl_wbf_ctx(),
         "rb": not_rb_ctx(),
-        "rb_strict": not_rb_strict_ctx(),
+        "read_only": read_only_contract()
     }
     post_ctx = post_map[post] if post else None
 
     if pre_ctx is None:
-        trees = handle_label_generation(function, root, n, m, c)
+        trees = handle_label_generation(function, root, n, m, c, parent_name=parent)
     else:
-        trees = handle_label_generation(function, root, n, m, c, pre_ctx.label_filter, pre_ctx.pair_filter)
+        trees = handle_label_generation(function, root, n, m, c, pre_ctx.label_filter, pre_ctx.pair_filter, parent_name=parent)
     trivially_sat = compute_trivially_sat(trees)
 
     display_generation_results(

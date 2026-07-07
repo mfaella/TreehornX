@@ -42,7 +42,9 @@ class CompressedKnitter(IKnitter):
     k: int
     m: int
     n: int
+    parent: str | None = None
     make_label: Callable[[Label | None, Frame], Label] = lambda o, f: Label(f, o)
+
 
     def pointers(self) -> Iterable[str]:
         for p in self.function.vars:
@@ -90,8 +92,10 @@ class CompressedKnitter(IKnitter):
     def _prev_of_internal_step(self, last_frame: Frame) -> tuple[Dir, int]:
         if self._replace_last_frame(last_frame):
             assert last_frame.prev is not None
+            # print("replace")
             return last_frame.prev
         else:
+            # print("do not replace")
             return (Internal(), last_frame.index)
 
     def set_ptr_here(self, f1: Frame, p: str) -> FrameDescriptor:
@@ -261,6 +265,8 @@ class CompressedKnitter(IKnitter):
 
     def step_field_assign_ptr(self, pair: Pair, p: str, q: str, pfield: str) -> tuple[FrameDescriptor, StepKind]:
         """p->pfield := q"""
+        if pfield == self.parent:
+            raise ValueError(f"Cannot assign to parent field '{self.parent}'")
         sigma = pair.leader()
         if sigma.frame.isnil[p]:
             return self.error(sigma.frame), StepKind.INTERNAL
@@ -394,6 +400,32 @@ class CompressedKnitter(IKnitter):
             frame = self.rewind2(pair, p, q)
             return frame, StepKind.EXTERNAL
 
+    def step_ptr_assign_parent(self, pair: Pair, p: str, q: str) -> tuple[FrameDescriptor, StepKind]:
+        """p := q->parent"""
+
+        sigma = pair.leader()
+        tau = pair.follower()
+        if sigma.frame.isnil[q]:
+            # print("error")
+            return self.error(sigma.frame), StepKind.INTERNAL
+        elif stop_rewind(sigma, q):
+            if pair.leadership == LeadershipKind.PARENT and pair.parent[1].prev == (Internal(), 1): # is root
+                return self.step_assign_nil(pair.parent, p), StepKind.INTERNAL
+
+            else:
+                if pair.leadership != LeadershipKind.CHILD:
+                    raise NonContinuosPairError()
+                tau_b = FrameDescriptor()
+                tau_b.isnil[p] = False
+                tau_b = self._copy_all_isnil_but_target(sigma.frame, tau_b, p)
+                tau_b = self.advance_pc(sigma.frame, tau_b)
+                tau_b.prev = self._prev_of_external_step(pair)
+                tau_b.event = Here(p)
+                tau_b = default("active", "val", "d", "active_child")(sigma.frame, tau.frame, tau_b)
+                return tau_b, StepKind.EXTERNAL
+        else:
+            return self.rewind(pair, q), StepKind.EXTERNAL
+
     def step_ptr_assign_field(self, pair: Pair, p: str, pfield: str, q: str) -> tuple[FrameDescriptor, StepKind]:
         """p := q->pfield"""
         sigma = pair.leader()
@@ -452,6 +484,7 @@ class CompressedKnitter(IKnitter):
             inst = self.function.instructions[pc]
             if len(pair.leader()) >= self.n:
                 return self.label_overflow(pair.leader().frame), None, StepKind.INTERNAL
+            # print(f"inst: {inst}")
             match inst:
                 case IfGoto(ire.PtrIsPtr(p, q), _):
                     assert isinstance(p, Var)
@@ -478,8 +511,12 @@ class CompressedKnitter(IKnitter):
                     frame, kind = self.step_ptr_assign_ptr(pair, p.name, q.name)
                     return frame, None, kind
                 case PtrAssignField(p, qfield):
-                    frame, kind = self.step_ptr_assign_field(pair, p.name, qfield.name, qfield.ptr.name)
-                    return frame, None, kind
+                    if qfield.name == self.parent:
+                        frame, kind = self.step_ptr_assign_parent(pair, p.name, qfield.ptr.name)
+                        return frame, None, kind
+                    else:
+                        frame, kind = self.step_ptr_assign_field(pair, p.name, qfield.name, qfield.ptr.name)
+                        return frame, None, kind
                 case FieldAssignPtr(pfield, q):
                     frame, kind = self.step_field_assign_ptr(pair, pfield.ptr.name, q.name, pfield.name)
                     return frame, None, kind
@@ -515,6 +552,7 @@ class CompressedKnitter(IKnitter):
             framed.upd[ptr_name] = False
         if self._replace_last_frame(sigma.frame):
             framed.index = sigma.frame.index
+            # print(f"frame.prev: {framed.prev}, sigma.frame.prev: {sigma.frame.prev}")
             assert framed.prev == sigma.frame.prev
         else:
             framed.index = sigma.frame.index + 1

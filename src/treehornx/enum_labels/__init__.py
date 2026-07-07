@@ -34,6 +34,7 @@ class KnittedTrees:
         endless_loop_pivots: Iterable[Label],
         steps: Iterable[Step],
         pairs: Iterable[tuple[Label, Label, int | str]],
+        parent_name: str | None = None,
     ):
         self.k = k
         self.m = m
@@ -44,6 +45,7 @@ class KnittedTrees:
         self._steps = set(steps)
         self._ids = dict((lab, id) for id, lab in enumerate(self._labels))
         self._pairs = set(pairs)
+        self.parent_name = parent_name
 
     @cached_property
     def _safe_for(self) -> dict[ExitCodeKind, bool]:
@@ -130,7 +132,7 @@ class KnittedTrees:
 
     @cached_property
     def child_keys(self) -> set[int | str]:
-        return set(p[2] for p in self._pairs)
+        return set(p[2] for p in self._pairs if p[2] != self.parent_name)
 
     def pairs(self) -> Iterable[tuple[Label, Label, int | str]]:
         return iter(self._pairs)
@@ -165,6 +167,7 @@ def generate_labels(
     c: int | None = None,
     backbone_label_filter: Callable[[Label, bool], bool] | None = None,
     backbone_pair_filter: Callable[[tuple[Label, Label, int | str], bool], bool] | None = None,
+    parent_name: str | None = None,
 ) -> KnittedTrees:
     if root not in func.vars:
         raise RootRefVariableNotFoundError(f"Root reference variable '{root.name}' not found in the function.")
@@ -179,6 +182,7 @@ def generate_labels(
         c,
         backbone_label_filter=backbone_label_filter or default_filter,
         backbone_pair_filter=backbone_pair_filter or default_filter,
+        parent=parent_name,
     )
     generator.generate()
     result = KnittedTrees(
@@ -190,5 +194,6 @@ def generate_labels(
         endless_loop_pivots=filter(generator.db.is_endless_loop_pivot, generator.db.find_all_labels()),
         steps=_get_steps(generator.db),
         pairs=map(lambda p: (p.parent, p.child, p.child_key), generator.db.find_all_pairs()),
+        parent_name=parent_name
     )
     return result

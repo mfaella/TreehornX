@@ -28,13 +28,14 @@ class CompressedUnboundedInternalChainKnitter(IKnitter):
         m: int,
         n: int,
         *,
+        parent: str | None = None,
         make_label: Callable[[Label | None, Frame], Label] = lambda o, f: Label(f, o),
         on_endless_loop_detected: Callable[[Pair], None] = lambda pivot: None,
         on_new_internal_step: Callable[[Pair, Pair], None] = lambda ancestor, lab: None,
         on_new_external_step: Callable[[Pair, Pair], None] = lambda previous, lab: None,
         on_step_failed: Callable[[Pair], None] = lambda p: None,
     ):
-        self._knitter: IKnitter = CompressedKnitter(function, k, m, n, make_label)
+        self._knitter: IKnitter = CompressedKnitter(function, k, m, n, parent, make_label)
         self._on_endless_loop_detected = on_endless_loop_detected
         self._on_new_internal_step = on_new_internal_step
         self._on_new_external_step = on_new_external_step

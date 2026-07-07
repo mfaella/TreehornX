@@ -9,6 +9,8 @@ from pysmt.fnode import FNode
 import pysmt.shortcuts as smt
 
 from treehornx.chc.computation import *
+from treehornx.chc.contracts import constract_with_Pre_predicates, produce_contract_queries, produce_contract_with_Pre
+from treehornx.chc.contracts.Contract import Contract
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.post import S_predicates, S_with_Pre_predicates, T_predicates, produce_S, produce_S_with_Pre, produce_T_no_query, produce_T_queries
 from treehornx.chc.post.SFactory import SFactory
@@ -38,12 +40,14 @@ class CHCSystemFactory:
     tree_node_sort: Struct
     trees: KnittedTrees
     pre_ctx: SDTAContext | None = None
-    post_ctx: SDTAContext | bool | None = None
+    post_ctx: SDTAContext | bool | None | Contract[TaintedLabel] = None
     root_name: str | None = None
+    parent_name: str | None = None
 
     def __post_init__(self):
         if self.post_ctx and self.root_name is None:
             raise ValueError("Root name must be provided if postcondition generation is enabled.")
+
 
     @cached_property
     def fragment_factory(self):
@@ -69,6 +73,38 @@ class CHCSystemFactory:
         )
 
     @cached_property
+    def contract_pre_factory(self) -> PreFactory[TaintedLabel]:
+        if self.pre_ctx is None:
+            raise ValueError("No context provided for precondition generation.")
+        if not isinstance(self.post_ctx, Contract):
+            raise ValueError("No contract provided for precondition generation.")
+
+
+        def property(lab: TaintedLabel, prefix: str) -> FNode:
+            return self.post_ctx.fail(lab, prefix) # pyright: ignore
+
+        def consistent_children(parent: TaintedLabel, children: Iterable[tuple[str|int, TaintedLabel]]) -> FNode:
+            children = list(children)
+            consistency_constraints: list[FNode] = []
+            for child_index, (child_key, child) in enumerate(children):
+                child_var_prefix = f"c{child_index}"
+                consistency_constraints.append(self.consistent_child_t(parent, child_key, child, "p", child_var_prefix))
+
+            return smt.And(*consistency_constraints)
+
+        return PreFactory[TaintedLabel](
+            property=property,
+            consistent_children=consistent_children,
+            ctx=self.pre_ctx,
+            fragment_factory=self.fragment_factory,
+            apply_predicate=self.T_factory.apply,
+            get_label=lambda tlab: tlab.label,
+            get_name=lambda slab: str(self.trees.id(slab.label)),
+            aux_symbols=lambda tlab, prefix: ()
+        )
+
+
+    @cached_property
     def post_pre_factory(self) -> PreFactory[SaintedLabel]:
         if self.pre_ctx is None:
             raise ValueError("No context provided for precondition generation.")
@@ -77,7 +113,7 @@ class CHCSystemFactory:
         if self.post_ctx is True:
             raise ValueError("Postcondition generation is enabled, but no context provided for precondition generation.")
 
-        def property(lab: SaintedLabel) -> FNode:
+        def property(lab: SaintedLabel, _prefix: str) -> FNode:
             if lab.state_node != Q():
                 return smt.FALSE()
 
@@ -119,7 +155,7 @@ class CHCSystemFactory:
 
     @cached_property
     def S_factory(self) -> SFactory:  # noqa: N802
-        if isinstance(self.post_ctx, (type(None), bool)):
+        if isinstance(self.post_ctx, (type(None), bool, Contract)):
             raise ValueError("No context provided for postcondition generation.")
         return SFactory(self.trees, self.post_ctx, self.T_factory)
 
@@ -214,7 +250,7 @@ class CHCSystemFactory:
             return lab
 
         pre_factory: PreFactory[Label] = PreFactory(
-            property=lambda lab: label_exit(lab, {exit_code}),
+            property=lambda lab, _: label_exit(lab, {exit_code}),
             consistent_children=self.consistent_chlidren,
             ctx=self.pre_ctx,
             fragment_factory=self.fragment_factory,
@@ -227,9 +263,12 @@ class CHCSystemFactory:
 
     def _add_pre(self, system: CHCSystem, exit_code: ExitCodeKind):
         pre_factory = self.pre_factory(exit_code)
+        print(f"Adding preconditions for exit code: {exit_code.name}")
         for pred in pre_predicates(self.trees, pre_factory):
             system.add_predicate(pred)
 
+        print(f"Added {len(list(pre_predicates(self.trees, pre_factory)))} precondition predicates.")
+        print(f"Adding precondition clauses for exit code: {exit_code.name}")
         for chc in produce_pre_no_query(self.trees, pre_factory):
             self._add_clause(system, chc)
 
@@ -277,24 +316,54 @@ class CHCSystemFactory:
             for chc in produce_S(self.trees, self.root_name, S_factory):
                 self._add_clause(system, chc)
 
+    def _add_contract(self, system: CHCSystem):
+        if not isinstance(self.post_ctx, Contract):
+            raise ValueError("No contract provided for postcondition generation.")
+
+        contract: Contract[TaintedLabel] = self.post_ctx
+
+        if self.pre_ctx is None:
+            for clause in produce_contract_queries(self.trees, contract, self.T_factory):
+                self._add_clause(system, clause)
+
+        else:
+            pre_factory = self.contract_pre_factory
+            for pred in constract_with_Pre_predicates(self.trees, pre_factory):
+                if pred not in system.get_predicates():
+                    system.add_predicate(pred)
+            for clause in produce_contract_with_Pre(self.trees, pre_factory, self.parent_name):
+                self._add_clause(system, clause)
+
+
     def make_system(self, exit_code: ExitCodeKind | None = None) -> CHCSystem:
         system = CHCSystem(logic=logics.QF_UFLIA)
 
         self._add_lab(system)
 
+        print("creating system...")
+
         if not self.post_ctx:
             if self.pre_ctx is None and exit_code is not None:
                 self._add_lab_queries(system, exit_code)
             elif exit_code is not None or self.pre_ctx is not None:
+                print("Adding preconditions...")
                 exit_code = exit_code or ExitCodeKind.CLEAN
                 self._add_pre(system, exit_code)
                 self._add_pre_queries(system, exit_code)
 
-        if self.post_ctx:
+        else:
+            print("Adding postconditions...")
+            print("Adding T...")
             self._add_T(system)
             self._add_T_queries(system)
 
-            if self.post_ctx is not True:
-                self._add_S(system)
+            match self.post_ctx:
+                case SDTAContext():
+                    print("Adding S...")
+                    self._add_S(system)
+                case Contract():
+                    self._add_contract(system)
+                case _:
+                    pass
 
         return system

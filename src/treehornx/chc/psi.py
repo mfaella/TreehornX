@@ -244,17 +244,17 @@ def _psi_avl_template(
     constraints: list[FNode] = []
 
     if left_state is None and right_state is None:
-        constraints.append(smt.Equals(states["height"], smt.Int(0)))
+        constraints.append(smt.Equals(states["height"], smt.Int(1)))
 
     elif left_state is None:
         assert right_state is not None
-        constraints.append(smt.Equals(right_state["height"], smt.Int(0)))
-        constraints.append(smt.Equals(states["height"], smt.Int(1)))
+        constraints.append(smt.Equals(right_state["height"], smt.Int(1)))
+        constraints.append(smt.Equals(states["height"], smt.Int(2)))
 
     elif right_state is None:
         assert left_state is not None
-        constraints.append(smt.Equals(left_state["height"], smt.Int(0)))
-        constraints.append(smt.Equals(states["height"], smt.Int(1)))
+        constraints.append(smt.Equals(left_state["height"], smt.Int(1)))
+        constraints.append(smt.Equals(states["height"], smt.Int(2)))
 
     else:
         constraints.append(
@@ -272,9 +272,9 @@ def psi_avl(
     children_states: dict[str, dict[str, FNode] | None],
     fields: dict[str, FNode],
     enum_fields: dict[str, str],
-    states: dict[str, FNode]
+    states: dict[str, FNode],
 ) -> FNode:
-    return _psi_avl_template(children_states, fields, enum_fields, states, psi_bst)
+    return _psi_avl_template(children_states, fields, enum_fields, states, psi_bst_strict)
 
 
 def not_psi_avl(
@@ -293,27 +293,40 @@ def not_psi_avl(
     conditions.append(smt.Equals(states["data"], fields["data"]))
 
     if left_state is None and right_state is None:
-        error_conditions.append(smt.Not(smt.Equals(states["height"], smt.Int(0))))
+        error_conditions.append(smt.NotEquals(states["height"], smt.Int(1)))
         conditions.append(smt.Equals(states["min"], fields["data"]))
         conditions.append(smt.Equals(states["max"], fields["data"]))
 
-    else:
+    elif left_state is None or right_state is None:
 
-        if left_state is not None:
-            error_conditions.append(smt.NotEquals(smt.Plus(left_state["height"], smt.Int(1)), states["height"]))
-            error_conditions.append(smt.GT(left_state["max"], states["data"]))
-            error_conditions.append(left_state["error"])
-            conditions.append(smt.Equals(states["min"], left_state["min"]))
-        else:
+        if left_state is None:
+            assert right_state is not None
+            error_conditions.append(smt.NotEquals(right_state["height"], smt.Int(1)))
+            error_conditions.append(smt.NotEquals(states["height"], smt.Int(2)))
+            error_conditions.append(smt.LE(right_state["min"], states["data"]))
             conditions.append(smt.Equals(states["min"], states["data"]))
-
-        if right_state is not None:
-            error_conditions.append(smt.NotEquals(smt.Plus(right_state["height"], smt.Int(1)), states["height"]))
-            error_conditions.append(smt.LT(right_state["min"], states["data"]))
-            error_conditions.append(right_state["error"])
             conditions.append(smt.Equals(states["max"], right_state["max"]))
-        else:
+
+        if right_state is None:
+            assert left_state is not None
+            error_conditions.append(smt.NotEquals(left_state["height"], smt.Int(1)))
+            error_conditions.append(smt.NotEquals(states["height"], smt.Int(2)))
+            error_conditions.append(smt.GE(left_state["max"], states["data"]))
             conditions.append(smt.Equals(states["max"], states["data"]))
+            conditions.append(smt.Equals(states["min"], left_state["min"]))
+
+    else:
+        max_height = smt.Max(left_state["height"], right_state["height"])
+        error_conditions.append(smt.NotEquals(smt.Plus(max_height, smt.Int(1)), states["height"]))
+        diff_height = smt.Minus(left_state["height"], right_state["height"])
+        error_conditions.append(smt.GT(diff_height, smt.Int(1)))
+        error_conditions.append(smt.LT(diff_height, smt.Int(-1)))
+        error_conditions.append(smt.GE(left_state["max"], states["data"]))
+        error_conditions.append(smt.LE(right_state["min"], states["data"]))
+        error_conditions.append(left_state["error"])
+        error_conditions.append(right_state["error"])
+        conditions.append(smt.Equals(states["min"], left_state["min"]))
+        conditions.append(smt.Equals(states["max"], right_state["max"]))
 
     error = smt.Iff(states["error"], smt.Or(*error_conditions))
     conditions.append(error)
@@ -321,57 +334,106 @@ def not_psi_avl(
     return smt.And(*conditions)
 
 
-def psi_avl_strict(
+def psi_avl_wbf(
     children_states: dict[str, dict[str, FNode] | None],
     fields: dict[str, FNode],
     enum_fields: dict[str, str],
-    states: dict[str, FNode],
+    states: dict[str, FNode]
 ) -> FNode:
-    return _psi_avl_template(children_states, fields, enum_fields, states, psi_bst_strict)
+    bst = psi_bst(children_states, fields, enum_fields, states)
+    left_state = children_states["left"]
+    right_state = children_states["right"]
+
+    constraints: list[FNode] = []
+    constraints.append(psi_bst_strict(children_states, fields, enum_fields, states))
+
+    if left_state is None and right_state is None:
+        constraints.append(smt.Equals(states["height"], smt.Int(1)))
+        constraints.append(smt.Bool(enum_fields["bf"] == "NEUTRAL"))
+
+    elif left_state is None:
+        assert right_state is not None
+        constraints.append(smt.Equals(right_state["height"], smt.Int(1)))
+        constraints.append(smt.Equals(states["height"], smt.Int(2)))
+        constraints.append(smt.Bool(enum_fields["bf"] == "LOW_RIGHT"))
+
+    elif right_state is None:
+        assert left_state is not None
+        constraints.append(smt.Equals(left_state["height"], smt.Int(1)))
+        constraints.append(smt.Equals(states["height"], smt.Int(2)))
+        constraints.append(smt.Bool(enum_fields["bf"] == "LOW_LEFT"))
+
+    else:
+        constraints.append(
+            smt.Equals(states["height"], smt.Plus(smt.Max(left_state["height"], right_state["height"]), smt.Int(1)))
+        )
+        diff = smt.Minus(left_state["height"], right_state["height"])
+        constraints.append(smt.And(smt.GE(diff, smt.Int(-1)), smt.LE(diff, smt.Int(1))))
+        constraints.append(smt.Implies(smt.Equals(diff, smt.Int(-1)), smt.Bool(enum_fields["bf"] == "LOW_LEFT")))
+        constraints.append(smt.Implies(smt.Equals(diff, smt.Int(0)), smt.Bool(enum_fields["bf"] == "NEUTRAL")))
+        constraints.append(smt.Implies(smt.Equals(diff, smt.Int(1)), smt.Bool(enum_fields["bf"] == "LOW_RIGHT")))
+
+    return smt.And(bst, *constraints)
 
 
-def not_psi_avl_strict(
+def not_psi_avl_wbf(
     children_states: dict[str, dict[str, FNode] | None],
     fields: dict[str, FNode],
     enum_fields: dict[str, str],
-    states: dict[str, FNode],
+    states: dict[str, FNode]
 ) -> FNode:
+    # raise NotImplementedError("not_psi_avl_wbf is not implemented yet")
     conditions: list[FNode] = []
     error_conditions: list[FNode] = []
 
     left_state = children_states["left"]
     right_state = children_states["right"]
 
-    conditions.append(smt.Equals(states["height"], fields["height"]))
     conditions.append(smt.Equals(states["data"], fields["data"]))
 
     if left_state is None and right_state is None:
-        error_conditions.append(smt.Not(smt.Equals(states["height"], smt.Int(0))))
+        error_conditions.append(smt.Not(smt.Equals(states["height"], smt.Int(1))))
         conditions.append(smt.Equals(states["min"], fields["data"]))
         conditions.append(smt.Equals(states["max"], fields["data"]))
+        # conditions.append(smt.Bool(enum_fields["bf"] != "NEUTRAL")) this conditions is added in the pair filter
+
+    elif left_state is None and right_state is not None:
+
+        conditions.append(smt.Equals(states["min"], states["data"]))
+        conditions.append(smt.Equals(states["max"], right_state["max"]))
+        error_conditions.append(smt.LE(right_state["min"], states["data"]))
+        error_conditions.append(smt.NotEquals(right_state["height"], smt.Int(1)))
+        error_conditions.append(smt.NotEquals(states["height"], smt.Int(2)))
+        error_conditions.append(smt.Bool(enum_fields["bf"] != "LOW_RIGHT"))
+
+    elif right_state is None and left_state is not None:
+        conditions.append(smt.Equals(states["max"], states["data"]))
+        conditions.append(smt.Equals(states["min"], left_state["min"]))
+        error_conditions.append(smt.GE(left_state["max"], states["data"]))
+        error_conditions.append(smt.NotEquals(left_state["height"], smt.Int(1)))
+        error_conditions.append(smt.NotEquals(states["height"], smt.Int(2)))
+        error_conditions.append(smt.Bool(enum_fields["bf"] != "LOW_LEFT"))
 
     else:
 
-        if left_state is not None:
-            error_conditions.append(smt.NotEquals(smt.Plus(left_state["height"], smt.Int(1)), states["height"]))
-            error_conditions.append(smt.GE(left_state["max"], states["data"]))
-            error_conditions.append(left_state["error"])
-            conditions.append(smt.Equals(states["min"], left_state["min"]))
-        else:
-            conditions.append(smt.Equals(states["min"], states["data"]))
+        assert left_state is not None and right_state is not None
 
-        if right_state is not None:
-            error_conditions.append(smt.NotEquals(smt.Plus(right_state["height"], smt.Int(1)), states["height"]))
-            error_conditions.append(smt.LE(right_state["min"], states["data"]))
-            error_conditions.append(right_state["error"])
-            conditions.append(smt.Equals(states["max"], right_state["max"]))
-        else:
-            conditions.append(smt.Equals(states["max"], states["data"]))
+        conditions.append(smt.Equals(states["min"], left_state["min"]))
+        conditions.append(smt.Equals(states["max"], right_state["max"]))
+
+        left_height = left_state["height"]
+        right_height = right_state["height"]
+        diff = smt.Minus(left_height, right_height)
+        error_conditions.append(smt.Or(smt.LT(diff, smt.Int(-1)), smt.GT(diff, smt.Int(1))))
+        error_conditions.append(smt.Implies(smt.Equals(diff, smt.Int(-1)), smt.Bool(enum_fields["bf"] != "LOW_LEFT")))
+        error_conditions.append(smt.Implies(smt.Equals(diff, smt.Int(0)), smt.Bool(enum_fields["bf"] != "NEUTRAL")))
+        error_conditions.append(smt.Implies(smt.Equals(diff, smt.Int(1)), smt.Bool(enum_fields["bf"] != "LOW_RIGHT")))
 
     error = smt.Iff(states["error"], smt.Or(*error_conditions))
     conditions.append(error)
 
     return smt.And(*conditions)
+
 
 def _psi_rb_template(
     children_states: dict[str, dict[str, FNode] | None],

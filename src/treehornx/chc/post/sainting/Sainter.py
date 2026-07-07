@@ -110,8 +110,6 @@ class Sainter:
 
         state_ptr2_ = state_ptr2 | state_ptr2_update
         new_sainted_sigma2 = replace(sainted_sigma2, state_ptr=state_ptr2_)
-        if self.trees.id(sainted_sigma2.label) == 29:
-            assert len(state_ptr2_) == 6
         return new_sainted_sigma2, tuple(coordinates_update)
 
     def _internal_states_propagation(self, sainted_sigma2: SaintedLabel) -> InternalStatePropagation|None:
@@ -142,18 +140,18 @@ class Sainter:
         )
 
     def _parent_to_jth_child_state_propagation(self, sainted_pair: Pair[SaintedLabel]) -> DownStatePropagation|None:
-        logger.debug("sainting parent to child propagation")
-        logger.debug(f"parent: {self.label_name(sainted_pair.parent)}")
-        logger.debug(f"child: {self.label_name(sainted_pair.child)}")
+        # logger.debug("sainting parent to child propagation")
+        # logger.debug(f"parent: {self.label_name(sainted_pair.parent)}")
+        # logger.debug(f"child: {self.label_name(sainted_pair.child)}")
         sainted_sigma1 = sainted_pair.parent
         sainted_sigma2 = sainted_pair.child
         child_key = sainted_pair.child_key
         propagation_result = self._state_propagation_by_dir(sainted_sigma1, sainted_sigma2, Up())
         if propagation_result is None:
-            logger.debug("propagation failed")
+            # logger.debug("propagation failed")
             return None
         new_sainted_sigma2, propagations = propagation_result
-        logger.debug(f"new child: {self.label_name(new_sainted_sigma2)}")
+        # logger.debug(f"new child: {self.label_name(new_sainted_sigma2)}")
         return DownStatePropagation(
             parent=sainted_sigma1,
             sainted_sigma2=sainted_sigma2,
@@ -171,7 +169,7 @@ class Sainter:
         return None
 
     def _automaton_transition(self, sainted_parent: SaintedLabel, sainted_children: tuple[tuple[str, SaintedLabel|None], ...]) -> AutomataTransition | None:
-        logger.debug(f"evaluatin automaton transition for ({self.label_name(sainted_parent)}, {list((key, self.label_name(child)) for key, child in sainted_children)})")
+        # logger.debug(f"evaluatin automaton transition for ({self.label_name(sainted_parent)}, {list((key, self.label_name(child)) for key, child in sainted_children)})")
         if sainted_parent.state_node is not True:
             return None
         # Do not consider aux children in the knitted trees since it only refers to node pointed by pointer fields in the node signature
@@ -180,25 +178,25 @@ class Sainter:
         ready_for_transition = True
         for child_key, child in sainted_children:
 
-            logger.debug(f"evaluating child {child_key}")
+            # logger.debug(f"evaluating child {child_key}")
 
             if child is None or missing_child(sainted_parent.label, child_key):
-                logger.debug("missing child")
+                # logger.debug("missing child")
                 children_dict[child_key] = None
                 states_source[child_key] = None
 
             elif no_assignment_to_field(sainted_parent.label, child_key) and child.state_node == Q():
-                logger.debug("sainting structural child")
+                # logger.debug("sainting structural child")
                 children_dict[child_key] = child
                 states_source[child_key] = child
 
             elif (coordinates := self._non_structural_child_ready_for_transition(sainted_parent, child_key)):
-                logger.debug("sainting non structural child")
+                # logger.debug("sainting non structural child")
                 children_dict[child_key] = None
                 states_source[child_key] = coordinates
 
             else:
-                logger.debug("not ready for transition")
+                # logger.debug("not ready for transition")
                 ready_for_transition = False
                 break
 
@@ -250,7 +248,7 @@ class Sainter:
             case Q():
                 state_node_id = 2
         name = f"{lab_id}_{state_node_id}_{state_ptr_id}"
-        logger.debug(f"saint_ptr_map({name}) = {state_ptr}")
+        # logger.debug(f"saint_ptr_map({name}) = {state_ptr}")
         return name
 
     def consistent_state(self, sainted_sigma1: SaintedLabel, a: int, sainted_sigma2: SaintedLabel, b: int) -> bool:
@@ -315,7 +313,7 @@ class Sainter:
 
         def add_pair(pair: Pair[SaintedLabel]):
             if not self.db.contains_pair(pair):
-                logger.debug(f"adding pair: ({self.label_name(pair.parent)}, {self.label_name(pair.child)}, {pair.child_key})")
+                # logger.debug(f"adding pair: ({self.label_name(pair.parent)}, {self.label_name(pair.child)}, {pair.child_key})")
                 self.db.add_pair(pair)
 
         def enqueue_label(label: SaintedLabel):
@@ -327,11 +325,11 @@ class Sainter:
             if pair not in enqueued and pair.parent not in unallowed_external_propagations and pair.child not in unallowed_external_propagations:
                 enqueued.add(pair)
                 pair_queue.append(pair)
-                logger.debug(f"enqueuing satined pair: ({self.label_name(pair.parent)}, {self.label_name(pair.child)}, {pair.child_key})")
+                # logger.debug(f"enqueuing satined pair: ({self.label_name(pair.parent)}, {self.label_name(pair.child)}, {pair.child_key})")
 
         for tainted_label in self.tainted_labels:
             step = self._saint_initalization(tainted_label)
-            logger.debug(f"tainted label init: {self.tainted_label_name(tainted_label)} -> {self.label_name(step.sainted_label)}")
+            # logger.debug(f"tainted label init: {self.tainted_label_name(tainted_label)} -> {self.label_name(step.sainted_label)}")
             sainting_steps.add(step)
             enqueue_label(step.sainted_label)
             self.db.add_label(step.sainted_label)
@@ -370,20 +368,22 @@ class Sainter:
                 for child_key in self.trees.child_keys
             ))
             is_leaf = not bool(label_children)
-            logger.debug(f"{self.label_name(label)} is {"" if is_leaf else "not "}leaf")
+            # logger.debug(f"{self.label_name(label)} is {"" if is_leaf else "not "}leaf")
             return is_leaf
 
         while label_queue:
+
+            automaton_transition_attempts: set[SaintedLabel] = set()
 
             while label_queue:
 
                 old_sainted_label = label_queue.popleft()
 
-                logger.debug(f"sainting extracting label: {self.label_name(old_sainted_label)}")
+                # logger.debug(f"sainting extracting label: {self.label_name(old_sainted_label)}")
                 new_sainted_label = old_sainted_label
                 step = self._start_state_propagation(new_sainted_label)
                 if step is not None:
-                    logger.debug(f"sainting start state propagation: {self.label_name(step.sainted_label)} -> {self.label_name(step.new_sainted_label)}")
+                    # logger.debug(f"sainting start state propagation: {self.label_name(step.sainted_label)} -> {self.label_name(step.new_sainted_label)}")
                     sainting_steps.add(step)
                     unallowed_external_propagations.add(new_sainted_label)
                     new_sainted_label = step.new_sainted_label
@@ -392,12 +392,19 @@ class Sainter:
 
                 step = self._internal_states_propagation(new_sainted_label)
                 if step is not None:
-                    logger.debug(f"sainting internal state propagation: {self.label_name(step.sainted_sigma)} -> {self.label_name(step.new_sainted_sigma)}")
+                    # logger.debug(f"sainting internal state propagation: {self.label_name(step.sainted_sigma)} -> {self.label_name(step.new_sainted_sigma)}")
                     sainting_steps.add(step)
                     unallowed_external_propagations.add(new_sainted_label)
                     new_sainted_label = step.new_sainted_sigma
                     self.db.add_label(new_sainted_label)
 
+                if new_sainted_label.state_node is True:
+                    automaton_transition_attempts.add(new_sainted_label)
+
+                if new_sainted_label.state_node == Q():
+                    for pair in self.db.pairs_by_child(new_sainted_label):
+                        if pair.parent.state_node is True:
+                            automaton_transition_attempts.add(pair.parent)
 
                 for new_pair in updated_pairs_on_new_label(old_sainted_label, new_sainted_label):
                     add_pair(new_pair)
@@ -405,35 +412,47 @@ class Sainter:
 
             while pair_queue:
                 pair = pair_queue.popleft()
-                logger.debug(f"sainting extracting pair: ({self.label_name(pair.parent)}, {self.label_name(pair.child)}, {pair.child_key})")
+                # logger.debug(f"sainting extracting pair: ({self.label_name(pair.parent)}, {self.label_name(pair.child)}, {pair.child_key})")
                 step = self._child_to_parent_state_propagation(pair)
                 if step is not None:
-                    logger.debug("sainting child to parent propagation")
-                    logger.debug(f"parent: {self.label_name(step.parent)}")
-                    logger.debug(f"child: {self.label_name(step.child)}")
-                    logger.debug(f"new parent: {self.label_name(step.new_sainted_sigma2)}")
+                    # logger.debug("sainting child to parent propagation")
+                    # logger.debug(f"parent: {self.label_name(step.parent)}")
+                    # logger.debug(f"child: {self.label_name(step.child)}")
+                    # logger.debug(f"new parent: {self.label_name(step.new_sainted_sigma2)}")
                     sainting_steps.add(step)
                     new_pair = replace(pair, parent=step.new_sainted_sigma2)
                     add_pair(new_pair)
                     enqueue_label(step.new_sainted_sigma2)
                     update_pairs_on_new_label(step.parent, step.new_sainted_sigma2, exclude_dir={Down(pair.child_key)})
+                    new_parent = step.new_sainted_sigma2
+                    if new_parent.state_node is True:
+                        automaton_transition_attempts.add(new_parent)
+
+                    if new_parent.state_node == Q():
+                        for new_parent_pair in self.db.pairs_by_child(new_parent):
+                            new_parent_parent = new_parent_pair.parent
+                            if new_parent_parent.state_node is True:
+                                automaton_transition_attempts.add(new_parent_parent)
 
                 step = self._parent_to_jth_child_state_propagation(pair)
                 if step is not None:
-                    logger.debug("sainting parent to child propagation")
-                    logger.debug(f"parent: {self.label_name(step.parent)}")
-                    logger.debug(f"child: {self.label_name(step.sainted_sigma2)}")
-                    logger.debug(f"new child: {self.label_name(step.new_sainted_sigma2)}")
+                    # logger.debug("sainting parent to child propagation")
+                    # logger.debug(f"parent: {self.label_name(step.parent)}")
+                    # logger.debug(f"child: {self.label_name(step.sainted_sigma2)}")
+                    # logger.debug(f"new child: {self.label_name(step.new_sainted_sigma2)}")
                     sainting_steps.add(step)
                     new_pair = replace(pair, child=step.new_sainted_sigma2)
                     add_pair(new_pair)
                     enqueue_label(step.new_sainted_sigma2)
                     update_pairs_on_new_label(step.sainted_sigma2, step.new_sainted_sigma2, exclude_dir={Up()})
+                    new_child = step.new_sainted_sigma2
+                    if new_child.state_node is True:
+                        automaton_transition_attempts.add(new_child)
 
-            for sainted_label in list(self.db.labels()):
-                logger.debug(f"sainting Trying automaton transition on {self.label_name(sainted_label)}")
+            for sainted_label in automaton_transition_attempts:
+                # logger.debug(f"sainting Trying automaton transition on {self.label_name(sainted_label)}")
                 if is_knitted_tree_leaf(sainted_label):
-                    logger.debug("no possible children for structural transition")
+                    # logger.debug("no possible children for structural transition")
                     possible_children = list(((j, None),) for j in self.field_keys)
                 else:
                     possible_children = [
@@ -441,13 +460,13 @@ class Sainter:
                         for j in self.field_keys
                     ]
                 for children in product(*possible_children):
-                    logger.debug(f"attempting transition with children: {list((child_key, (self.label_name(child) if child else None)) for child_key, child in children)}")
+                    # logger.debug(f"attempting transition with children: {list((child_key, (self.label_name(child) if child else None)) for child_key, child in children)}")
                     step = self._automaton_transition(sainted_label, children)
                     if step is not None and step not in sainting_steps:
-                        logger.debug("sainting Automaton transition")
-                        logger.debug(f"parent: {self.label_name(step.parent)}")
-                        logger.debug(f"children: {list((child_key, self.label_name(child)) for child_key, child in children)}")
-                        logger.debug(f"new parent: {self.label_name(step.new_parent)}")
+                        # logger.debug("sainting Automaton transition")
+                        # logger.debug(f"parent: {self.label_name(step.parent)}")
+                        # logger.debug(f"children: {list((child_key, self.label_name(child)) for child_key, child in children)}")
+                        # logger.debug(f"new parent: {self.label_name(step.new_parent)}")
                         sainting_steps.add(step)
                         self.db.add_label(step.new_parent)
                         enqueue_label(step.new_parent)
@@ -463,12 +482,13 @@ class Sainter:
                         exclude_dir: set[Dir] = {Down(child_key) for child_key in self.field_keys}
                         update_pairs_on_new_label(step.parent, step.new_parent, exclude_dir)
                     else:
-                        logger.debug("automaton transition failed")
+                        pass
+                        # logger.debug("automaton transition failed")
 
         for label in self.db.labels():
             step = self._acceptance(label)
             if step is not None:
-                logger.debug(f"sainting acceptance: {self.label_name(step.sainted_label)}")
+                # logger.debug(f"sainting acceptance: {self.label_name(step.sainted_label)}")
                 sainting_steps.add(step)
 
         return sainting_steps, set(self.db.labels()), set(self.db.pairs())

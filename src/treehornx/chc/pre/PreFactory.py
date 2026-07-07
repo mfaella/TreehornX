@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from functools import cached_property
-from typing import Callable, Iterable
+from time import strftime
+from typing import TYPE_CHECKING, Callable, Iterable
 
 from frozendict import frozendict
 from loguru import logger
@@ -25,7 +26,7 @@ class PreFactoryError(Exception):
 
 @dataclass
 class PreFactory[T]:
-    property: Callable[[T], FNode]
+    property: Callable[[T, str], FNode]
     consistent_children: Callable[[T, Iterable[tuple[str|int, T]]], FNode]
     ctx: SDTAContext
     fragment_factory: CHCFragmentFactory
@@ -82,7 +83,7 @@ class PreFactory[T]:
             )
         lab = self.apply_predicate(decorated_label, "")
         e = self._e_symbol(decorated_label)
-        property = self.property(decorated_label)
+        property = self.property(decorated_label, "")
         body = smt.And(lab, smt.Iff(e, property)).simplify()
         head = self._apply(decorated_label)
         clause = chc.Clause(body, head)
@@ -139,7 +140,7 @@ class PreFactory[T]:
 
         e = self._e_symbol(decorated_parent, var_prefix=parent_var_prefix)
         lab = self.apply_predicate(decorated_parent, parent_var_prefix)
-        property = self.property(decorated_parent)
+        property = self.property(decorated_parent, parent_var_prefix)
         if psi:
             body = smt.And(
                 lab, *pres, *data_constraints, psi, smt.Iff(e, smt.Or(*es, property))

@@ -176,11 +176,11 @@ type TaintingStep = (
 )
 
 
-def init_tainted_label(lab: Label, root_name: str) -> TaintedLabel:
-    lab_len = len(lab)
-    tainted_ptr: frozendict[tuple[str, int], bool] = frozendict(
-        {(ptr, i): False for i, ptr in product(range(1, lab_len), lab.frame.isnil.keys())}
-    )
-    if end_of_lace(lab) and not lab.frame.isnil[root_name]:
-        tainted_ptr = tainted_ptr.set((root_name, lab_len - 1), True)
-    return TaintedLabel(label=lab, taint_node=False, taint_ptr=tainted_ptr)
+# def init_tainted_label(lab: Label, root_name: str) -> TaintedLabel:
+#     lab_len = len(lab)
+#     tainted_ptr: frozendict[tuple[str, int], bool] = frozendict(
+#         {(ptr, i): False for i, ptr in product(range(1, lab_len), lab.frame.isnil.keys())}
+#     )
+#     if end_of_lace(lab) and not lab.frame.isnil[root_name]:
+#         tainted_ptr = tainted_ptr.set((root_name, lab_len - 1), True)
+#     return TaintedLabel(label=lab, taint_node=False, taint_ptr=tainted_ptr)
