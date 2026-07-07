@@ -6,17 +6,28 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from func_timeout import FunctionTimedOut, func_timeout
-
 from pychc.solvers.chc_solver import CHCSolver, Status # pyright: ignore[reportMissingTypeStubs]
 from pychc.solvers.golem import GolemSolver # pyright: ignore[reportMissingTypeStubs]
+from pychc.solvers.z3 import Z3CHCSolver # pyright: ignore[reportMissingTypeStubs]
 from pysmt.shortcuts import reset_env
 
 from treehornx.chc.CHCSystemFactory import CHCSystemFactory
 from treehornx.chc.core import ExitCodeKind
-from treehornx.chc.post import taint
-from treehornx.chc.pre import PreContext
-from treehornx.chc.pre.PreContext import avl_strict_ctx, bst_strict_ctx, sll_sorted_strict_ctx
+from treehornx.chc.SDTAContext import (
+    SDTAContext,
+    avl_ctx,
+    avl_wbf_ctx,
+    bst_ctx,
+    bst_strict_ctx,
+    not_avl_ctx,
+    not_avl_wbf_ctx,
+    not_bst_ctx,
+    not_bst_strict_ctx,
+    not_sll_sorted_ctx,
+    not_sll_sorted_strict_ctx,
+    sll_sorted_strict_ctx,
+)
+from treehornx.chc.post.tainting import Tainter
 from treehornx.enum_labels import generate_labels
 from treehornx.ir.sorts import Pointer, Struct
 from treehornx.parser.CParser import CParser
@@ -40,8 +51,9 @@ class BenchmarkConfig:
     n: int = DEFAULT_N
     m: int = DEFAULT_M
     c: int = DEFAULT_C
-    pre_ctx: PreContext|None = None
-    post_is_tree: bool = False
+    pre_ctx: SDTAContext|None = None
+    post_ctx: bool | SDTAContext = False
+    parent: str | None = None
     solver: CHCSolver = field(default_factory = default_chc_solver)
 
 @dataclass
@@ -54,7 +66,7 @@ class BenchmarkResult:
     system_creation_elapsed_time_for: defaultdict[str, float|None] = field(default_factory=lambda: defaultdict(lambda: None))
     system_creation_timed_out_for: defaultdict[str, bool|None] = field(default_factory=lambda: defaultdict(lambda: None))
     outcome_for: defaultdict[str, VerificationOutcome|None] = field(default_factory=lambda: defaultdict(lambda: None))
-    number_of_labels: int | None = None
+    number_of_chcs: int | None = None
     longest_label_len: int | None = None
     number_of_tainted_labels: int | None = None
 
@@ -75,6 +87,12 @@ def trivially_safe_for(system_factory: CHCSystemFactory, key: str) -> bool:
         case "lof":
             return system_factory.trivially_safe_for_lof
         case "post_is_tree":
+            # `trivially_safe_for_post_is_tree` only reflects the tree-shape (T)
+            # check. When a full post-condition context is provided, the
+            # post-condition property (S) must always be solved, even if the
+            # tree shape is trivially preserved.
+            if isinstance(system_factory.post_ctx, SDTAContext):
+                return False
             return system_factory.trivially_safe_for_post_is_tree
         case _:
             raise ValueError(f"Unknown key: {key}")
@@ -95,38 +113,33 @@ def key_to_exit_code_kind(key: str) -> ExitCodeKind|None:
 def solve_for_key(config: BenchmarkConfig, system_factory: CHCSystemFactory, key: str, result: BenchmarkResult, timeout: int):
     if not trivially_safe_for(system_factory, key):
         result.trivially_safe_for[key] = False
-        try:
-            exit_code_kind = key_to_exit_code_kind(key)
-            start = time.perf_counter()
-            system = func_timeout(timeout, system_factory.make_system, args=(exit_code_kind,))
-            end = time.perf_counter()
-            result.system_creation_timed_out_for[key] = False
-            result.system_creation_elapsed_time_for[key] = end - start
-        except FunctionTimedOut:
-            result.system_creation_timed_out_for[key] = True
-            return
+        exit_code_kind = key_to_exit_code_kind(key)
+        start = time.perf_counter()
+        system = system_factory.make_system(exit_code_kind)
+        end = time.perf_counter()
+        result.system_creation_timed_out_for[key] = False
+        result.system_creation_elapsed_time_for[key] = end - start
 
 
-        try:
-            def load_and_solve():
-                start = time.perf_counter()
-                config.solver.load_system(system)
-                input_file = config.solver.get_input_file()
-                end = time.perf_counter()
-                remaining_timeout = timeout - int(end - start)
-                return config.solver.run(input_file, timeout=remaining_timeout)
+        def load_and_solve():
             start = time.perf_counter()
-            status = func_timeout(timeout, load_and_solve)
+            config.solver.load_system(system)
+            input_file = config.solver.get_input_file()
             end = time.perf_counter()
-            result.outcome_for[key] = status_to_outcome(status)
-            result.solving_timed_out_for[key] = False
-            result.solving_elapsed_time_for[key] = end - start
-        except FunctionTimedOut:
-            result.solving_timed_out_for[key] = True
-            return
+            remaining_timeout = timeout - int(end - start)
+            return config.solver.run(input_file, timeout=remaining_timeout)
+        start = time.perf_counter()
+        status = load_and_solve()
+        end = time.perf_counter()
+        result.outcome_for[key] = status_to_outcome(status)
+        result.solving_timed_out_for[key] = False
+        result.solving_elapsed_time_for[key] = end - start
+        return len(list(system.get_clauses()))
+
     else:
         result.outcome_for[key] = VerificationOutcome.SAFE
         result.trivially_safe_for[key] = True
+        return 0
 
 def run_benchmark(config: BenchmarkConfig, timeout: int) -> BenchmarkResult:
     parser = CParser()
@@ -134,77 +147,99 @@ def run_benchmark(config: BenchmarkConfig, timeout: int) -> BenchmarkResult:
     root = next(var for var in function.vars if var.name == "root_0")
     assert isinstance(root.sort, Pointer) and isinstance(root.sort.pointee, Struct)
     result = BenchmarkResult()
-    try:
-        start_time = time.perf_counter()
-        trees = func_timeout(timeout, generate_labels, args=(function, root, config.m, config.n, config.c))
-        end_time = time.perf_counter()
-        result.labels_generation_timed_out = False
-        result.labels_generation_elapsed_time = end_time - start_time
-    except FunctionTimedOut:
-        result.labels_generation_timed_out = True
-        return result
+    start_time = time.perf_counter()
+    trees = generate_labels(function, root, config.m, config.n, config.c, parent_name=config.parent)
+    end_time = time.perf_counter()
+    result.labels_generation_timed_out = False
+    result.labels_generation_elapsed_time = end_time - start_time
     system_factory = CHCSystemFactory(
         function,
         root.sort.pointee,
         trees,
         config.pre_ctx,
-        config.post_is_tree,
+        config.post_ctx,
         root.name
     )
 
-    solve_for_key(config, system_factory, "err", result, timeout)
+    chc_num = solve_for_key(config, system_factory, "err", result, timeout)
 
-    solve_for_key(config, system_factory, "oom", result, timeout)
+    chc_num = max(solve_for_key(config, system_factory, "oom", result, timeout), chc_num)
 
-    solve_for_key(config, system_factory, "lof", result, timeout)
+    chc_num = max(solve_for_key(config, system_factory, "lof", result, timeout), chc_num)
 
     if (
         system_factory.trivially_safe_for_err and
         system_factory.trivially_safe_for_oom and
         system_factory.trivially_safe_for_lof and
-        config.post_is_tree
+        config.post_ctx
     ):
-        solve_for_key(config, system_factory, "post_is_tree", result, timeout)
+        chc_num = max(solve_for_key(config, system_factory, "post_is_tree", result, timeout), chc_num)
 
-    result.number_of_labels = len(list(trees.labels()))
+    result.number_of_chcs = chc_num
     result.longest_label_len = max(len(label) for label in trees.labels())
-    if config.post_is_tree:
+    if config.post_ctx:
         result.trivially_safe_for["post_is_tree"] = system_factory.trivially_safe_for_post_is_tree
-        result.number_of_tainted_labels = len(taint(trees, root.name)[1]) if config.post_is_tree else None
+        result.number_of_tainted_labels = len(Tainter(root.name, trees).taint()[1]) if config.post_ctx else None
 
     return result
 
-def pre_ctx_name(pre_ctx: PreContext) -> str:
-    if pre_ctx == avl_strict_ctx():
-        return "avl strict"
-    elif pre_ctx == bst_strict_ctx():
+def ctx_name(ctx: SDTAContext) -> str:
+    if ctx == avl_ctx():
+        return "avl"
+    elif ctx == not_avl_wbf_ctx():
+        return "not avl"
+    elif ctx == avl_wbf_ctx():
+        return "avl"
+    elif ctx == not_avl_ctx():
+        return "not avl"
+    elif ctx == avl_wbf_ctx():
+        return "avl wbf"
+    elif ctx == bst_strict_ctx():
         return "bst strict"
-    elif pre_ctx == sll_sorted_strict_ctx():
+    elif ctx == not_bst_strict_ctx():
+        return "not bst strict"
+    elif ctx == sll_sorted_strict_ctx():
         return "sll sorted strict"
+    elif ctx == not_sll_sorted_strict_ctx():
+        return "not sll sorted strict"
+    elif ctx == not_bst_ctx():
+        return "not bst"
+    elif ctx == not_sll_sorted_ctx():
+        return "not sll sorted"
+    elif ctx == bst_ctx():
+        return "bst"
     else:
-        raise ValueError("Unknown pre-context")
+        raise ValueError(f"Unknown context: {ctx}")
 
 C_FILES_DIR = Path(__file__).parent / "c_files"
 
 benchamrks_config: list[BenchmarkConfig] = [
     # post_is_tree benchmarks
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_find.c", post_is_tree=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_find.c", post_is_tree=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "sll_unsafe_circular.c", post_is_tree=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_unsafe_post_1.c", post_is_tree=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_unsafe_post_2.c", post_is_tree=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_reverse.c", post_is_tree=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_remove_root.c", post_is_tree=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, post_is_tree=True),
+    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_find.c", post_ctx=True),
+    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_find.c", post_ctx=True),
+    BenchmarkConfig(file_name=C_FILES_DIR / "sll_unsafe_circular.c", post_ctx=True),
+    BenchmarkConfig(file_name=C_FILES_DIR / "bst_unsafe_post_1.c", post_ctx=True),
+    BenchmarkConfig(file_name=C_FILES_DIR / "bst_unsafe_post_2.c", post_ctx=True),
+    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_reverse.c", post_ctx=True),
+    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_remove_root.c", post_ctx=True),
+    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, post_ctx=True),
     # # pre_ctx benchmarks
     BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_check_balance_and_root_height.c", pre_ctx=avl_strict_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "avl_unsafe_check_balance.c", pre_ctx=avl_strict_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "avl_unsafe_check_root_height.c", pre_ctx=avl_strict_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_min_lt_max.c", pre_ctx=bst_strict_ctx()),
-    # BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_min_lt_max_hcpre.c", c=128),
     BenchmarkConfig(file_name=C_FILES_DIR / "bst_unsafe_min_lt_max.c", pre_ctx=bst_strict_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "sll_sorted_safe_first_lt_last.c", pre_ctx=sll_sorted_strict_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "sll_sorted_unsafe_first_lt_last.c", pre_ctx=sll_sorted_strict_ctx()),
+    # pre + post benchmarks
+    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_find.c", pre_ctx=bst_strict_ctx(), post_ctx=not_bst_strict_ctx()),
+    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_strict_ctx(), post_ctx=not_bst_ctx()),
+    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_ctx(), post_ctx=not_bst_strict_ctx()),
+    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_ctx(), post_ctx=not_bst_ctx()),
+    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_find.c", pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_strict_ctx()),
+    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_insert_sorted.c", m=1, pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_ctx()),
+    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_insert_sorted.c", m=1, pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_strict_ctx()),
+    BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_find.c", pre_ctx=avl_ctx(), post_ctx=not_avl_ctx()),
 ]
 
 def main():
@@ -253,14 +288,14 @@ def main():
         for config in benchamrks_config:
             print(f"Running benchmark for {config.file_name}")
             reset_env()
-            result = run_benchmark(config, timeout=180)
+            result = run_benchmark(config, timeout=1500)
             row = {
                 "file_name": config.file_name.name,
                 "n": config.n,
                 "m": config.m,
                 "c": config.c,
                 "pre_ctx": config.pre_ctx,
-                "post_is_tree": config.post_is_tree,
+                "post_is_tree": config.post_ctx,
                 "trivially_safe_for_err": result.trivially_safe_for["err"],
                 "trivially_safe_for_oom": result.trivially_safe_for["oom"],
                 "trivially_safe_for_lof": result.trivially_safe_for["lof"],
@@ -287,7 +322,7 @@ def main():
                 "outcome_for_oom": result.outcome_for["oom"],
                 "outcome_for_lof": result.outcome_for["lof"],
                 "outcome_for_post_is_tree": result.outcome_for["post_is_tree"],
-                "number_of_labels": result.number_of_labels,
+                "number_of_labels": result.number_of_chcs,
                 "longest_label_len": result.longest_label_len,
                 "number_of_tainted_labels": result.number_of_tainted_labels
             }
@@ -299,8 +334,8 @@ def main():
                         row[key] = value.value
                     case float():
                         row[key] = round(value, 4)
-                    case PreContext():
-                        row[key] = pre_ctx_name(value)
+                    case SDTAContext():
+                        row[key] = ctx_name(value)
                     case _:
                         pass
             dict_writer.writerow(row)

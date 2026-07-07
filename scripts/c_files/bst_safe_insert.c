@@ -1,5 +1,5 @@
 struct Node {
-    int value;
+    int data;
     struct Node *left;
     struct Node *right;
 };
@@ -16,7 +16,7 @@ void bst_safe_insert(struct Node* root, int value) {
 
 		while (current) {
 			parent = current;
-			tmp_value = current->value;
+			tmp_value = current->data;
 			if (value < tmp_value) {
 				current = current->left;
 			}
@@ -25,9 +25,9 @@ void bst_safe_insert(struct Node* root, int value) {
 			}
 		}
 
-		tmp_value = parent->value;
+		tmp_value = parent->data;
 		newNode = malloc(sizeof(struct Node));
-		newNode->value = value;
+		newNode->data = value;
 		if (value < tmp_value) {
 			parent->left = newNode;
 		}
