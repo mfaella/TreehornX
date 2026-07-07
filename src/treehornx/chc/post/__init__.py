@@ -1,3 +1,4 @@
+from collections import defaultdict
 from functools import cache
 from itertools import product
 from typing import Iterable
@@ -124,14 +125,14 @@ def S_with_Pre_predicates(trees: KnittedTrees, root_name: str, s_factory: SFacto
 
     logger.debug("yielded Pre predicates of S")
 
-def _make_parent_child_key_index[T](pairs: set[Pair[T]]) -> dict[tuple[T, int | str], list[Pair[T]]]:
+def _make_parent_child_key_index[T](pairs: set[Pair[T]]) -> defaultdict[tuple[T, int | str], list[Pair[T]]]:
     index: dict[tuple[T, int | str], list[Pair[T]]] = {}
     for p in pairs:
         key = (p.parent, p.child_key)
         if key not in index:
             index[key] = []
         index[key].append(p)
-    return index
+    return defaultdict(list, index)
 
 def produce_S_with_Pre(trees: KnittedTrees, root_name: str, s_factory: SFactory, pre_factory: PreFactory[SaintedLabel], parent: str | None = None) -> Iterable[FNode]:  # noqa: N802
     yield from produce_S_no_query(trees, root_name, s_factory, parent=parent)

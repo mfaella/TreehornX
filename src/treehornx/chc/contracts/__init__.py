@@ -1,4 +1,5 @@
 
+from collections import defaultdict
 from itertools import product
 from typing import Callable, Iterable
 
@@ -22,14 +23,14 @@ def produce_contract_queries(trees: KnittedTrees, contract: Contract[TaintedLabe
         clause = chc.Clause(body, smt.FALSE())
         yield clause
 
-def _make_parent_child_key_index[T](pairs: set[Pair[T]]) -> dict[tuple[T, int | str], list[Pair[T]]]:
+def _make_parent_child_key_index[T](pairs: set[Pair[T]]) -> defaultdict[tuple[T, int | str], list[Pair[T]]]:
     index: dict[tuple[T, int | str], list[Pair[T]]] = {}
     for p in pairs:
         key = (p.parent, p.child_key)
         if key not in index:
             index[key] = []
         index[key].append(p)
-    return index
+    return defaultdict(list, index)
 
 def produce_contract_with_Pre(trees: KnittedTrees, pre_factory: PreFactory[TaintedLabel], parent: None | str = None) -> Iterable[FNode]:  # noqa: N802
     _, tlabels, tpairs_ = taint(trees, trees.root_name)

@@ -12,6 +12,7 @@ from pychc.solvers.z3 import Z3CHCSolver # pyright: ignore[reportMissingTypeStub
 from pysmt.shortcuts import reset_env
 
 from treehornx.chc.CHCSystemFactory import CHCSystemFactory
+from treehornx.chc.contracts.Contract import Contract, read_only_contract
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.SDTAContext import (
     SDTAContext,
@@ -28,9 +29,12 @@ from treehornx.chc.SDTAContext import (
     sll_sorted_strict_ctx,
 )
 from treehornx.chc.post.tainting import Tainter
+from treehornx.chc.post.tainting.core import TaintedLabel
 from treehornx.enum_labels import generate_labels
 from treehornx.ir.sorts import Pointer, Struct
 from treehornx.parser.CParser import CParser
+
+C_FILES_DIR = Path(__file__).parent / "c_files"
 
 DEFAULT_N = 128
 DEFAULT_M = 0
@@ -39,6 +43,7 @@ DEFAULT_C = 32
 def default_chc_solver() -> CHCSolver:
     path = Path(__file__).parent / "solvers" / "linux" / "x86-64"
     return GolemSolver(binary_path=path)
+    # return Z3CHCSolver(binary_path=path)
 
 class VerificationOutcome(Enum):
     SAFE = "safe"
@@ -52,7 +57,7 @@ class BenchmarkConfig:
     m: int = DEFAULT_M
     c: int = DEFAULT_C
     pre_ctx: SDTAContext|None = None
-    post_ctx: bool | SDTAContext = False
+    post_ctx: bool | SDTAContext | Contract[TaintedLabel] = False
     parent: str | None = None
     solver: CHCSolver = field(default_factory = default_chc_solver)
 
@@ -183,7 +188,7 @@ def run_benchmark(config: BenchmarkConfig, timeout: int) -> BenchmarkResult:
 
     return result
 
-def ctx_name(ctx: SDTAContext) -> str:
+def ctx_name(ctx: SDTAContext | Contract[TaintedLabel]) -> str:
     if ctx == avl_ctx():
         return "avl"
     elif ctx == not_avl_wbf_ctx():
@@ -208,10 +213,11 @@ def ctx_name(ctx: SDTAContext) -> str:
         return "not sll sorted"
     elif ctx == bst_ctx():
         return "bst"
+    elif ctx == read_only_contract():
+        return "read-only"
     else:
         raise ValueError(f"Unknown context: {ctx}")
 
-C_FILES_DIR = Path(__file__).parent / "c_files"
 
 benchamrks_config: list[BenchmarkConfig] = [
     # post_is_tree benchmarks
@@ -223,10 +229,10 @@ benchamrks_config: list[BenchmarkConfig] = [
     BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_reverse.c", post_ctx=True),
     BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_remove_root.c", post_ctx=True),
     BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, post_ctx=True),
-    # # pre_ctx benchmarks
-    BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_check_balance_and_root_height.c", pre_ctx=avl_strict_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "avl_unsafe_check_balance.c", pre_ctx=avl_strict_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "avl_unsafe_check_root_height.c", pre_ctx=avl_strict_ctx()),
+    # pre_ctx benchmarks
+    # BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_check_balance_and_root_height.c", pre_ctx=avl_ctx()),
+    # BenchmarkConfig(file_name=C_FILES_DIR / "avl_unsafe_check_balance.c", pre_ctx=avl_ctx()),
+    # BenchmarkConfig(file_name=C_FILES_DIR / "avl_unsafe_check_root_height.c", pre_ctx=avl_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_min_lt_max.c", pre_ctx=bst_strict_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "bst_unsafe_min_lt_max.c", pre_ctx=bst_strict_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "sll_sorted_safe_first_lt_last.c", pre_ctx=sll_sorted_strict_ctx()),
@@ -240,6 +246,12 @@ benchamrks_config: list[BenchmarkConfig] = [
     BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_insert_sorted.c", m=1, pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_insert_sorted.c", m=1, pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_strict_ctx()),
     BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_find.c", pre_ctx=avl_ctx(), post_ctx=not_avl_ctx()),
+    # pre + contract
+    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_find.c", pre_ctx=bst_strict_ctx(), post_ctx=read_only_contract()),
+    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_strict_ctx(), post_ctx=read_only_contract()),
+    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_find.c", pre_ctx=sll_sorted_strict_ctx(), post_ctx=read_only_contract()),
+    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_find.c", pre_ctx=sll_sorted_strict_ctx(), post_ctx=read_only_contract()),
+    BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_insert.c", m=1, pre_ctx=avl_ctx(), post_ctx=read_only_contract()),
 ]
 
 def main():
