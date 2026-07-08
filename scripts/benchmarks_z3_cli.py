@@ -1,14 +1,15 @@
+import argparse
 from collections import defaultdict
 import csv
 from enum import Enum
+import subprocess
+import tempfile
 import time
 
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from pychc.solvers.chc_solver import CHCSolver, Status # pyright: ignore[reportMissingTypeStubs]
-from pychc.solvers.golem import GolemSolver # pyright: ignore[reportMissingTypeStubs]
-from pychc.solvers.z3 import Z3CHCSolver # pyright: ignore[reportMissingTypeStubs]
+from pychc.chc_system import CHCSystem
 from pysmt.shortcuts import reset_env
 
 from treehornx.chc.CHCSystemFactory import CHCSystemFactory
@@ -40,10 +41,56 @@ DEFAULT_N = 128
 DEFAULT_M = 0
 DEFAULT_C = 32
 
-def default_chc_solver() -> CHCSolver:
-    path = Path(__file__).parent / "solvers" / "linux" / "x86-64"
-    return GolemSolver(binary_path=path)
-    # return Z3CHCSolver(binary_path=path)
+DEFAULT_SOLVER_PATH = Path(__file__).parent / "solvers" / "linux" / "x86-64" / "z3"
+
+class Status(Enum):
+    SAT = "sat"
+    UNSAT = "unsat"
+    UNKNOWN = "unknown"
+
+class CLIZ3Solver:
+    """
+    Minimal CHC solver adapter that, instead of relying on pychc's solver
+    classes, dumps the CHC system's SMT-LIB content into a temporary .smt2
+    file and invokes the z3 binary directly from the command line via
+    subprocess.
+    """
+
+    def __init__(self, binary_path: Path):
+        self.binary_path = binary_path
+        self.system: CHCSystem | None = None
+
+    def load_system(self, chc_system: CHCSystem) -> None:
+        self.system = chc_system
+
+    def get_input_file(self) -> Path:
+        assert self.system is not None
+        with tempfile.NamedTemporaryFile("w", suffix=".smt2", delete=False) as tmp:
+            tmp_path = Path(tmp.name)
+        self.system.serialize(tmp_path)
+        return tmp_path
+
+    def run(self, path: Path, timeout: int | None = None) -> Status:
+        try:
+            proc = subprocess.run(
+                [str(self.binary_path), str(path)],
+                capture_output=True,
+                text=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            return Status.UNKNOWN
+        finally:
+            path.unlink(missing_ok=True)
+
+        lines = (proc.stdout or "").strip().splitlines()
+        first_line = lines[0].strip() if lines else ""
+        if first_line == "sat":
+            return Status.SAT
+        elif first_line == "unsat":
+            return Status.UNSAT
+        else:
+            return Status.UNKNOWN
 
 class VerificationOutcome(Enum):
     SAFE = "safe"
@@ -59,7 +106,7 @@ class BenchmarkConfig:
     pre_ctx: SDTAContext|None = None
     post_ctx: bool | SDTAContext | Contract[TaintedLabel] = False
     parent: str | None = None
-    solver: CHCSolver = field(default_factory = default_chc_solver)
+    solver: CLIZ3Solver | None = None
 
 @dataclass
 class BenchmarkResult:
@@ -125,14 +172,16 @@ def solve_for_key(config: BenchmarkConfig, system_factory: CHCSystemFactory, key
         result.system_creation_timed_out_for[key] = False
         result.system_creation_elapsed_time_for[key] = end - start
 
+        solver = config.solver
+        assert solver is not None
 
         def load_and_solve():
             start = time.perf_counter()
-            config.solver.load_system(system)
-            input_file = config.solver.get_input_file()
+            solver.load_system(system)
+            input_file = solver.get_input_file()
             end = time.perf_counter()
             remaining_timeout = timeout - int(end - start)
-            return config.solver.run(input_file, timeout=remaining_timeout)
+            return solver.run(input_file, timeout=remaining_timeout)
         start = time.perf_counter()
         status = load_and_solve()
         end = time.perf_counter()
@@ -220,44 +269,61 @@ def ctx_name(ctx: SDTAContext | Contract[TaintedLabel]) -> str:
         raise ValueError(f"Unknown context: {ctx}")
 
 
-benchamrks_config: list[BenchmarkConfig] = [
-    # post_is_tree benchmarks
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_find.c", post_ctx=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_find.c", post_ctx=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "sll_unsafe_circular.c", post_ctx=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_unsafe_post_1.c", post_ctx=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_unsafe_post_2.c", post_ctx=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_reverse.c", post_ctx=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_remove_root.c", post_ctx=True),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, post_ctx=True),
-    # pre_ctx benchmarks
-    # BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_check_balance_and_root_height.c", pre_ctx=avl_ctx()),
-    # BenchmarkConfig(file_name=C_FILES_DIR / "avl_unsafe_check_balance.c", pre_ctx=avl_ctx()),
-    # BenchmarkConfig(file_name=C_FILES_DIR / "avl_unsafe_check_root_height.c", pre_ctx=avl_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_min_lt_max.c", pre_ctx=bst_strict_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_unsafe_min_lt_max.c", pre_ctx=bst_strict_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "sll_sorted_safe_first_lt_last.c", pre_ctx=sll_sorted_strict_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "sll_sorted_unsafe_first_lt_last.c", pre_ctx=sll_sorted_strict_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_strict_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_find.c", pre_ctx=avl_ctx()),
-    # pre + post benchmarks
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_find.c", pre_ctx=bst_strict_ctx(), post_ctx=not_bst_strict_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_strict_ctx(), post_ctx=not_bst_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_ctx(), post_ctx=not_bst_strict_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_ctx(), post_ctx=not_bst_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_find.c", pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_strict_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_insert_sorted.c", m=1, pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_insert_sorted.c", m=1, pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_strict_ctx()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_find.c", pre_ctx=avl_ctx(), post_ctx=not_avl_ctx()),
-    # pre + contract
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_find.c", pre_ctx=bst_strict_ctx(), post_ctx=read_only_contract()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_strict_ctx(), post_ctx=read_only_contract()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_find.c", pre_ctx=sll_sorted_strict_ctx(), post_ctx=read_only_contract()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_insert_sorted.c", m=1, pre_ctx=sll_sorted_strict_ctx(), post_ctx=read_only_contract()),
-    BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_find.c", pre_ctx=avl_ctx(), post_ctx=read_only_contract()),
-]
+def make_benchmarks_config() -> list[BenchmarkConfig]:
+    return [
+        # post_is_tree benchmarks
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_find.c", post_ctx=True),
+        BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_find.c", post_ctx=True),
+        BenchmarkConfig(file_name=C_FILES_DIR / "sll_unsafe_circular.c", post_ctx=True),
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_unsafe_post_1.c", post_ctx=True),
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_unsafe_post_2.c", post_ctx=True),
+        BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_reverse.c", post_ctx=True),
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_remove_root.c", post_ctx=True),
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, post_ctx=True),
+        # pre_ctx benchmarks
+        # BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_check_balance_and_root_height.c", pre_ctx=avl_ctx()),
+        # BenchmarkConfig(file_name=C_FILES_DIR / "avl_unsafe_check_balance.c", pre_ctx=avl_ctx()),
+        # BenchmarkConfig(file_name=C_FILES_DIR / "avl_unsafe_check_root_height.c", pre_ctx=avl_ctx()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_min_lt_max.c", pre_ctx=bst_strict_ctx()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_unsafe_min_lt_max.c", pre_ctx=bst_strict_ctx()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "sll_sorted_safe_first_lt_last.c", pre_ctx=sll_sorted_strict_ctx()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "sll_sorted_unsafe_first_lt_last.c", pre_ctx=sll_sorted_strict_ctx()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_strict_ctx()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_find.c", pre_ctx=avl_ctx()),
+        # pre + post benchmarks
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_find.c", pre_ctx=bst_strict_ctx(), post_ctx=not_bst_strict_ctx()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_strict_ctx(), post_ctx=not_bst_ctx()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_ctx(), post_ctx=not_bst_strict_ctx()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_ctx(), post_ctx=not_bst_ctx()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_find.c", pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_strict_ctx()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_insert_sorted.c", m=1, pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_ctx()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_insert_sorted.c", m=1, pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_strict_ctx()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_find.c", pre_ctx=avl_ctx(), post_ctx=not_avl_ctx()),
+        # pre + contract
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_find.c", pre_ctx=bst_strict_ctx(), post_ctx=read_only_contract()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "bst_safe_insert.c", m=1, pre_ctx=bst_strict_ctx(), post_ctx=read_only_contract()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_find.c", pre_ctx=sll_sorted_strict_ctx(), post_ctx=read_only_contract()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "sll_safe_insert_sorted.c", m=1, pre_ctx=sll_sorted_strict_ctx(), post_ctx=read_only_contract()),
+        BenchmarkConfig(file_name=C_FILES_DIR / "avl_safe_find.c", pre_ctx=avl_ctx(), post_ctx=read_only_contract()),
+    ]
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--solver-path",
+        type=Path,
+        default=DEFAULT_SOLVER_PATH,
+        help="Path to the z3 executable (or a directory containing it) to invoke from the command line.",
+    )
+    return parser.parse_args()
 
 def main():
+    args = parse_args()
+    solver = CLIZ3Solver(args.solver_path)
+    benchamrks_config = make_benchmarks_config()
+    for config in benchamrks_config:
+        config.solver = solver
+
     now = time.strftime("%Y-%m-%d_%H-%M-%S")
     file_name = f"benchmarks_{now}.csv"
     with open(file_name, "w") as f:

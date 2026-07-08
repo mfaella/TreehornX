@@ -34,6 +34,7 @@ class PreFactory[T]:
     apply_predicate: Callable[[T, str], FNode]
     get_label: Callable[[T], Label]
     get_name: Callable[[T], str]
+    enable_non_input_node: bool = False
 
     def _state_symbol(self, label: T, state: str, prefix: str = "") -> FNode:
         lab_id = self.get_name(label)
@@ -94,7 +95,10 @@ class PreFactory[T]:
     ) -> FNode:
         logger.debug(f"pre II for parent: {self.get_name(decorated_parent)} with children: {[self.get_name(child) for _, child in children]}")
         parent = self.get_label(decorated_parent)
-        children = list(child for child in children if isinstance(child[0], str))
+        if not self.enable_non_input_node:
+            children = list(child for child in children if isinstance(child[0], str))
+        else:
+            children = list(children)
 
         data_constraints: list[FNode] = []
         pres: list[FNode] = []
@@ -106,18 +110,18 @@ class PreFactory[T]:
         data_constraints.append(consistency_constraints)
         for child_index, (child_key, decorated_child) in enumerate(children):
             logger.debug(f"Gathering contraints of {self.get_name(decorated_child)} as '{child_key}' child and {child_index} index")
-            if isinstance(child_key, int):
-                continue
+
 
 
             child_var_prefix = f"c{child_index}"
             child = self.get_label(decorated_child)
             pre = self._apply(decorated_child, var_prefix=child_var_prefix)
             pres.append(pre)
-            if child[0].active:
-                children_states[child_key] = self._states_dict(decorated_child, prefix=child_var_prefix)
-            else:
-                children_states[child_key] = None
+            if isinstance(child_key, str):
+                if child[0].active:
+                    children_states[child_key] = self._states_dict(decorated_child, prefix=child_var_prefix)
+                else:
+                    children_states[child_key] = None
             e = self._e_symbol(decorated_child, var_prefix=child_var_prefix)
             es.append(e)
 

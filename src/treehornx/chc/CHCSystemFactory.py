@@ -81,7 +81,8 @@ class CHCSystemFactory:
 
 
         def property(lab: TaintedLabel, prefix: str) -> FNode:
-            return self.post_ctx.fail(lab, prefix) # pyright: ignore
+            assert isinstance(self.post_ctx, Contract)
+            return self.post_ctx.failure_check(lab, self.fragment_factory, prefix)
 
         def consistent_children(parent: TaintedLabel, children: Iterable[tuple[str|int, TaintedLabel]]) -> FNode:
             children = list(children)
@@ -100,7 +101,8 @@ class CHCSystemFactory:
             apply_predicate=self.T_factory.apply,
             get_label=lambda tlab: tlab.label,
             get_name=lambda slab: str(self.trees.id(slab.label)),
-            aux_symbols=lambda tlab, prefix: ()
+            aux_symbols=lambda tlab, prefix: (),
+            enable_non_input_node=True
         )
 
 
