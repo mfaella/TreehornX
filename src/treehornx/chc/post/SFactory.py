@@ -13,7 +13,7 @@ import pysmt.typing as smtty
 
 from treehornx.chc.computation.LabFactory import LabFactory
 from treehornx.chc.post.TFactory import TFactory
-from treehornx.chc.post.helpers import last_assignment_to_field, no_assignment_to_field, ptr_here
+from treehornx.chc.post.helpers import last_assignment_to_field, child_is_dflt, ptr_here
 from treehornx.chc.post.sainting.core import Q, Acceptance, AutomataTransition, DownStatePropagation, Initialization, InternalStatePropagation, SaintedLabel, SaintingStep, StartStatePropagation, UpStatePropagation
 from treehornx.chc.post.sainting.helpers import missing_child
 from treehornx.chc.utils.CHCFragmentFactory import CHCFragmentFactory
@@ -397,7 +397,7 @@ class SFactory:
                 children_dict[child_key] = None
                 states_source[child_key] = None
 
-            elif no_assignment_to_field(sainted_parent.label, child_key) and child.state_node == Q():
+            elif child_is_dflt(sainted_parent.label, child_key) and child.state_node == Q():
                 children_dict[child_key] = child
                 states_source[child_key] = child
 

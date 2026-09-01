@@ -3,7 +3,7 @@ from treehornx.enum_labels.core.Event import FieldAssignP, FieldHere, Here
 from treehornx.enum_labels.core.Label import Label
 
 
-def no_assignment_to_field(label: Label, field_name: str) -> bool:
+def child_is_dflt(label: Label, field_name: str) -> bool:
     for frame in iter(label):
         if any(isinstance(e, (FieldAssignP, FieldHere)) and e.pfield == field_name for e in frame.events):
             return False

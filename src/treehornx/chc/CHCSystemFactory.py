@@ -282,7 +282,9 @@ class CHCSystemFactory:
         T_factory = self.T_factory  # noqa: N806
         assert isinstance(self.root_name, str)
 
-        for pred in T_predicates(self.trees, self.root_name, T_factory):
+        predicates = set(T_predicates(self.trees, self.root_name, T_factory))
+
+        for pred in predicates:
             system.add_predicate(pred)
 
         for chc in produce_T_no_query(self.trees, self.root_name, T_factory):

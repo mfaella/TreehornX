@@ -8,7 +8,7 @@ from typing import Any, Iterable, override
 from frozendict import frozendict
 from loguru import logger
 
-from treehornx.chc.post.helpers import last_assignment_to_field, no_assignment_to_field, ptr_here
+from treehornx.chc.post.helpers import last_assignment_to_field, child_is_dflt, ptr_here
 from treehornx.chc.post.sainting.helpers import missing_child
 from treehornx.chc.utils.terminals_discovery import Pair
 from treehornx.enum_labels.core.Dir import Dir, Down, Internal, Up
@@ -185,7 +185,7 @@ class Sainter:
                 children_dict[child_key] = None
                 states_source[child_key] = None
 
-            elif no_assignment_to_field(sainted_parent.label, child_key) and child.state_node == Q():
+            elif child_is_dflt(sainted_parent.label, child_key) and child.state_node == Q():
                 # logger.debug("sainting structural child")
                 children_dict[child_key] = child
                 states_source[child_key] = child

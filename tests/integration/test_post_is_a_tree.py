@@ -8,7 +8,7 @@ from pysmt.environment import reset_env
 
 from treehornx.chc.CHCSystemFactory import CHCSystemFactory
 from treehornx.chc.core import ExitCodeKind
-from treehornx.chc.SDTAContext import SDTAContext, avl_strict_ctx, bst_strict_ctx, sll_sorted_strict_ctx
+from treehornx.chc.SDTAContext import SDTAContext, avl_ctx, bst_strict_ctx, sll_sorted_strict_ctx
 from treehornx.enum_labels import KnittedTrees, generate_labels
 from treehornx.ir.expressions import Var
 from treehornx.ir.function import Function

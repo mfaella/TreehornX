@@ -1,6 +1,6 @@
 
 
-from treehornx.chc.post.helpers import no_assignment_to_field
+from treehornx.chc.post.helpers import child_is_dflt
 from treehornx.enum_labels.core.Event import FieldAssignP, FieldHere
 from treehornx.enum_labels.core.Label import Label
 
@@ -20,6 +20,6 @@ def field_is_nil(lab: Label, j: str) -> bool:
 def missing_child(lab: Label, j: str) -> bool:
     # Version when the free instruction is not allowed
     return field_is_nil(lab, j) or (
-        no_assignment_to_field(lab, j) and
+        child_is_dflt(lab, j) and
         not lab[0].active_child[j]
     )

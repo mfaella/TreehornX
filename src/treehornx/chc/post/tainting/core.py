@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from enum import Enum
 from functools import cached_property
 from itertools import product
 from typing import Any
@@ -14,11 +15,11 @@ from treehornx.enum_labels.core.Label import Label
 
 @dataclass
 class TaintedLabelFactory:
-    _cache: dict[tuple[Label, bool, frozendict[tuple[str, int], bool]], TaintedLabel] = field(
+    _cache: dict[tuple[Label, BoolPlus, frozendict[tuple[str, int], BoolPlus]], TaintedLabel] = field(
         init=False, default_factory=dict
     )
 
-    def create(self, label: Label, taint_node: bool, taint_ptr: frozendict[tuple[str, int], bool]) -> TaintedLabel:
+    def create(self, label: Label, taint_node: BoolPlus, taint_ptr: frozendict[tuple[str, int], BoolPlus]) -> TaintedLabel:
         key = (label, taint_node, taint_ptr)
         if key not in self._cache:
             tainted_label = TaintedLabel(label=label, taint_node=taint_node, taint_ptr=taint_ptr)
@@ -30,20 +31,28 @@ class TaintedLabelFactory:
         self,
         tainted_label: TaintedLabel,
         label: Label | None = None,
-        taint_node: bool | None = None,
-        taint_ptr: frozendict[tuple[str, int], bool] | None = None,
+        taint_node: BoolPlus | None = None,
+        taint_ptr: frozendict[tuple[str, int], BoolPlus] | None = None,
     ) -> TaintedLabel:
         new_label = label if label is not None else tainted_label.label
         new_taint_node = taint_node if taint_node is not None else tainted_label.taint_node
         new_taint_ptr = taint_ptr if taint_ptr is not None else tainted_label.taint_ptr
         return self.create(new_label, new_taint_node, new_taint_ptr)
 
+class BoolPlus(Enum):
+    Bottom = 0
+    Top = 1
+    TopPlus = 2
+
+    def __bool__(self) -> bool:
+        return bool(self.value)
+
 
 @dataclass(frozen=True)
 class TaintedLabel:
     label: Label
-    taint_node: bool
-    taint_ptr: frozendict[tuple[str, int], bool]
+    taint_node: BoolPlus
+    taint_ptr: frozendict[tuple[str, int], BoolPlus]
     _factory: TaintedLabelFactory | None = field(init=False, default=None, compare=False, hash=False)
 
     @cached_property
@@ -116,12 +125,6 @@ class TaintedPair:
 class TaintingInitialization:
     tainted_label: TaintedLabel
 
-
-@dataclass(slots=True, frozen=True)
-class LookingForRoot:
-    tainted_label: TaintedLabel
-
-
 @dataclass(slots=True, frozen=True)
 class StructuralChildTainting:
     parent: TaintedLabel
@@ -129,6 +132,11 @@ class StructuralChildTainting:
     new_child: TaintedLabel
     child_key: int | str
 
+
+@dataclass(slots=True, frozen=True)
+class StartOfRootTainting:
+    lab: TaintedLabel
+    new_lab: TaintedLabel
 
 @dataclass(slots=True, frozen=True)
 class StartOfPointerTainting:
@@ -166,13 +174,13 @@ class PointerTaintingEnd:
 
 type TaintingStep = (
     TaintingInitialization
-    | LookingForRoot
     | StructuralChildTainting
     | StartOfPointerTainting
     | InternalTaintingPropagation
     | UpTaintingPropagation
     | DownTaintingPropagation
     | PointerTaintingEnd
+    | StartOfRootTainting
 )
 
 
