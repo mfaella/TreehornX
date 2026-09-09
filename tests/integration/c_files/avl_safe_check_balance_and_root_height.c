@@ -18,14 +18,14 @@ void avl_safe_check_balance_and_root_height(struct Node *root) {
             left_height = tmp->height;
         }
         else {
-            left_height = 1 - 2;
+            left_height = 0;
         }
         tmp = root->right;
         if (tmp) {
             right_height = tmp->height;
         }
         else {
-            right_height = 1 - 2;
+            right_height = 0;
         }
         tmp_value = left_height - right_height;
         if (tmp_value < 0) {

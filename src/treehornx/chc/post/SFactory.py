@@ -14,8 +14,10 @@ import pysmt.typing as smtty
 from treehornx.chc.computation.LabFactory import LabFactory
 from treehornx.chc.post.TFactory import TFactory
 from treehornx.chc.post.helpers import last_assignment_to_field, child_is_dflt, ptr_here
-from treehornx.chc.post.sainting.core import Q, Acceptance, AutomataTransition, DownStatePropagation, Initialization, InternalStatePropagation, SaintedLabel, SaintingStep, StartStatePropagation, UpStatePropagation
+from treehornx.chc.post.sainting.core import Q, AutomataTransition, DownStatePropagation, EmptyAcceptance, Initialization, InternalStatePropagation, NonEmptyAcceptance, SaintedLabel, SaintingStep, StartStatePropagation, StructuralChildUpload, UpStatePropagation
 from treehornx.chc.post.sainting.helpers import missing_child
+from treehornx.chc.post.tainting.Tainter import child_is_ptr
+from treehornx.chc.post.tainting.core import BoolPlus
 from treehornx.chc.utils.CHCFragmentFactory import CHCFragmentFactory
 from treehornx.enum_labels import KnittedTrees
 from treehornx.enum_labels.core.Dir import Down, Up
@@ -47,21 +49,24 @@ class SFactory:
         state_ptr_id = 0
         for (p, i) in sorted(state_ptr.keys()):
            match state_ptr[p, i]:
-               case True:
-                   state_ptr_id = (state_ptr_id << 2) + 1
-               case False:
-                   state_ptr_id = (state_ptr_id << 2)
+               case BoolPlus() as value:
+                   state_ptr_id = (state_ptr_id << 2) + value.value
                case Q():
-                   state_ptr_id = (state_ptr_id << 2) + 2
+                   state_ptr_id = (state_ptr_id << 2) + 3
         state_node = sainted_label.state_node
         match state_node:
-            case True:
-                state_node_id = 1
-            case False:
-                state_node_id = 0
+            case BoolPlus() as value:
+                state_node_id = value.value
             case Q():
-                state_node_id = 2
-        name = f"{lab_id}_{state_node_id}_{state_ptr_id}"
+                state_node_id = 3
+        state_struct_children = 0
+        for _, state in sorted(sainted_label.state_struct_children.items()):
+            match state:
+                case BoolPlus() as value:
+                    state_struct_children = (state_struct_children << 2) + value.value
+                case Q():
+                    state_struct_children = (state_struct_children << 2) + 3
+        name = f"{lab_id}_{state_node_id}_{state_ptr_id}_{state_struct_children}"
         return name
 
     def _predicate_name(self, sainted_label: SaintedLabel) -> str:
@@ -108,8 +113,27 @@ class SFactory:
         for state_name in self.states_name:
             yield self._node_state_symbol(sainted_label, state_name, prefix)
 
+    def _structural_child_state_symbol(self, sainted_label: SaintedLabel, child_key: str, state_name: str, prefix: str = "") -> FNode:
+        if prefix != "":
+            prefix = f"{prefix}_schild_{child_key}"
+        else:
+            prefix = f"schild_{child_key}"
+        return self._state_symbol(sainted_label, state_name, prefix)
+
+    def _structural_child_state_symbols(self, sainted_label: SaintedLabel, child_key: str, prefix: str = "") -> Iterable[FNode]:
+        state = sainted_label.state_struct_children[child_key]
+        assert isinstance(state, Q)
+        for state_name in self.states_name:
+            yield self._structural_child_state_symbol(sainted_label, child_key, state_name, prefix)
+
+    def _structural_children_state_symbols(self, sainted_label: SaintedLabel, prefix: str = "") -> Iterable[FNode]:
+        for child_key, state in sorted(sainted_label.state_struct_children.items()):
+            if state == Q():
+                yield from self._structural_child_state_symbols(sainted_label, child_key, prefix)
+
     def _predicate_symbols(self, sainted_label: SaintedLabel, prefix: str = "") -> Iterable[FNode]:
         yield from self.fragment_factory.label_symbols(sainted_label.label, prefix)
+        yield from self._structural_children_state_symbols(sainted_label, prefix)
         yield from self.aux_symbols(sainted_label, prefix)
 
     def predicate(self, label: SaintedLabel) -> FNode:
@@ -134,8 +158,7 @@ class SFactory:
         child_states: dict[str, dict[str, FNode]|None] = dict()
         conjuncts: list[FNode] = []
         parent_prefix = "p"
-        for index, (child_key, state_src) in enumerate(step.states_source.items()):
-            child_prefix = f"c{index}"
+        for child_key, state_src in step.states_source.items():
             match state_src:
                 case None:
                     logger.debug(f"Automata transition step: child {child_key} has no state source")
@@ -150,20 +173,10 @@ class SFactory:
                         )
                     ))
                     child_states[child_key] = states
-                case SaintedLabel() as child_sainted_label:
-                    conjuncts.append(self.apply(child_sainted_label,var_prefix=child_prefix))
-                    conjuncts.extend(
-                        self.fragment_factory.cross_data_constraints(
-                            step.parent.label,
-                            child_sainted_label.label,
-                            child_key,
-                            parent_variable_prefix=parent_prefix,
-                            child_variable_prefix=child_prefix
-                    ))
-                    conjuncts.append(self.consistent_child_S(step.parent, child_key, child_sainted_label, sigma_var_prefix=parent_prefix, tau_var_prefix=child_prefix))
+                case str():
                     states = dict(zip(
                         self.states_name,
-                        self._node_state_symbols(child_sainted_label, prefix=child_prefix)
+                        self._structural_child_state_symbols(step.parent, state_src, prefix=parent_prefix)
                     ))
                     child_states[child_key] = states
 
@@ -226,11 +239,11 @@ class SFactory:
 
     def _start_of_state_propagation(self, step: StartStatePropagation) -> FNode:
         equalities: list[FNode] = []
-        for coordinates in step.propagation_coordinates:
-            for state_name in self.sdta_ctx.states:
-                src_symbol = self._node_state_symbol(step.sainted_label, state_name)
-                dest_symbol = self._ptr_state_symbol_with_coordinates(step.new_sainted_label, state_name, coordinates)
-                equalities.append(smt.EqualsOrIff(src_symbol, dest_symbol))
+        coordinates = step.propagation_coordinates
+        for state_name in self.sdta_ctx.states:
+            src_symbol = self._node_state_symbol(step.sainted_label, state_name)
+            dest_symbol = self._ptr_state_symbol_with_coordinates(step.new_sainted_label, state_name, coordinates)
+            equalities.append(smt.EqualsOrIff(src_symbol, dest_symbol))
         node_state_equalities = list(self._internal_node_state_equalities(step.sainted_label, step.new_sainted_label))
         ptr_state_equalities = list(self._internal_ptr_state_equalities(step.sainted_label, step.new_sainted_label))
         body = smt.And(
@@ -250,8 +263,8 @@ class SFactory:
         internal_ptr_state_eq = list(self._internal_ptr_state_equalities(step.sainted_sigma, step.new_sainted_sigma))
         body = smt.And(
             self.apply(step.sainted_sigma),
-            *self._ptr_state_equalities(step.sainted_sigma, step.new_sainted_sigma, step.prpagations),
-            *self._ptr_state_equalities(step.new_sainted_sigma, step.new_sainted_sigma, step.prpagations), # self-propagation of the updated ptr states
+            *self._ptr_state_equalities(step.sainted_sigma, step.new_sainted_sigma, [step.prpagations]),
+            *self._ptr_state_equalities(step.new_sainted_sigma, step.new_sainted_sigma, [step.prpagations]), # self-propagation of the updated ptr states
             *internal_node_state_eq,
             *internal_ptr_state_eq
         )
@@ -259,10 +272,43 @@ class SFactory:
         clause = chc.Clause(body, head)
         return clause
 
+    def _cross_state_constraints(self, sainted_sigma: SaintedLabel, sainted_tau: SaintedLabel, child_key: str|int, parent_var_prefix: str, child_var_prefix: str) -> Iterable[FNode]:
+        for (ptr, index), state in sainted_sigma.state_ptr.items():
+            if state != Q():
+                continue
+            prev = sainted_sigma.label[index].prev
+            if prev is None:
+                continue
+            if prev[0] != Down(child_key):
+                continue
+            tau_index = prev[1]
+            if sainted_tau.state_ptr[ptr, tau_index] != Q():
+                continue
+            for state_name in self.states_name:
+                sigma_symbol = self._ptr_state_symbol_with_coordinates(sainted_sigma, state_name, (ptr, index), parent_var_prefix)
+                tau_symbol = self._ptr_state_symbol_with_coordinates(sainted_tau, state_name, (ptr, tau_index), child_var_prefix)
+                yield smt.EqualsOrIff(sigma_symbol, tau_symbol)
+
+        for (ptr, index), state in sainted_tau.state_ptr.items():
+            if state != Q():
+                continue
+            prev = sainted_tau.label[index].prev
+            if prev is None:
+                continue
+            if prev[0] != Up():
+                continue
+            sigma_index = prev[1]
+            if sainted_sigma.state_ptr[ptr, sigma_index] != Q():
+                continue
+            for state_name in self.states_name:
+                tau_symbol = self._ptr_state_symbol_with_coordinates(sainted_tau, state_name, (ptr, index), child_var_prefix)
+                sigma_symbol = self._ptr_state_symbol_with_coordinates(sainted_sigma, state_name, (ptr, sigma_index), parent_var_prefix)
+                yield smt.EqualsOrIff(tau_symbol, sigma_symbol)
+
     def _up_state_propagation(self, step: UpStatePropagation) -> FNode:
-        equalities = list(self._ptr_state_equalities(step.child, step.new_sainted_sigma2, step.prpagations, src_prefix="c", dest_prefix="p"))
-        equalities.extend(self._internal_node_state_equalities(step.parent, step.new_sainted_sigma2, prefix="p"))
-        equalities.extend(self._internal_ptr_state_equalities(step.parent, step.new_sainted_sigma2, prefix="p"))
+        equalities = list(self._ptr_state_equalities(step.child, step.new_parent, [step.prpagations], src_prefix="c", dest_prefix="p"))
+        equalities.extend(self._internal_node_state_equalities(step.parent, step.new_parent, prefix="p"))
+        equalities.extend(self._cross_state_constraints(step.parent, step.child, step.child_key, parent_var_prefix="p", child_var_prefix="c"))
         cross_data_constraints = self.fragment_factory.cross_data_constraints(
             step.parent.label,
             step.child.label,
@@ -276,37 +322,71 @@ class SFactory:
             *equalities,
             *cross_data_constraints
         )
-        head = self.apply(step.new_sainted_sigma2, var_prefix="p")
+        head = self.apply(step.new_parent, var_prefix="p")
         clause = chc.Clause(body, head)
         return clause
 
     def _down_state_propagation(self, step: DownStatePropagation) -> FNode:
-        equalities = list(self._ptr_state_equalities(step.sainted_sigma2, step.new_sainted_sigma2, step.prpagations, src_prefix="p", dest_prefix="c"))
-        equalities.extend(self._internal_node_state_equalities(step.sainted_sigma2, step.new_sainted_sigma2, prefix="c"))
-        equalities.extend(self._internal_ptr_state_equalities(step.sainted_sigma2, step.new_sainted_sigma2, prefix="c"))
+        equalities = list(self._ptr_state_equalities(step.parent, step.new_child, [step.prpagations], src_prefix="p", dest_prefix="c"))
+        equalities.extend(self._internal_node_state_equalities(step.child, step.new_child, prefix="c"))
+        equalities.extend(self._cross_state_constraints(step.parent, step.child, step.child_key, parent_var_prefix="p", child_var_prefix="c"))
         cross_data_constraints = self.fragment_factory.cross_data_constraints(
             step.parent.label,
-            step.sainted_sigma2.label,
+            step.child.label,
             step.child_key,
             parent_variable_prefix="p",
             child_variable_prefix="c"
         )
         body = smt.And(
             self.apply(step.parent, var_prefix="p"),
-            self.apply(step.sainted_sigma2, var_prefix="c"),
+            self.apply(step.child, var_prefix="c"),
             *equalities,
             *cross_data_constraints
         )
-        head = self.apply(step.new_sainted_sigma2, var_prefix="c")
+        head = self.apply(step.new_child, var_prefix="c")
         clause = chc.Clause(body, head)
         return clause
 
-    def _acceptance(self, step: Acceptance) -> FNode:
+    def _empty_acceptance(self, step: EmptyAcceptance) -> FNode:
+        body = smt.And(
+            self.lab_factory.apply(step.sainted_label.label),
+            self.apply_psiF(step.sainted_label)
+        )
+        head = smt.FALSE()
+        clause = chc.Clause(body, head)
+        return clause
+
+    def _non_empty_acceptance(self, step: NonEmptyAcceptance) -> FNode:
         body = smt.And(
             self.apply(step.sainted_label),
             self.apply_psiF(step.sainted_label)
         )
         head = smt.FALSE()
+        clause = chc.Clause(body, head)
+        return clause
+
+    def _structural_child_state_upload(self, step: StructuralChildUpload) -> FNode:
+        equalities = list(self._internal_node_state_equalities(step.parent, step.new_parent, prefix="p"))
+        equalities.extend(self._internal_ptr_state_equalities(step.parent, step.new_parent, prefix="p"))
+        for child_state, ptr_state in zip(
+            self._structural_child_state_symbols(step.new_parent, step.child_key, prefix="p"),
+            self._node_state_symbols(step.child, prefix="c")
+        ):
+            equalities.append(smt.EqualsOrIff(child_state, ptr_state))
+        cross_data_constraints = self.fragment_factory.cross_data_constraints(
+            step.parent.label,
+            step.child.label,
+            step.child_key,
+            parent_variable_prefix="p",
+            child_variable_prefix="c"
+        )
+        body = smt.And(
+            self.apply(step.parent, var_prefix="p"),
+            self.apply(step.child, var_prefix="c"),
+            *equalities,
+            *cross_data_constraints
+        )
+        head = self.apply(step.new_parent, var_prefix="p")
         clause = chc.Clause(body, head)
         return clause
 
@@ -357,11 +437,6 @@ class SFactory:
 
     def apply_psiF(self, sainted_label: SaintedLabel, var_prefix: str = "") -> FNode:
         if sainted_label.state_node != Q():
-            return smt.FALSE()
-        if not any(
-            v is True and ptr_here(sainted_label.label, i, p)
-            for (p, i), v in sainted_label.state_ptr.items()
-        ):
             return smt.FALSE()
         states_dict = dict(zip(self.sdta_ctx.states.keys(), self._node_state_symbols(sainted_label, var_prefix)))
         psif = self.sdta_ctx.psiF(states_dict)
@@ -473,8 +548,12 @@ class SFactory:
                 return self._up_state_propagation(up_state_propagation)
             case DownStatePropagation() as down_state_propagation:
                 return self._down_state_propagation(down_state_propagation)
-            case Acceptance() as acceptance:
-                return self._acceptance(acceptance)
+            case NonEmptyAcceptance() as acceptance:
+                return self._non_empty_acceptance(acceptance)
+            case EmptyAcceptance() as acceptance:
+                return self._empty_acceptance(acceptance)
+            case StructuralChildUpload() as structural_child_upload:
+                return self._structural_child_state_upload(structural_child_upload)
 
     def all_S(self, steps: Iterable[SaintingStep]) -> Iterable[FNode]: # noqa: N802
         return map(self.S, steps)

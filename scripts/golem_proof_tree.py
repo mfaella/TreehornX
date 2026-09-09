@@ -104,11 +104,6 @@ def run_golem(golem_bin: str, chc_file: str, engine: str) -> str:
     return proc.stdout
 
 
-def _short(label: str, limit: int = 60) -> str:
-    label = label.strip()
-    return label if len(label) <= limit else label[: limit - 1] + "\u2026"
-
-
 def build_graph(steps, title: str | None = None) -> "graphviz.Digraph":
     """Build a Graphviz Digraph of the refutation proof tree."""
     by_index = {s.index: s for s in steps}
@@ -138,7 +133,7 @@ def build_graph(steps, title: str | None = None) -> "graphviz.Digraph":
         else:
             fill, border = "#d6eaf8", "#2471a3"   # blue: intermediate facts
 
-        label = f"#{s.index}\\n{_short(s.fact)}"
+        label = f"#{s.index}\\n{s.fact.strip()}"
         dot.node(str(s.index), label=label, fillcolor=fill, color=border)
 
     # Edge: conclusion -> each premise it was derived from.

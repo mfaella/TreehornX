@@ -36,6 +36,9 @@ class PreFactory[T]:
     get_name: Callable[[T], str]
     enable_non_input_node: bool = False
 
+    def __post_init__(self):
+        print(f"psi = {self.ctx.psi}")
+
     def _state_symbol(self, label: T, state: str, prefix: str = "") -> FNode:
         lab_id = self.get_name(label)
         symbol_name = f"{prefix}q{lab_id}_{state}"

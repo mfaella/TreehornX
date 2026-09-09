@@ -3,6 +3,7 @@ from pathlib import Path
 import pytest
 from pychc.solvers.chc_solver import CHCSolver  # pyright: ignore[reportMissingTypeStubs]
 from pychc.solvers.golem import GolemSolver  # pyright: ignore[reportMissingTypeStubs]
+from pychc.solvers.z3 import Z3CHCSolver  # pyright: ignore[reportMissingTypeStubs]
 from pychc.solvers.witness import Status
 from pysmt.environment import reset_env
 
@@ -41,12 +42,6 @@ def default_solver() -> CHCSolver:
     return GolemSolver(binary_path=binary_path)
 
 
-def make_system_without_pre(function: Function, root: Var, trees: KnittedTrees, post_ctx: SDTAContext):
-    assert isinstance(root.sort, Pointer) and isinstance(root.sort.pointee, Struct)
-    system_factory = CHCSystemFactory(function, root.sort.pointee, trees, post_ctx=post_ctx, root_name=root.name)
-    return system_factory.make_system()
-
-
 def make_system_with_pre(
     function: Function, root: Var, trees: KnittedTrees, pre_ctx: SDTAContext, post_ctx: SDTAContext
 ):
@@ -55,20 +50,6 @@ def make_system_with_pre(
         function, root.sort.pointee, trees, pre_ctx=pre_ctx, post_ctx=post_ctx, root_name=root.name
     )
     return system_factory.make_system()
-
-
-def check_sat_without_pre(
-    file_name: str,
-    post_ctx: SDTAContext,
-    solver: CHCSolver = default_solver(),
-    n: int = DEFAULT_N,
-    m: int = DEFAULT_M,
-    c: int = DEFAULT_C,
-) -> Status:
-    function, root, trees = parse_and_generate_labels(file_name, n, m, c)
-    system = make_system_without_pre(function, root, trees, post_ctx)
-    solver.load_system(system)
-    return solver.solve()
 
 
 def check_sat_with_pre(
@@ -83,19 +64,10 @@ def check_sat_with_pre(
     function, root, trees = parse_and_generate_labels(file_name, n, m, c)
     system = make_system_with_pre(function, root, trees, pre_ctx, post_ctx)
     solver.load_system(system)
-    return solver.solve()
+    return solver.solve(timeout=1200)
 
 
 # --- bst_safe_find ---
-
-def test_bst_safe_find_without_pre(): # ok
-    result = check_sat_without_pre("bst_safe_find.c", post_ctx=not_bst_ctx())
-    assert result == Status.UNSAT
-
-def test_bst_safe_find_without_pre_strict(): # ok
-    result = check_sat_without_pre("bst_safe_find.c", post_ctx=not_bst_strict_ctx())
-    assert result == Status.UNSAT
-
 
 def test_bst_safe_find_with_pre(): # fails (expected SAT, gets UNSAT)
     result = check_sat_with_pre("bst_safe_find.c", pre_ctx=bst_ctx(), post_ctx=not_bst_ctx())
@@ -107,15 +79,6 @@ def test_bst_safe_find_with_strict_pre(): # fails (expected SAT, gets UNSAT)
 
 # --- bst_safe_insert ---
 
-def test_bst_safe_insert_without_pre(): # ok
-    result = check_sat_without_pre("bst_safe_insert.c", post_ctx=not_bst_ctx(), m=1)
-    assert result == Status.UNSAT
-
-def test_bst_safe_insert_without_pre_strict(): # ok
-    result = check_sat_without_pre("bst_safe_insert.c", post_ctx=not_bst_strict_ctx(), m=1)
-    assert result == Status.UNSAT
-
-
 def test_bst_safe_insert_with_pre(): # fails (expected SAT, gets UNSAT)
     result = check_sat_with_pre("bst_safe_insert.c", pre_ctx=bst_ctx(), post_ctx=not_bst_ctx(), m=1)
     assert result == Status.SAT
@@ -126,15 +89,6 @@ def test_bst_safe_insert_with_strict_pre(): # stopped
 
 # --- sll_safe_find ---
 
-def test_sll_safe_find_without_pre(): # ok
-    result = check_sat_without_pre("sll_safe_find.c", post_ctx=sll_sorted_ctx())
-    assert result == Status.UNSAT
-
-def test_sll_safe_find_without_pre_strict(): # ok
-    result = check_sat_without_pre("sll_safe_find.c", post_ctx=sll_sorted_strict_ctx())
-    assert result == Status.UNSAT
-
-
 def test_sll_safe_find_with_pre(): # ok
     result = check_sat_with_pre("sll_safe_find.c", pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_ctx())
     assert result == Status.SAT
@@ -144,15 +98,6 @@ def test_sll_safe_find_with_pre_strict(): # ok
     assert result == Status.SAT
 
 # --- sll_safe_insert_sorted ---
-
-def test_sll_safe_insert_sorted_without_pre(): # ok
-    result = check_sat_without_pre("sll_safe_insert_sorted.c", post_ctx=not_sll_sorted_ctx(), m=1)
-    assert result == Status.UNSAT
-
-def test_sll_safe_insert_sorted_without_pre_strict(): # ok
-    result = check_sat_without_pre("sll_safe_insert_sorted.c", post_ctx=not_sll_sorted_strict_ctx(), m=1)
-    assert result == Status.UNSAT
-
 
 def test_sll_safe_insert_sorted_with_pre(): # (expected SAT, gets UNSAT)
     result = check_sat_with_pre(

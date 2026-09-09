@@ -67,7 +67,7 @@ def consistent_taint(tsigma1: TaintedLabel, i1: int, tsigma2: TaintedLabel, i2: 
     setE: set[str] = {E} if E is not None else set()
     ptrs = set(tsigma1.label.frame.isnil.keys()) - setE
     for ptr in ptrs:
-        if not (ptr_here(tsigma2.label, i2, ptr) or not tsigma2.taint_ptr[(ptr, i2)]):
+        if not (not ptr_here(tsigma2.label, i2, ptr) and tsigma2.taint_ptr[(ptr, i2)]):
             continue
 
         if tsigma1.taint_ptr[(ptr, i1)] != tsigma2.taint_ptr[(ptr, i2)]:
@@ -373,34 +373,6 @@ class Tainter:
 
         return True
 
-    def consistent_child_t(self, tainted_sigma: TaintedLabel, child_key: str|int, tainted_tau: TaintedLabel) -> bool:
-        sigma = tainted_sigma.label
-        tau = tainted_tau.label
-
-        for frame in iter(tau): # step_down
-            if frame.prev is None:
-                continue
-            b = frame.prev[1]
-            a = frame.index
-            if (
-                frame.prev[0] == Up() and
-                not self.consistent_taint(tainted_tau, a, tainted_sigma, b)
-            ):
-                return False
-
-        for frame in iter(sigma): # step_up
-            if frame.prev is None:
-                continue
-            b = frame.prev[1]
-            a = frame.index
-            if (
-                frame.prev[0] == Down(child_key) and
-                not self.consistent_taint(tainted_sigma, a, tainted_tau, b)
-            ):
-                return False
-
-        return True
-
     def taint(self) -> tuple[set[TaintingStep], set[TaintedLabel], set[TaintedPair]]:
         internal_tainting_progress: defaultdict[TaintedLabel, set[TaintedLabel]] = defaultdict(set)
         pairs = set(map(lambda tup: Pair(*tup), self.trees.pairs()))
@@ -441,9 +413,6 @@ class Tainter:
 
                 if not db.contains_pair(new_pair):
                     logger.debug(f"Discovered new pair: ({self.label_name(new_pair.parent)}, {self.label_name(new_pair.child)}, {new_pair.child_key})")
-                    if not self.consistent_child_t(tainted_sigma=new_pair.parent, child_key=new_pair.child_key, tainted_tau=new_pair.child):
-                        logger.debug(f"Skipping inconsistent pair: ({self.label_name(new_pair.parent)}, {self.label_name(new_pair.child)}, {new_pair.child_key})")
-                        continue
                     temp_P_tainted.add(new_pair)
                     queue.append(new_pair)
             for new_pair in temp_P_tainted:
@@ -456,9 +425,6 @@ class Tainter:
             new_pair = self.tainted_pair_factory.create(parent=new_parent, child=child, child_key=child_key)
             if not db.contains_pair(new_pair):
                 logger.debug("Discovered new pair after up tainting propagation: ({}, {}, {})".format(self.label_name(new_parent), self.label_name(child), child_key))
-                if not self.consistent_child_t(tainted_sigma=new_parent, child_key=child_key, tainted_tau=child):
-                    logger.debug(f"Skipping inconsistent pair: ({self.label_name(new_parent)}, {self.label_name(child)}, {child_key})")
-                    return
                 logger.debug(f"Adding new special pair: ({self.label_name(new_parent)}, {self.label_name(child)}, {child_key})")
                 db.add_pair(new_pair)
                 queue.append(new_pair)
@@ -467,9 +433,6 @@ class Tainter:
             on_new_label(child, new_child, exclude_dir=Up())
             new_pair = self.tainted_pair_factory.create(parent=parent, child=new_child, child_key=child_key)
             if not db.contains_pair(new_pair):
-                if not self.consistent_child_t(tainted_sigma=parent, child_key=child_key, tainted_tau=new_child):
-                    logger.debug(f"Skipping inconsistent pair: ({self.label_name(parent)}, {self.label_name(new_child)}, {child_key})")
-                    return
                 logger.debug(f"Adding new special pair: ({self.label_name(parent)}, {self.label_name(new_child)}, {child_key})")
                 db.add_pair(new_pair)
                 queue.append(new_pair)

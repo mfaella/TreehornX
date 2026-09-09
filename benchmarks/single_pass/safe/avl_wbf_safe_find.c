@@ -5,7 +5,7 @@ struct Node {
     struct Node *right;
 };
 
-void avl_safe_find(struct Node* root, int key) {
+void avl_wbf_safe_find(struct Node* root, int key) {
     struct Node* current;
     struct Node* result;
     struct Node *null;

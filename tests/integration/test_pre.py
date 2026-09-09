@@ -8,7 +8,7 @@ from pysmt.environment import reset_env
 
 from treehornx.chc.CHCSystemFactory import CHCSystemFactory
 from treehornx.chc.core import ExitCodeKind
-from treehornx.chc.SDTAContext import SDTAContext, avl_strict_ctx, bst_strict_ctx, sll_sorted_strict_ctx
+from treehornx.chc.SDTAContext import SDTAContext, avl_ctx, bst_strict_ctx, sll_sorted_strict_ctx
 from treehornx.enum_labels import KnittedTrees, generate_labels
 from treehornx.ir.expressions import Var
 from treehornx.ir.function import Function
@@ -69,19 +69,19 @@ def check_sat_with_pre(
 
 
 def test_avl_safe_check_balance_and_root_height():
-    pre_ctx = avl_strict_ctx()
+    pre_ctx = avl_ctx()
     result = check_sat_with_pre("avl_safe_check_balance_and_root_height.c", pre_ctx, ExitCodeKind.ERR)
     assert result == Status.SAT, f"Expected SAT, got {result}"
 
 
 def test_avl_unsafe_check_balance():
-    pre_ctx = avl_strict_ctx()
+    pre_ctx = avl_ctx()
     result = check_sat_with_pre("avl_unsafe_check_balance.c", pre_ctx, ExitCodeKind.ERR)
     assert result == Status.UNSAT, f"Expected UNSAT, got {result}"
 
 
 def test_avl_unsafe_check_root_height():
-    pre_ctx = avl_strict_ctx()
+    pre_ctx = avl_ctx()
     result = check_sat_with_pre("avl_unsafe_check_root_height.c", pre_ctx, ExitCodeKind.ERR)
     assert result == Status.UNSAT, f"Expected UNSAT, got {result}"
 

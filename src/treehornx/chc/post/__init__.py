@@ -9,7 +9,7 @@ from pysmt.fnode import FNode
 from treehornx.chc.post.SFactory import SFactory
 from treehornx.chc.post.helpers import ptr_here
 from treehornx.chc.post.sainting.Sainter import Sainter
-from treehornx.chc.post.sainting.core import Q, Acceptance, SaintedLabel, SaintingStep
+from treehornx.chc.post.sainting.core import Q, EmptyAcceptance, NonEmptyAcceptance, SaintedLabel, SaintingStep
 from treehornx.chc.post.tainting import Tainter
 from treehornx.chc.post.TFactory import TFactory
 from treehornx.chc.post.tainting import TaintedLabel, TaintedPair, TaintingStep
@@ -98,20 +98,9 @@ def produce_S(trees: KnittedTrees, root_name: str, s_factory: SFactory) -> Itera
 def produce_S_no_query(trees: KnittedTrees, root_name: str, s_factory: SFactory, parent: str | None = None) -> Iterable[FNode]:  # noqa: N802
     sainting_steps, _, _ = _saint(trees, root_name, parent=parent)
     for sstep in sainting_steps:
-        if not isinstance(sstep, Acceptance):
+        if not isinstance(sstep, (EmptyAcceptance, NonEmptyAcceptance)):
             chc = s_factory.S(sstep)
             yield chc
-
-def _is_automata_run_end(sainted_label: SaintedLabel, root_name: str) -> bool:
-    if sainted_label.state_node != Q():
-        return False
-
-    for (p, i), state in sainted_label.state_ptr.items():
-        if p == root_name and state is True and ptr_here(sainted_label.label, i, root_name):
-            return True
-
-    return False
-
 
 def S_with_Pre_predicates(trees: KnittedTrees, root_name: str, s_factory: SFactory, pre_factory: PreFactory[SaintedLabel]) -> Iterable[FNode]:  # noqa: N802
     yield from S_predicates(trees, root_name, s_factory)
