@@ -4,7 +4,8 @@ struct Node {
     struct Node *right;
 };
 
-void bst_safe_find(struct Node* root, int key) {
+void bst_safe_find(struct Node* root) {
+    int key;
     struct Node* current;
     struct Node* result;
     struct Node *null;

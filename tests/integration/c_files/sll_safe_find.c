@@ -3,7 +3,8 @@ struct Node {
     struct Node *next;
 };
 
-void sll_safe_find(struct Node *root, int key) {
+void sll_safe_find(struct Node *root) {
+    int key;
     struct Node *curr;
     struct Node *result;
     struct Node *null;

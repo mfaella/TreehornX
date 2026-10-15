@@ -4,7 +4,8 @@ struct Node {
     struct Node* next;
 };
 
-void sll_safe_insert_sorted(struct Node* root, int value) {
+void sll_safe_insert_sorted(struct Node* root) {
+    int value;
     struct Node* newNode;
     struct Node* parent;
     struct Node* current;

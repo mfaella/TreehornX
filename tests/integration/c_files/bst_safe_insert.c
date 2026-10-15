@@ -4,7 +4,8 @@ struct Node {
     struct Node *right;
 };
 
-void bst_safe_insert(struct Node* root, int value) {
+void bst_safe_insert(struct Node* root) {
+    int value;
     struct Node* newNode;
     struct Node* parent;
     struct Node* current;
