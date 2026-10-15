@@ -1,5 +1,5 @@
 struct Node {
-    int value;
+    int data;
     struct Node *next;
 };    
  
@@ -13,17 +13,17 @@ void sll_unsafe_insert(struct Node *head) {
     x = head;
 
     z = malloc(sizeof(struct Node));
-    z->value = key;
+    z->data = key;
 
     if(x != NULL) {
-        kx = x->value;
+        kx = x->data;
         if(key <= kx) {
             z->next = x;
         }
         else {
             w = x->next;
             while(w == NULL) {
-                kx = w->value;
+                kx = w->data;
                 if(key > kx) {
                     x->next = z;
                     z->next = w;

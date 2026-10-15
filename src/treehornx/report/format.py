@@ -4,8 +4,8 @@ from typing import Any
 
 from frozendict import frozendict
 
-from treehornx.enum_labels.core.Dir import Down, Internal, Up
-from treehornx.enum_labels.core.Event import (
+from treehornx.enum_models.core.Dir import Down, Internal, Up
+from treehornx.enum_models.core.Event import (
     ERR,
     LOF,
     NOP,
@@ -18,8 +18,8 @@ from treehornx.enum_labels.core.Event import (
     Rewind,
     Rewind2,
 )
-from treehornx.enum_labels.core.Frame import Frame
-from treehornx.enum_labels.core.Label import Label
+from treehornx.enum_models.core.Frame import Frame
+from treehornx.enum_models.core.Label import Label
 
 
 def _dir_to_json(dir_value: Up | Internal | Down) -> dict[str, Any]:

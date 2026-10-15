@@ -23,12 +23,14 @@ from treehornx.chc.Lab.symbols import (
     var_symbol,
     var_symbols,
 )
-from treehornx.chc.Lab.system import enumerate_labels, external_steps, make_system
+from treehornx.chc.Lab.system import LabCHC, build_lab, enumerate_labels, external_steps, make_system, to_system
 
 __all__ = [
     "SIGMA_PREFIX",
     "TAU_PREFIX",
+    "LabCHC",
     "apply",
+    "build_lab",
     "consistency_constraint",
     "enumerate_labels",
     "expr_to_smt",
@@ -48,6 +50,7 @@ __all__ = [
     "psi_internal",
     "query",
     "smt_type",
+    "to_system",
     "var_symbol",
     "var_symbols",
 ]

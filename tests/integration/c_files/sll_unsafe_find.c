@@ -1,5 +1,5 @@
 struct Node {
-    int value;
+    int data;
     struct Node *next;
 };
 
@@ -15,7 +15,7 @@ void sll_unsafe_find(struct Node *root) {
 
 
     while(x) {
-        result = x->value;
+        result = x->data;
         if(result == key) {
             result_node = x;
             x = null;
@@ -25,5 +25,5 @@ void sll_unsafe_find(struct Node *root) {
         }
     }
 
-    result = x->value;
+    result = x->data;
 }

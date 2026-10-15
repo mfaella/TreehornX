@@ -1,6 +1,7 @@
 """Compressed CHC system of the Lab encoding."""
 
-from typing import Callable
+from dataclasses import dataclass, field
+from typing import Callable, Iterable
 
 from pychc.chc_system import CHCSystem
 from pysmt import logics
@@ -56,43 +57,68 @@ def external_steps(pair: Pair[Frame]) -> list[tuple[Lab, Lab]]:
     return sorted(steps, key=lambda step: len(step[0]) + len(step[1]), reverse=True)
 
 
-def make_system(function: ir.Function, k: int, m: int, n: int, is_query: Callable[[Lab], bool]) -> CHCSystem:
+@dataclass
+class LabCHC:
+    """The enumerated part of the knitted-trees and the Lab clauses built on it."""
+
+    engine: LabEngine
+    labels: list[Lab]
+    pairs: list[Pair[Frame]]
+    predicates: set[Lab] = field(default_factory=set[Lab])
+    clauses: list[FNode] = field(default_factory=list[FNode])
+
+    def predicate_symbols(self, function: ir.Function) -> list[FNode]:
+        return [predicate(function, lab) for lab in sorted(self.predicates, key=lambda lab: lab.id)]
+
+
+def build_lab(function: ir.Function, k: int, m: int, n: int) -> LabCHC:
+    """Enumerates the labels and builds the Lab clauses, without queries.
+
+    Only the final labels and pairs where both labels are non-continuous are kept."""
     engine = enumerate_labels(function, k, m, n)
     final_labels, final_pairs = engine.finals()
-    labels = [lab for lab in final_labels if not engine.is_continuos(lab)]
-    pairs = [p for p in final_pairs if not engine.is_continuos(p.parent) and not engine.is_continuos(p.child)]
-
-    predicates: set[Lab] = set()
-    clauses: list[FNode] = []
+    lab = LabCHC(
+        engine,
+        labels=[lab for lab in final_labels if not engine.is_continuos(lab)],
+        pairs=[p for p in final_pairs if not engine.is_continuos(p.parent) and not engine.is_continuos(p.child)],
+    )
 
     # internal steps and facts: walk the prefixes of every label, a visited prefix has its own prefixes visited
-    for lab in labels:
-        for i in range(len(lab), 0, -1):
-            prefix = lab.cut(i)
-            if prefix in predicates:
+    for label in lab.labels:
+        for i in range(len(label), 0, -1):
+            prefix = label.cut(i)
+            if prefix in lab.predicates:
                 break
-            predicates.add(prefix)
+            lab.predicates.add(prefix)
             if i == 1 or (i == 2 and is_initial(prefix)):
-                clauses.append(fact(function, prefix))
+                lab.clauses.append(fact(function, prefix))
             elif prefix.prev is not None and prefix.prev[0] == Internal():
-                clauses.append(internal_clause(function, prefix))
+                lab.clauses.append(internal_clause(function, prefix))
 
     # external steps: walk the links of every pair, a visited step has the earlier steps of the pair visited
     visited_steps: set[tuple[Lab, Lab]] = set()
-    for pair in pairs:
+    for pair in lab.pairs:
         for receiver, sender in external_steps(pair):
             if (receiver, sender) in visited_steps:
                 break
             visited_steps.add((receiver, sender))
             assert receiver.prefix is not None
-            predicates |= {receiver, receiver.prefix, sender}
-            clauses.append(external_clause(function, receiver, sender))
+            lab.predicates |= {receiver, receiver.prefix, sender}
+            lab.clauses.append(external_clause(function, receiver, sender))
 
-    clauses.extend(query(function, lab) for lab in predicates if is_query(lab))
+    return lab
 
+
+def to_system(predicates: Iterable[FNode], clauses: Iterable[FNode]) -> CHCSystem:
     system = CHCSystem(logics.QF_UFLIA)
-    for lab in sorted(predicates, key=lambda lab: lab.id):
-        system.add_predicate(predicate(function, lab))
+    for pred in predicates:
+        system.add_predicate(pred)
     for clause in clauses:
         system.add_clause(clause)
     return system
+
+
+def make_system(function: ir.Function, k: int, m: int, n: int, is_query: Callable[[Lab], bool]) -> CHCSystem:
+    lab = build_lab(function, k, m, n)
+    queries = [query(function, label) for label in lab.predicates if is_query(label)]
+    return to_system(lab.predicate_symbols(function), [*lab.clauses, *queries])

@@ -9,9 +9,9 @@ from treehornx.chc.contracts.Contract import Contract
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.SDTAContext import SDTAContext
 from treehornx.chc.post.tainting.core import TaintedLabel
-from treehornx.enum_labels import KnittedTrees, generate_labels
-from treehornx.enum_labels.core.Event import ERR, LOF, OOM
-from treehornx.enum_labels.core.Label import Label
+from treehornx.enum_models import KnittedTrees, generate_labels
+from treehornx.enum_models.core.Event import ERR, LOF, OOM
+from treehornx.enum_models.core.Label import Label
 from treehornx.ir._internal.sorts.natives import Pointer
 from treehornx.ir.expressions import Var
 from treehornx.ir.function import Function

@@ -5,10 +5,10 @@ from typing import Iterable
 
 import pydot
 
-from treehornx.enum_labels import KnittedTrees, Step
-from treehornx.enum_labels.core.Dir import Dir, Down, Internal, Up
-from treehornx.enum_labels.core.Event import ERR, LOF, OOM, Exit
-from treehornx.enum_labels.core.Label import Label
+from treehornx.enum_models import KnittedTrees, Step
+from treehornx.enum_models.core.Dir import Dir, Down, Internal, Up
+from treehornx.enum_models.core.Event import ERR, LOF, OOM, Exit
+from treehornx.enum_models.core.Label import Label
 from treehornx.ir.function import Function
 from treehornx.ir.instructions import Return
 from treehornx.report.format import frame_to_json
