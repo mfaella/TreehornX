@@ -88,13 +88,21 @@ class IsNil:
 
 
 @dataclass(frozen=True)
+class FieldIsNil:
+    """``ptr->field == NULL`` (or ``!= NULL`` when negated), ``field`` a pointer field."""
+    ptr: int
+    field: int
+    negated: bool = False
+
+
+@dataclass(frozen=True)
 class DataCond:
     """A Boolean data expression."""
     expr: DataExpr
 
 
-HeapCond = Union[PtrEq, IsNil]
-Cond = Union[PtrEq, IsNil, DataCond]
+HeapCond = Union[PtrEq, IsNil, FieldIsNil]
+Cond = Union[PtrEq, IsNil, FieldIsNil, DataCond]
 
 
 def negate(c: Cond) -> Cond:
@@ -102,6 +110,8 @@ def negate(c: Cond) -> Cond:
         return PtrEq(c.left, c.right, not c.negated)
     if isinstance(c, IsNil):
         return IsNil(c.ptr, not c.negated)
+    if isinstance(c, FieldIsNil):
+        return FieldIsNil(c.ptr, c.field, not c.negated)
     e = c.expr
     if isinstance(e, UnOp) and e.op == "!":
         return DataCond(e.operand)
@@ -386,6 +396,9 @@ class Function:
             return f"{p(c.left)} {'!=' if c.negated else '=='} {p(c.right)}"
         if isinstance(c, IsNil):
             return f"{p(c.ptr)} {'!=' if c.negated else '=='} nil"
+        if isinstance(c, FieldIsNil):
+            pf = self.node.pointer_fields[c.field].name
+            return f"{p(c.ptr)}->{pf} {'!=' if c.negated else '=='} nil"
         return self.fmt_expr(c.expr)
 
     def fmt_stmt(self, s: Stmt) -> str:

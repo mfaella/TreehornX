@@ -40,7 +40,7 @@ class KnittedTrees:
 
     @cached_property
     def _labels(self) -> frozenset[Lab]:
-        return frozenset(self.engine.labels | self._start_labels | self._backbone_labels)
+        return frozenset(self.engine.labels.keys() | self._start_labels | self._backbone_labels)
 
     @cached_property
     def _ids(self) -> dict[Lab, int]:

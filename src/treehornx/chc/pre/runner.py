@@ -78,17 +78,27 @@ class BotUpAutomataRunner[F](ABC):
     def error_symbol(self, role: str) -> FNode:
         return smt.Symbol(f"pre_{role}_{ERROR_FLAG}", smtty.BOOL)
 
-    def _data_symbols(self, label: Label[F], role: str) -> list[FNode]:
-        return label_symbols(self.function, cast(Any, label), data_prefix(role))
+    # The node predicate the automaton runs alongside (Lab by default), its data and the consistency
+    # between a parent and a child: overridden by runners attached to other predicates.
 
-    def _lab(self, label: Label[F], role: str) -> FNode:
-        return lab_apply(self.function, cast(Any, label), data_prefix(role))
+    def node_data_symbols(self, label: Label[F], prefix: str) -> list[FNode]:
+        return label_symbols(self.function, cast(Any, label), prefix)
+
+    def node_data_types(self, label: Label[F]) -> list[smtty.PySMTType]:
+        return [t for _ in kept_frames(cast(Any, label)) for t in frame_types(self.function)]
+
+    def node_apply(self, label: Label[F], prefix: str) -> FNode:
+        return lab_apply(self.function, cast(Any, label), prefix)
+
+    def node_consistency(self, parent: Label[F], child: Label[F], parent_prefix: str, child_prefix: str) -> FNode:
+        return consistency_constraint(self.function, cast(Any, parent), cast(Any, child), parent_prefix, child_prefix)
 
     def _args(self, label: Label[F], role: str) -> list[FNode]:
-        return [*self._data_symbols(label, role), *self.state_symbols(role).values(), self.error_symbol(role)]
+        data = self.node_data_symbols(label, data_prefix(role))
+        return [*data, *self.state_symbols(role).values(), self.error_symbol(role)]
 
     def _arg_types(self, label: Label[F]) -> list[smtty.PySMTType]:
-        data_types = [t for _ in kept_frames(cast(Any, label)) for t in frame_types(self.function)]
+        data_types = self.node_data_types(label)
         return [*data_types, *(self._smt_type(state) for state in self.ctx.states), smtty.BOOL]
 
     def predicate(self, label: Label[F]) -> FNode:
@@ -121,7 +131,8 @@ class BotUpAutomataRunner[F](ABC):
 
     def leaf_clause(self, label: Label[F]) -> FNode:
         """Pre1: an auxiliary leaf has the nil state."""
-        body = smt.And(self._lab(label, PARENT), smt.Iff(self.error_symbol(PARENT), self.is_error(label)))
+        error = smt.Iff(self.error_symbol(PARENT), self.is_error(label))
+        body = smt.And(self.node_apply(label, data_prefix(PARENT)), error)
         return chc.Clause(body, self.apply(label, PARENT))
 
     def _psi(self, parent: Label[F], children: tuple[Label[F], ...]) -> FNode:
@@ -138,14 +149,10 @@ class BotUpAutomataRunner[F](ABC):
 
     def node_clause(self, parent: Label[F], children: tuple[Label[F], ...]) -> FNode:
         """Pre2: the state of an input node follows from the states of its children through ψ."""
-        body = [self._lab(parent, PARENT)]
+        body = [self.node_apply(parent, data_prefix(PARENT))]
         for j, child in enumerate(children):
             body.append(self.apply(child, child_role(j)))
-            body.append(
-                consistency_constraint(
-                    self.function, cast(Any, parent), cast(Any, child), data_prefix(PARENT), data_prefix(child_role(j))
-                )
-            )
+            body.append(self.node_consistency(parent, child, data_prefix(PARENT), data_prefix(child_role(j))))
         if self.is_input_node(parent):
             body.append(self._psi(parent, children))
         errors = [self.error_symbol(child_role(j)) for j in range(len(children))]

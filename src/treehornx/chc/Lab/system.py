@@ -43,13 +43,13 @@ def external_steps(pair: Pair[Frame]) -> list[tuple[Lab, Lab]]:
     steps: list[tuple[Lab, Lab]] = []
     for c in range(2, len(child) + 1):
         match prev_of(child, c):
-            case (Up(), i) if 2 <= i <= len(parent) and next_of(parent, i) == (Down(j), c):
+            case (Up(), i) if 1 <= i <= len(parent) and next_of(parent, i) == (Down(j), c):
                 steps.append((child.cut(c), parent.cut(i)))
             case _:
                 pass
     for i in range(2, len(parent) + 1):
         match prev_of(parent, i):
-            case (Down(j_), c) if j_ == j and 2 <= c <= len(child) and next_of(child, c) == (Up(), i):
+            case (Down(j_), c) if j_ == j and 1 <= c <= len(child) and next_of(child, c) == (Up(), i):
                 steps.append((parent.cut(i), child.cut(c)))
             case _:
                 pass

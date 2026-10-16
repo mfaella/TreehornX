@@ -31,9 +31,9 @@ from treehornx.enum_models.Lab.helpers import (
     are_equal_after_rewind,
     cur_rewind_pos,
     default,
+    field_is_nil,
     is_pfield_implicit,
-    is_pfield_nil,
-    is_pfield_ptr,
+    get_pfield_ptr,
     isnil_with,
     last_upd,
     last_visit,
@@ -170,6 +170,8 @@ class LabEngine(SymbolicEngine[Frame]):
                 return [self.step_cmp_ptr_int(sigma, p, q, neg, d)]
             case ir.IfGoto(ir.IsNil(p, neg)):
                 return [self.step_cmp_nil_int(sigma, p, neg, d)]
+            case ir.IfGoto(ir.FieldIsNil(p, pfield, neg)):
+                return [self.step_cmp_field_nil_int(sigma, p, pfield, neg, d)]
             case ir.IfGoto(ir.DataCond(expr)):
                 return self.step_local_branch_int(sigma, expr, d)
             case ir.Exit():
@@ -200,6 +202,8 @@ class LabEngine(SymbolicEngine[Frame]):
                 return self.step_free_ext(sigma, tau, p, d)
             case ir.IfGoto(ir.PtrEq(p, q, _)):
                 return self.step_cmp_ptr_ext(sigma, tau, p, q, d)
+            case ir.IfGoto(ir.FieldIsNil(p, _, _)):
+                return self.step_cmp_field_nil_ext(sigma, tau, p, d)
             case _:
                 return None
 
@@ -448,14 +452,11 @@ class LabEngine(SymbolicEngine[Frame]):
                 return None
             # Case 3a: end of phase I; q points to the current node
             case _ if stop_rewind(sigma, a, q):
-                if is_pfield_nil(sigma, a, pfield) or (
-                    is_pfield_implicit(sigma, a, pfield) and not f.active_child[pfield]
-                ):
+                if field_is_nil(sigma, a, pfield):
                     return self.step_assgn_nil(f, p, expected_next_dir)
-                for r in self.pointers:
-                    for i in range(2, a + 1):
-                        if is_pfield_ptr(sigma, a, pfield, r, i) and points_here(sigma, i, r):
-                            return self.set_ptr_here(f, p, expected_next_dir)
+                ptr = get_pfield_ptr(sigma, a, pfield)
+                if ptr is not None and points_here(sigma, ptr[1], ptr[0]):
+                    return self.set_ptr_here(f, p, expected_next_dir)
                 return None
             case _:
                 return None
@@ -495,10 +496,10 @@ class LabEngine(SymbolicEngine[Frame]):
                 return self.rewind(sigma, tau, q, expected_next_dir)
             # Case 3a: end of phase I; pfield is equal to r, which points elsewhere
             case _:
-                for r in self.pointers:
-                    for i in range(2, a + 1):
-                        if is_pfield_ptr(sigma, a, pfield, r, i) and not points_here(sigma, i, r):
-                            return self.rewind_special(sigma, tau, r, i, expected_next_dir)
+                ptr = get_pfield_ptr(sigma, a, pfield)
+                if ptr is not None and not points_here(sigma, ptr[1], ptr[0]):
+                    r, i = ptr
+                    return self.rewind_special(sigma, tau, r, i, expected_next_dir)
                 return None
 
     # -----------------------------------------------------------------------
@@ -536,6 +537,28 @@ class LabEngine(SymbolicEngine[Frame]):
             return None
         f2 = self.advance_pc(f, MutableFrame(), neg != f.isnil[p])
         return default("active", "isnil", "event", "active_child")(f, f, f2)
+
+    def step_cmp_field_nil_int(
+        self, sigma: Label[Frame], p: int, pfield: int, neg: bool, expected_next_dir: Dir
+    ) -> MutableFrame | None:
+        """if p -> pfield = nil (neg = False) / if p -> pfield != nil (neg = True)
+
+        The field is read at the node p points to, without visiting the node it points to."""
+        f, a = sigma.frame, len(sigma)
+        # Case 1: p is nil; null pointer dereference
+        if f.isnil[p]:
+            return self.find_or_fail_int(sigma, p, expected_next_dir)
+        # Case 3: p points to the current node; branch on the value of the field
+        if not stop_rewind(sigma, a, p) or expected_next_dir != Internal():
+            return None
+        f2 = self.advance_pc(f, MutableFrame(), neg != field_is_nil(sigma, a, pfield))
+        return default("active", "isnil", "event", "active_child")(f, f, f2)
+
+    def step_cmp_field_nil_ext(
+        self, sigma: Label[Frame], tau: Label[Frame], p: int, expected_next_dir: Dir
+    ) -> MutableFrame | None:
+        """if p -> pfield = nil / if p -> pfield != nil, Case 2: p points elsewhere; start or keep rewinding"""
+        return self.find_or_fail_ext(sigma, tau, p, expected_next_dir)
 
     # -----------------------------------------------------------------------
     # Rewinding the lace (C.7)

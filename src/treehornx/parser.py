@@ -408,6 +408,9 @@ class _Lowering:
                                   "single comparison (p == q, p != q, p == NULL, "
                                   "p != NULL); combine results with separate "
                                   "statements", rhs)
+            if isinstance(cond, ir.FieldIsNil):
+                raise SubsetError("a field compared with NULL can only be used as a "
+                                  "condition; load the field into a variable first", rhs)
             self._check(DataType.BOOL, dtype, rhs, f"'{name}'")
             self._emit(ir.AssignCond(d, cond))
             return
@@ -484,13 +487,20 @@ class _Lowering:
             return None if inner is None else ir.negate(inner)
         if isinstance(n, c_ast.ID) and n.name in self.ptr_vars:
             return ir.IsNil(self.ptr_vars[n.name], negated=True)
+        if isinstance(n, c_ast.StructRef):
+            return self._field_is_nil(n, negated=True)
         if isinstance(n, c_ast.BinaryOp) and n.op in _EQ:
             neg = n.op == "!="
+            ln, rn = self._is_null(n.left), self._is_null(n.right)
+            if isinstance(n.left, c_ast.StructRef) and rn:
+                return self._field_is_nil(n.left, neg)
+            if ln and isinstance(n.right, c_ast.StructRef):
+                return self._field_is_nil(n.right, neg)
             for side in (n.left, n.right):
                 if isinstance(side, c_ast.StructRef):
-                    raise SubsetError("field accesses are not allowed in comparisons; "
-                                      "load the field into a variable first", side)
-            ln, rn = self._is_null(n.left), self._is_null(n.right)
+                    raise SubsetError("a field can only be compared with NULL "
+                                      "('p->field == NULL'); load the field into a "
+                                      "variable first", side)
             lp = isinstance(n.left, c_ast.ID) and n.left.name in self.ptr_vars
             rp = isinstance(n.right, c_ast.ID) and n.right.name in self.ptr_vars
             if lp and rp:
@@ -503,6 +513,14 @@ class _Lowering:
                 raise SubsetError("pointers can only be compared with pointer "
                                   "variables or NULL", n)
         return None
+
+    def _field_is_nil(self, n: c_ast.StructRef, negated: bool) -> ir.FieldIsNil:
+        """p->pf == NULL (or != NULL when negated), pf a pointer field."""
+        p, kind, fid = self._field(n)
+        if kind != "ptr":
+            raise SubsetError(f"'{n.field.name}' is a data field; only pointer fields "
+                              "can be compared with NULL", n)
+        return ir.FieldIsNil(p, fid, negated)
 
     # -------------------------------------------------------- conditions
     def _jump(self, n: c_ast.Node, target: _Label, when: bool) -> None:

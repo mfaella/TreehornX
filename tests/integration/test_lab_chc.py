@@ -10,30 +10,36 @@ from pathlib import Path
 import pytest
 from pychc.environment import reset_env
 from pychc.solvers.witness import Status
-from pychc.solvers.z3 import Z3CHCSolver
+from pychc.solvers.golem import GolemSolver
 
 from treehornx.chc.Lab import make_system
 from treehornx.enum_models.Lab import ERR, Lab
 from treehornx.parser import parse_file
 
 C_FILES = Path(__file__).parent / "c_files"
+SOLVERS = Path(__file__).parent / "solvers"
 TIMEOUT = 120
+N = 128
 
-# (program, m, n, expected status)
+# (program, m, expected status)
 CASES = [
-    ("sll_safe_find", 0, 12, Status.SAT),
-    ("sll_unsafe_find", 0, 12, Status.UNSAT),
-    ("sll_safe_insert_sorted", 1, 12, Status.SAT),
-    ("sll_unsafe_insert", 1, 12, Status.UNSAT),
-    ("sll_safe_length", 0, 12, Status.SAT),
-    ("sll_unsafe_length", 0, 12, Status.UNSAT),
-    # two passes over the list plus a rewind to the head need more frames per node
-    ("sll_safe_find_last", 0, 16, Status.SAT),
-    ("sll_unsafe_find_last", 0, 16, Status.UNSAT),
-    ("bst_safe_find", 0, 12, Status.SAT),
-    ("bst_unsafe_find", 0, 12, Status.UNSAT),
-    ("bst_safe_insert", 1, 12, Status.SAT),
-    ("bst_unsafe_insert", 1, 12, Status.UNSAT),
+    ("sll_safe_find", 0, Status.SAT),
+    ("sll_unsafe_find", 0, Status.UNSAT),
+    ("sll_safe_insert_sorted", 1, Status.SAT),
+    ("sll_unsafe_insert", 1, Status.UNSAT),
+    ("sll_safe_length", 0, Status.SAT),
+    ("sll_unsafe_length", 0, Status.UNSAT),
+    ("sll_safe_find_last", 0, Status.SAT),
+    ("sll_unsafe_find_last", 0, Status.UNSAT),
+    ("bst_safe_find", 0, Status.SAT),
+    ("bst_unsafe_find", 0, Status.UNSAT),
+    ("bst_safe_insert", 1, Status.SAT),
+    ("bst_unsafe_insert", 1, Status.UNSAT),
+    # fields compared with NULL directly (if p->pf == NULL), without loading them into a variable
+    ("bst_safe_min_field_nil", 0, Status.SAT),
+    ("bst_unsafe_min_field_nil", 0, Status.UNSAT),
+    ("bst_safe_insert_field_nil", 1, Status.SAT),
+    ("bst_safe_insert_load", 1, Status.SAT),
 ]
 
 
@@ -48,13 +54,13 @@ def ends_with_error(label: Lab) -> bool:
     return label.next is None and isinstance(label.frame.event, ERR)
 
 
-@pytest.mark.skipif(shutil.which("z3") is None, reason="z3 executable not found")
-@pytest.mark.parametrize(("program", "m", "n", "expected"), CASES, ids=[case[0] for case in CASES])
-def test_memory_safety(program: str, m: int, n: int, expected: Status) -> None:
+@pytest.mark.skipif(shutil.which("golem", path=str(SOLVERS)) is None, reason="golem executable not found")
+@pytest.mark.parametrize(("program", "m", "expected"), CASES, ids=[case[0] for case in CASES])
+def test_memory_safety(program: str, m: int, expected: Status) -> None:
     function = parse_file(str(C_FILES / f"{program}.c"))
-    system = make_system(function, function.node.k, m, n, ends_with_error)
+    system = make_system(function, function.node.k, m, N, ends_with_error)
 
-    solver = Z3CHCSolver()
+    solver = GolemSolver(binary_path=SOLVERS)
     solver.load_system(system)
 
     assert solver.solve(timeout=TIMEOUT) == expected

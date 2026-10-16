@@ -17,17 +17,17 @@ from treehornx.enum_models.Lab.Frame import Frame, MutableFrame
 # ---------------------------------------------------------------------------
 
 
-def prev_of(sigma: Label[Frame], i: int) -> tuple[Dir, int] | None:
+def prev_of[F](sigma: Label[F], i: int) -> tuple[Dir, int] | None:
     """σ^i.prev"""
     return sigma.cut(i).prev
 
 
-def next_of(sigma: Label[Frame], i: int) -> tuple[Dir, int] | None:
+def next_of[F](sigma: Label[F], i: int) -> tuple[Dir, int] | None:
     """σ^i.next"""
     return sigma.cut(i).next
 
 
-def last_visit(tau: Label[Frame], dir: Dir, j: int) -> int | None:
+def last_visit[F](tau: Label[F], dir: Dir, j: int) -> int | None:
     """max{i ∈ [n] | τ^i.next = (dir, c), c ≤ j}, None when the set is empty."""
     visits = [
         i for i in range(1, len(tau) + 1)
@@ -51,7 +51,7 @@ def cur_rewind_pos(sigma: Label[Frame], a: int) -> int:
 
 def points_here(sigma: Label[Frame], a: int, q: int) -> bool:
     """∨_{i∈[2,a]} (σ^i.event = ⟨q := here⟩ ∧ ∧_{j∈[i+1,a]} ¬σ^j.upd_q)"""
-    for f in reversed(sigma[2 : a + 1]):
+    for _, f in sigma.reverse_iter_frames(2, a):
         if f.event == Here(q):
             return True
         if f.upd[q]:
@@ -60,7 +60,7 @@ def points_here(sigma: Label[Frame], a: int, q: int) -> bool:
 
 
 def last_upd(sigma: Label[Frame], a: int, q: int) -> int:
-    return max((i for i in range(2, a + 1) if sigma[i].upd[q]), default=2)
+    return max((i for i, f in sigma.reverse_iter_frames(2, a) if f.upd[q]), default=2)
 
 
 def stop_rewind(sigma: Label[Frame], a: int, q: int) -> bool:
@@ -87,22 +87,33 @@ def _is_pfield_assign(f: Frame, pfield: int) -> bool:
 
 
 def is_pfield_nil(sigma: Label[Frame], a: int, pfield: int) -> bool:
-    for f in reversed(sigma[2 : a + 1]):
+    for _, f in sigma.reverse_iter_frames(2, a):
         if _is_pfield_assign(f, pfield):
             return f.event == FieldAssignP(pfield, None)
     return False
 
 
-def is_pfield_ptr(sigma: Label[Frame], a: int, pfield: int, r: int, i: int) -> bool:
-    return (
-        2 <= i <= a
-        and sigma[i].event == FieldAssignP(pfield, r)
-        and not any(_is_pfield_assign(f, pfield) for f in sigma[i + 1 : a + 1])
-    )
+def get_pfield_ptr(sigma: Label[Frame], a: int, pfield: int) -> tuple[int, int] | None:
+    """(r, i) such that the last assignment to pfield in σ^2..σ^a is ⟨pfield := r⟩ at position i."""
+    for i, f in sigma.reverse_iter_frames(2, a):
+        match f.event:
+            case FieldAssignP(pf, r) if pf == pfield:
+                return None if r is None else (r, i)
+            case _:
+                pass
+    return None
 
 
 def is_pfield_implicit(sigma: Label[Frame], a: int, pfield: int) -> bool:
-    return not any(_is_pfield_assign(f, pfield) for f in sigma[2 : a + 1])
+    return not any(_is_pfield_assign(f, pfield) for _, f in sigma.reverse_iter_frames(2, a))
+
+
+def field_is_nil(sigma: Label[Frame], a: int, pfield: int) -> bool:
+    """pfield_nil(σ,a,pf) ∨ (pfield_implicit(σ,a,pf) ∧ ¬σ^a.active_child_pf): the field of the node
+    holding σ^a is nil."""
+    return is_pfield_nil(sigma, a, pfield) or (
+        is_pfield_implicit(sigma, a, pfield) and not sigma[a].active_child[pfield]
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +123,10 @@ def is_pfield_implicit(sigma: Label[Frame], a: int, pfield: int) -> bool:
 
 def upd_since(sigma: Label[Frame], a_: int, a: int, p: int) -> bool:
     """∨_{c∈[a',a]} σ^c.event = ⟨p := here⟩ ∨ ∨_{c∈[a'+1,a]} σ^c.upd_p"""
-    return any(f.event == Here(p) for f in sigma[a_ : a + 1]) or any(f.upd[p] for f in sigma[a_ + 1 : a + 1])
+    return (
+        any(f.event == Here(p) for _, f in sigma.reverse_iter_frames(a_, a)) or
+        any(f.upd[p] for _, f in sigma.reverse_iter_frames(a_ + 1, a))
+    )
 
 
 # ---------------------------------------------------------------------------

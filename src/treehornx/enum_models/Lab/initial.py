@@ -9,7 +9,7 @@ from typing import Iterable
 
 from treehornx import ir
 from treehornx.enum_models.core.Dir import Internal
-from treehornx.enum_models.core.Label import Label, make_label
+from treehornx.enum_models.core.Label import Label
 from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.Lab.Event import NOP, Here
 from treehornx.enum_models.Lab.Frame import Frame
@@ -38,8 +38,8 @@ def backbone_labels(function: ir.Function, m: int) -> Iterable[Label[Frame]]:
     """
     k, num_ptrs = function.node.k, len(function.pointer_vars)
     for named in product((True, False), repeat=k):
-        yield make_label(_first_frame(num_ptrs, True, named + (False,) * m))
-    yield make_label(_first_frame(num_ptrs, False, (False,) * k + (True,) * m))
+        yield Label(_first_frame(num_ptrs, True, named + (False,) * m))
+    yield Label(_first_frame(num_ptrs, False, (False,) * k + (True,) * m))
 
 
 def start_labels(function: ir.Function, m: int) -> Iterable[Label[Frame]]:
@@ -75,7 +75,7 @@ def start_labels(function: ir.Function, m: int) -> Iterable[Label[Frame]]:
     )
     for f2 in second_frames:
         f1 = _first_frame(num_ptrs, f2.active, f2.active_child)
-        yield make_label(f2, prev=(Internal(), 2), prefix=make_label(f1))
+        yield Label(f2, prev=(Internal(), 2), prefix=Label(f1))
 
 
 def is_initial(sigma: Label[Frame]) -> bool:
