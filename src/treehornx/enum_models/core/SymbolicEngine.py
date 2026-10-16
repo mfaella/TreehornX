@@ -5,12 +5,17 @@ from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
 from functools import cached_property
+from itertools import count
 from typing import Iterable
 
 
 from treehornx.enum_models.core.Dir import Dir, Down, Internal, Up
 from treehornx.enum_models.core.Label import Label
 from treehornx.enum_models.core.Pair import Pair
+
+# Label ids are unique in the whole process, not only in one engine: predicate names are built from them
+# (Lab<id>, Pre<id>, Dfs<id>) and the systems of different engines share the pySMT environment.
+_LABEL_IDS = count()
 
 @dataclass(frozen=True, slots=True)
 class Transition[F]:
@@ -47,7 +52,7 @@ class SymbolicEngine[F](ABC):
         if prefix is not label.prefix or label._id >= 0:
             # rebuild on a canonical prefix, or copy a label numbered by another engine
             label = Label(label.frame, label.next, label.prev, prefix)
-        object.__setattr__(label, "_id", len(self._canonical))
+        object.__setattr__(label, "_id", next(_LABEL_IDS))
         self._canonical[label] = label
         return label
 
