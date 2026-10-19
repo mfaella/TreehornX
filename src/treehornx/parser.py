@@ -406,11 +406,8 @@ class _Lowering:
             if cond is None:
                 raise SubsetError("a heap condition assigned to a variable must be a "
                                   "single comparison (p == q, p != q, p == NULL, "
-                                  "p != NULL); combine results with separate "
-                                  "statements", rhs)
-            if isinstance(cond, ir.FieldIsNil):
-                raise SubsetError("a field compared with NULL can only be used as a "
-                                  "condition; load the field into a variable first", rhs)
+                                  "p != NULL, p->f == NULL, p->f != NULL); combine "
+                                  "results with separate statements", rhs)
             self._check(DataType.BOOL, dtype, rhs, f"'{name}'")
             self._emit(ir.AssignCond(d, cond))
             return

@@ -10,7 +10,7 @@ from pathlib import Path
 import pytest
 from pychc.environment import reset_env
 from pychc.solvers.witness import Status
-from pychc.solvers.golem import GolemSolver
+from pychc.solvers.eldarica import EldaricaSolver
 
 from treehornx.chc.Lab import make_system
 from treehornx.enum_models.Lab import ERR, Lab
@@ -40,6 +40,9 @@ CASES = [
     ("bst_unsafe_min_field_nil", 0, Status.UNSAT),
     ("bst_safe_insert_field_nil", 1, Status.SAT),
     ("bst_safe_insert_load", 1, Status.SAT),
+    # a field compared with NULL assigned to a variable (b = p->pf == NULL)
+    ("bst_safe_assign_field_nil", 0, Status.SAT),
+    ("bst_unsafe_assign_field_nil", 0, Status.UNSAT),
 ]
 
 
@@ -51,16 +54,16 @@ def fresh_smt_environment() -> None:
 
 
 def ends_with_error(label: Lab) -> bool:
-    return label.next is None and isinstance(label.frame.event, ERR)
+    return isinstance(label.frame.event, ERR)
 
 
-@pytest.mark.skipif(shutil.which("golem", path=str(SOLVERS)) is None, reason="golem executable not found")
+@pytest.mark.skipif(shutil.which("eld", path=str(SOLVERS)) is None, reason="eldarica executable not found")
 @pytest.mark.parametrize(("program", "m", "expected"), CASES, ids=[case[0] for case in CASES])
 def test_memory_safety(program: str, m: int, expected: Status) -> None:
     function = parse_file(str(C_FILES / f"{program}.c"))
     system = make_system(function, function.node.k, m, N, ends_with_error)
 
-    solver = GolemSolver(binary_path=SOLVERS)
+    solver = EldaricaSolver(binary_path=SOLVERS)
     solver.load_system(system)
 
     assert solver.solve(timeout=TIMEOUT) == expected

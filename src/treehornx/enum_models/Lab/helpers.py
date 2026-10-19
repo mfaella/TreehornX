@@ -1,47 +1,23 @@
 """Auxiliary predicates and functions of the Lab encoding (CAV25, Appendix C).
 
 Positions inside a label are 1-based as in the paper: `sigma[i]` is the frame σ^i and
-`sigma[len(sigma)]` is the top frame. The `prev`/`next` links of σ^i are stored on the
-prefix of `sigma` of length i (see `prev_of`/`next_of`).
+`sigma[len(sigma)]` is the top frame. The `prev` link of σ^i is stored in the frame itself
+(`sigma[i].prev`); `next` links are not stored, they are implied by the `prev` links of the
+neighbouring labels.
 """
 
 from typing import Callable
 
-from treehornx.enum_models.core.Dir import Dir
-from treehornx.enum_models.core.Label import Label
+from treehornx.enum_models.Lab.Lab import Lab
 from treehornx.enum_models.Lab.Event import NOP, FieldAssignP, Here, Rewind
 from treehornx.enum_models.Lab.Frame import Frame, MutableFrame
-
-# ---------------------------------------------------------------------------
-# Lace links
-# ---------------------------------------------------------------------------
-
-
-def prev_of[F](sigma: Label[F], i: int) -> tuple[Dir, int] | None:
-    """σ^i.prev"""
-    return sigma.cut(i).prev
-
-
-def next_of[F](sigma: Label[F], i: int) -> tuple[Dir, int] | None:
-    """σ^i.next"""
-    return sigma.cut(i).next
-
-
-def last_visit[F](tau: Label[F], dir: Dir, j: int) -> int | None:
-    """max{i ∈ [n] | τ^i.next = (dir, c), c ≤ j}, None when the set is empty."""
-    visits = [
-        i for i in range(1, len(tau) + 1)
-        if (nxt := next_of(tau, i)) is not None and nxt[0] == dir and nxt[1] <= j
-    ]
-    return max(visits, default=None)
-
 
 # ---------------------------------------------------------------------------
 # Rewinding the lace (C.7)
 # ---------------------------------------------------------------------------
 
 
-def cur_rewind_pos(sigma: Label[Frame], a: int) -> int:
+def cur_rewind_pos(sigma: Lab, a: int) -> int:
     match sigma[a].event:
         case Rewind(b):
             return b
@@ -49,9 +25,9 @@ def cur_rewind_pos(sigma: Label[Frame], a: int) -> int:
             return a
 
 
-def points_here(sigma: Label[Frame], a: int, q: int) -> bool:
+def points_here(sigma: Lab, a: int, q: int) -> bool:
     """∨_{i∈[2,a]} (σ^i.event = ⟨q := here⟩ ∧ ∧_{j∈[i+1,a]} ¬σ^j.upd_q)"""
-    for _, f in sigma.reverse_iter_frames(2, a):
+    for f in reversed(sigma[2:a]):
         if f.event == Here(q):
             return True
         if f.upd[q]:
@@ -59,19 +35,19 @@ def points_here(sigma: Label[Frame], a: int, q: int) -> bool:
     return False
 
 
-def last_upd(sigma: Label[Frame], a: int, q: int) -> int:
-    return max((i for i, f in sigma.reverse_iter_frames(2, a) if f.upd[q]), default=2)
+def last_upd(sigma: Lab, a: int, q: int) -> int:
+    return max((i for i, f in sigma.reversed_iter_indexed(2, a) if f.upd[q]), default=2)
 
 
-def stop_rewind(sigma: Label[Frame], a: int, q: int) -> bool:
+def stop_rewind(sigma: Lab, a: int, q: int) -> bool:
     return not sigma[a].isnil[q] and points_here(sigma, cur_rewind_pos(sigma, a), q)
 
 
-def stop_rewind2(sigma: Label[Frame], a: int, q1: int, q2: int) -> bool:
+def stop_rewind2(sigma: Lab, a: int, q1: int, q2: int) -> bool:
     return stop_rewind(sigma, a, q1) or stop_rewind(sigma, a, q2)
 
 
-def are_equal_after_rewind(sigma: Label[Frame], a: int, p: int, q: int) -> bool:
+def are_equal_after_rewind(sigma: Lab, a: int, p: int, q: int) -> bool:
     a_ = cur_rewind_pos(sigma, a)
     return points_here(sigma, a_, p) and points_here(sigma, a_, q)
 
@@ -86,16 +62,16 @@ def _is_pfield_assign(f: Frame, pfield: int) -> bool:
     return isinstance(f.event, FieldAssignP) and f.event.pfield == pfield
 
 
-def is_pfield_nil(sigma: Label[Frame], a: int, pfield: int) -> bool:
-    for _, f in sigma.reverse_iter_frames(2, a):
+def is_pfield_nil(sigma: Lab, a: int, pfield: int) -> bool:
+    for f in reversed(sigma[2:a]):
         if _is_pfield_assign(f, pfield):
             return f.event == FieldAssignP(pfield, None)
     return False
 
 
-def get_pfield_ptr(sigma: Label[Frame], a: int, pfield: int) -> tuple[int, int] | None:
+def get_pfield_ptr(sigma: Lab, a: int, pfield: int) -> tuple[int, int] | None:
     """(r, i) such that the last assignment to pfield in σ^2..σ^a is ⟨pfield := r⟩ at position i."""
-    for i, f in sigma.reverse_iter_frames(2, a):
+    for i, f in sigma.reversed_iter_indexed(2, a):
         match f.event:
             case FieldAssignP(pf, r) if pf == pfield:
                 return None if r is None else (r, i)
@@ -104,11 +80,11 @@ def get_pfield_ptr(sigma: Label[Frame], a: int, pfield: int) -> tuple[int, int] 
     return None
 
 
-def is_pfield_implicit(sigma: Label[Frame], a: int, pfield: int) -> bool:
-    return not any(_is_pfield_assign(f, pfield) for _, f in sigma.reverse_iter_frames(2, a))
+def is_pfield_implicit(sigma: Lab, a: int, pfield: int) -> bool:
+    return not any(_is_pfield_assign(f, pfield) for f in reversed(sigma[2:a]))
 
 
-def field_is_nil(sigma: Label[Frame], a: int, pfield: int) -> bool:
+def field_is_nil(sigma: Lab, a: int, pfield: int) -> bool:
     """pfield_nil(σ,a,pf) ∨ (pfield_implicit(σ,a,pf) ∧ ¬σ^a.active_child_pf): the field of the node
     holding σ^a is nil."""
     return is_pfield_nil(sigma, a, pfield) or (
@@ -121,11 +97,11 @@ def field_is_nil(sigma: Label[Frame], a: int, pfield: int) -> bool:
 # ---------------------------------------------------------------------------
 
 
-def upd_since(sigma: Label[Frame], a_: int, a: int, p: int) -> bool:
+def upd_since(sigma: Lab, a_: int, a: int, p: int) -> bool:
     """∨_{c∈[a',a]} σ^c.event = ⟨p := here⟩ ∨ ∨_{c∈[a'+1,a]} σ^c.upd_p"""
     return (
-        any(f.event == Here(p) for _, f in sigma.reverse_iter_frames(a_, a)) or
-        any(f.upd[p] for _, f in sigma.reverse_iter_frames(a_ + 1, a))
+        any(f.event == Here(p) for f in reversed(sigma[a_:a])) or
+        any(f.upd[p] for f in reversed(sigma[a_+1:a]))
     )
 
 

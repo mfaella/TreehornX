@@ -8,8 +8,8 @@ from itertools import product
 from typing import Iterable
 
 from treehornx import ir
+from treehornx.enum_models.Lab.Lab import Lab
 from treehornx.enum_models.core.Dir import Internal
-from treehornx.enum_models.core.Label import Label
 from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.Lab.Event import NOP, Here
 from treehornx.enum_models.Lab.Frame import Frame
@@ -23,10 +23,11 @@ def _first_frame(num_ptrs: int, active: bool, active_child: tuple[bool, ...]) ->
         isnil=(False,) * num_ptrs,
         event=NOP(),
         active_child=active_child,
+        prev=None
     )
 
 
-def backbone_labels(function: ir.Function, m: int) -> Iterable[Label[Frame]]:
+def backbone_labels(function: ir.Function, m: int) -> Iterable[Lab]:
     """Labels of non-root nodes before the lace reaches them (CHC I).
 
     first_frame(f) = f.active ∧ ∧_{j∈[k+1,k+m]} ¬f.active_child_j ∨
@@ -38,11 +39,11 @@ def backbone_labels(function: ir.Function, m: int) -> Iterable[Label[Frame]]:
     """
     k, num_ptrs = function.node.k, len(function.pointer_vars)
     for named in product((True, False), repeat=k):
-        yield Label(_first_frame(num_ptrs, True, named + (False,) * m))
-    yield Label(_first_frame(num_ptrs, False, (False,) * k + (True,) * m))
+        yield Lab(_first_frame(num_ptrs, True, named + (False,) * m))
+    yield Lab(_first_frame(num_ptrs, False, (False,) * k + (True,) * m))
 
 
-def start_labels(function: ir.Function, m: int) -> Iterable[Label[Frame]]:
+def start_labels(function: ir.Function, m: int) -> Iterable[Lab]:
     """Labels of the root holding the first frame of the lace (CHC II, predicate start).
 
     The first frame copies active and active_child from the second one (Section 3.1), the
@@ -60,6 +61,7 @@ def start_labels(function: ir.Function, m: int) -> Iterable[Label[Frame]]:
                 isnil=tuple(p != root for p in range(num_ptrs)),
                 event=Here(root),
                 active_child=named + (False,) * m,
+                prev=(Internal(), 2)
             )
         )
     # empty input tree
@@ -71,19 +73,20 @@ def start_labels(function: ir.Function, m: int) -> Iterable[Label[Frame]]:
             isnil=(True,) * num_ptrs,
             event=NOP(),
             active_child=(False,) * (k + m),
+            prev=(Internal(), 2)
         )
     )
     for f2 in second_frames:
         f1 = _first_frame(num_ptrs, f2.active, f2.active_child)
-        yield Label(f2, prev=(Internal(), 2), prefix=Label(f1))
+        yield Lab(f2, prefix=Lab(f1))
 
 
-def is_initial(sigma: Label[Frame]) -> bool:
+def is_initial(sigma: Lab) -> bool:
     """initial(σ) = ¬σ.avail^2 ∧ σ.prev^2 = (−, 2)"""
-    return len(sigma) >= 2 and sigma.cut(2).prev == (Internal(), 2)
+    return len(sigma) >= 2 and sigma[2].prev == (Internal(), 2)
 
 
-def consistent_first_frames(tau: Label[Frame], j: int, sigma: Label[Frame], k: int) -> bool:
+def consistent_first_frames(tau: Lab, j: int, sigma: Lab, k: int) -> bool:
     """(initial(σ) ∨ σ.active^1) ∧ (τ.active^1 → σ.active^1) ∧ (j > k → ¬τ.active^1) ∧
     σ.active_child^1_j = τ.active^1
 
@@ -99,8 +102,8 @@ def consistent_first_frames(tau: Label[Frame], j: int, sigma: Label[Frame], k: i
 
 
 def initial_pairs(
-    function: ir.Function, m: int, starts: Iterable[Label[Frame]], backbones: Iterable[Label[Frame]]
-) -> Iterable[Pair[Frame]]:
+    function: ir.Function, m: int, starts: Iterable[Lab], backbones: Iterable[Lab]
+) -> Iterable[Pair[Lab]]:
     """Pairs (σ, τ, j) where τ is the label of the j-th child of σ before the lace reaches it.
 
     With a single frame in τ, consistent_child reduces to consistent_first_frames.

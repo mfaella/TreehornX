@@ -6,14 +6,13 @@ The system is sat when no input accepted by the precondition leads to a null-poi
 
 import shutil
 from pathlib import Path
-from typing import Any, Callable
+from typing import Callable
 
 import pytest
 from pychc.chc_system import CHCSystem
 from pychc.environment import reset_env
-from pychc.exceptions import PyCHCSolverException
 from pychc.solvers.witness import Status
-from pychc.solvers.golem import GolemSolver
+from pychc.solvers.eldarica import EldaricaSolver
 
 from treehornx.chc import Lab, pre
 from treehornx.chc.sdta.SDTAContext import SDTAContext, bst_strict_ctx, sll_sorted_ctx, sll_sorted_strict_ctx
@@ -27,26 +26,20 @@ TIMEOUT = 120
 N = 128
 
 # (program, precondition, m, expected status)
-CASES: list[tuple[str, Callable[[], SDTAContext], int, Status] | Any] = [
+CASES: list[tuple[str, Callable[[], SDTAContext], int, Status]] = [
     ("sll_sorted_safe_first_lt_last", sll_sorted_strict_ctx, 0, Status.SAT),
     ("sll_sorted_unsafe_first_lt_last", sll_sorted_strict_ctx, 0, Status.UNSAT),
     ("bst_safe_min_lt_max", bst_strict_ctx, 0, Status.SAT),
     ("bst_unsafe_min_lt_max", bst_strict_ctx, 0, Status.UNSAT),
     # safe for every input, the precondition must not change the result
     ("sll_safe_find", sll_sorted_ctx, 0, Status.SAT),
-    pytest.param(
-        "bst_safe_insert_field_nil", bst_strict_ctx, 1, Status.SAT,
-        # golem 0.9.0 answers sat, then crashes printing the witness (std::out_of_range in unordered_map::at);
-        # z3 answers sat on the same system
-        marks=pytest.mark.xfail(raises=PyCHCSolverException, reason="golem 0.9.0 witness crash", strict=True),
-        id="bst_safe_insert_field_nil",
-    ),
+    ("bst_safe_insert_field_nil", bst_strict_ctx, 1, Status.SAT),
 ]
 
 # safe only thanks to the precondition
 NEEDS_PRECONDITION = ["sll_sorted_safe_first_lt_last", "bst_safe_min_lt_max"]
 
-pytestmark = pytest.mark.skipif(shutil.which("golem", path=str(SOLVERS)) is None, reason="golem executable not found")
+pytestmark = pytest.mark.skipif(shutil.which("eld", path=str(SOLVERS)) is None, reason="eldarica executable not found")
 
 
 @pytest.fixture(autouse=True)
@@ -57,16 +50,16 @@ def fresh_smt_environment() -> None:
 
 
 def solve(system: CHCSystem) -> Status:
-    solver = GolemSolver(binary_path=SOLVERS)
+    solver = EldaricaSolver(binary_path=SOLVERS)
     solver.load_system(system)
     return solver.solve(timeout=TIMEOUT)
 
 
 def ends_with_error(label: Label) -> bool:
-    return label.next is None and isinstance(label.frame.event, ERR)
+    return isinstance(label.frame.event, ERR)
 
 
-@pytest.mark.parametrize(("program", "precondition", "m", "expected"), CASES, ids=[getattr(case, "id", None) or case[0] for case in CASES])
+@pytest.mark.parametrize(("program", "precondition", "m", "expected"), CASES, ids=[case[0] for case in CASES])
 def test_memory_safety_under_precondition(
     program: str, precondition: Callable[[], SDTAContext], m: int, expected: Status
 ) -> None:

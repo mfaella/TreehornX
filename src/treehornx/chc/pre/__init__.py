@@ -19,9 +19,9 @@ def make_system(
     """Lab clauses plus the precondition layer: unsat iff an input accepted by `ctx` leads to an exit status in
     `exit_codes`."""
     lab = build_lab(function, k, m, n)
-    runner = PreRunner(function, lab.pairs, ctx, k, m, n=n, exit_codes=exit_codes)
+    runner = PreRunner(function, lab.pairs, ctx, k, m, sym=lab.sym, n=n, exit_codes=exit_codes)
     return to_system(
-        [*lab.predicate_symbols(function), *runner.predicates()],
+        [*lab.predicate_symbols(), *runner.predicates()],
         [*lab.clauses, *runner.clauses(), *runner.queries()],
     )
 

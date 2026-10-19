@@ -4,9 +4,12 @@ from dataclasses import dataclass, field
 from typing import override
 
 import pysmt.shortcuts as smt
+import pysmt.typing as smtty
 from pysmt.fnode import FNode
 
 from treehornx.chc.core import ExitCodeKind
+from treehornx.chc.Lab.clauses import consistency_constraint
+from treehornx.chc.Lab.symbols import ChcLabUtils
 from treehornx.chc.pre.runner import BotUpAutomataRunner
 from treehornx.enum_models.Lab import ERR, OOM, Frame, Lab
 from treehornx.enum_models.Lab.initial import is_initial
@@ -14,8 +17,29 @@ from treehornx.enum_models.Lab.initial import is_initial
 
 @dataclass
 class PreRunner(BotUpAutomataRunner[Frame]):
+    sym: ChcLabUtils = field(kw_only=True)
     n: int = field(kw_only=True)
     exit_codes: frozenset[ExitCodeKind] = field(default=frozenset({ExitCodeKind.ERR}), kw_only=True)
+
+    @override
+    def node_data_symbols(self, label: Lab, prefix: str) -> list[FNode]:
+        return self.sym.label_symbols(label, prefix)
+
+    @override
+    def node_data_types(self, label: Lab) -> list[smtty.PySMTType]:
+        return [t for _ in self.sym.kept_frames(label) for t in self.sym.frame_types()]
+
+    @override
+    def node_field_symbol(self, field_id: int, index: int, prefix: str) -> FNode:
+        return self.sym.field_symbol(field_id, index, prefix)
+
+    @override
+    def node_apply(self, label: Lab, prefix: str) -> FNode:
+        return self.sym.apply(label, prefix)
+
+    @override
+    def node_consistency(self, parent: Lab, child: Lab, j: int, parent_prefix: str, child_prefix: str) -> FNode:
+        return consistency_constraint(self.sym, parent, child, j, parent_prefix, child_prefix)
 
     def label_exit(self, label: Lab) -> set[ExitCodeKind]:
         """Exit statuses of the frames of the label (label_exit, CAV25 C.3)."""

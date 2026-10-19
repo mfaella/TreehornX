@@ -233,25 +233,26 @@ def _psi_avl_template(
 
     if left_state is None and right_state is None:
         constraints.append(smt.Equals(states["height"], smt.Int(1)))
+        constraints.append(smt.Equals(fields["bal"], smt.Int(0)))
 
     elif left_state is None:
         assert right_state is not None
         constraints.append(smt.Equals(right_state["height"], smt.Int(1)))
         constraints.append(smt.Equals(states["height"], smt.Int(2)))
+        constraints.append(smt.Equals(fields["bal"], smt.Int(1)))
 
     elif right_state is None:
         assert left_state is not None
         constraints.append(smt.Equals(left_state["height"], smt.Int(1)))
         constraints.append(smt.Equals(states["height"], smt.Int(2)))
+        constraints.append(smt.Equals(fields["bal"], smt.Int(-1)))
 
     else:
         constraints.append(
             smt.Equals(states["height"], smt.Plus(smt.Max(left_state["height"], right_state["height"]), smt.Int(1)))
         )
-        diff = smt.Minus(left_state["height"], right_state["height"])
-        constraints.append(smt.And(smt.GE(diff, smt.Int(-1)), smt.LE(diff, smt.Int(1))))
-
-    constraints.append(smt.Equals(states["height"], fields["height"]))
+        diff = smt.Minus(right_state["height"], left_state["height"])
+        constraints.append(smt.Equals(fields["bal"], diff))
 
     return smt.And(bst, *constraints)
 

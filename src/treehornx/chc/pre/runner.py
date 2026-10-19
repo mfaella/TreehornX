@@ -9,10 +9,10 @@ states as `pre_p_<STATE>`, `pre_c<j>_<STATE>`, and the flag as `pre_p_e`, `pre_c
 
 from abc import ABC, abstractmethod
 from collections import defaultdict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import cached_property
 from itertools import product
-from typing import Any, Iterable, cast
+from typing import Iterable
 
 import pychc.shortcuts as chc
 import pysmt.shortcuts as smt
@@ -20,10 +20,8 @@ import pysmt.typing as smtty
 from pysmt.fnode import FNode
 
 from treehornx import ir
-from treehornx.chc.Lab.clauses import consistency_constraint
-from treehornx.chc.Lab.symbols import apply as lab_apply
-from treehornx.chc.Lab.symbols import field_symbol, frame_types, kept_frames, label_symbols
 from treehornx.chc.sdta.SDTAContext import SDTAContext
+from treehornx.enum_models.core.InternedPool import InternedPool
 from treehornx.enum_models.core.Label import Label
 from treehornx.enum_models.core.Pair import Pair
 
@@ -42,17 +40,22 @@ def data_prefix(role: str) -> str:
 @dataclass
 class BotUpAutomataRunner[F](ABC):
     function: ir.Function
-    pairs: Iterable[Pair[F]]
+    pairs: Iterable[Pair[Label[F]]]
     ctx: SDTAContext
     k: int
     m: int
     name: str = "Pre"
     accept_empty: bool = True
     """ψ_F on the nil state, checked when the root is not an input node (empty input tree)."""
+    _label_ids: InternedPool[Label[F]] = field(default_factory=InternedPool[Label[F]], init=False)
 
     def __post_init__(self) -> None:
         assert ERROR_FLAG not in self.ctx.states, f"the state name '{ERROR_FLAG}' is reserved for the error flag"
         self.pairs = list(self.pairs)
+        # labels are numbered in the order of the pairs, so predicates and clauses come out in a fixed order
+        for pair in self.pairs:
+            self._label_ids.intern(pair.parent)
+            self._label_ids.intern(pair.child)
 
     @abstractmethod
     def is_error(self, label: Label[F]) -> FNode:
@@ -78,20 +81,29 @@ class BotUpAutomataRunner[F](ABC):
     def error_symbol(self, role: str) -> FNode:
         return smt.Symbol(f"pre_{role}_{ERROR_FLAG}", smtty.BOOL)
 
-    # The node predicate the automaton runs alongside (Lab by default), its data and the consistency
-    # between a parent and a child: overridden by runners attached to other predicates.
+    # The node predicate the automaton runs alongside, its data and the consistency between a parent and
+    # its j-th child: implemented by the runner attached to each kind of label.
 
-    def node_data_symbols(self, label: Label[F], prefix: str) -> list[FNode]:
-        return label_symbols(self.function, cast(Any, label), prefix)
+    @abstractmethod
+    def node_data_symbols(self, label: Label[F], prefix: str) -> list[FNode]: ...
 
-    def node_data_types(self, label: Label[F]) -> list[smtty.PySMTType]:
-        return [t for _ in kept_frames(cast(Any, label)) for t in frame_types(self.function)]
+    @abstractmethod
+    def node_data_types(self, label: Label[F]) -> list[smtty.PySMTType]: ...
 
-    def node_apply(self, label: Label[F], prefix: str) -> FNode:
-        return lab_apply(self.function, cast(Any, label), prefix)
+    @abstractmethod
+    def node_field_symbol(self, field_id: int, index: int, prefix: str) -> FNode:
+        """The data field `field_id` of the node at the frame `index`."""
 
-    def node_consistency(self, parent: Label[F], child: Label[F], parent_prefix: str, child_prefix: str) -> FNode:
-        return consistency_constraint(self.function, cast(Any, parent), cast(Any, child), parent_prefix, child_prefix)
+    @abstractmethod
+    def node_apply(self, label: Label[F], prefix: str) -> FNode: ...
+
+    @abstractmethod
+    def node_consistency(
+        self, parent: Label[F], child: Label[F], j: int, parent_prefix: str, child_prefix: str
+    ) -> FNode: ...
+
+    def _label_id(self, label: Label[F]) -> int:
+        return self._label_ids.get_id(label)
 
     def _args(self, label: Label[F], role: str) -> list[FNode]:
         data = self.node_data_symbols(label, data_prefix(role))
@@ -102,7 +114,7 @@ class BotUpAutomataRunner[F](ABC):
         return [*data_types, *(self._smt_type(state) for state in self.ctx.states), smtty.BOOL]
 
     def predicate(self, label: Label[F]) -> FNode:
-        return chc.Predicate(f"{self.name}{label.id}", self._arg_types(label))
+        return chc.Predicate(f"{self.name}{self._label_id(label)}", self._arg_types(label))
 
     def apply(self, label: Label[F], role: str) -> FNode:
         return chc.Apply(self.predicate(label), self._args(label, role))
@@ -143,7 +155,7 @@ class BotUpAutomataRunner[F](ABC):
             for j in range(self.k)
         }
         fields = {
-            f.name: field_symbol(self.function, f.id, 1, data_prefix(PARENT)) for f in self.function.node.data_fields
+            f.name: self.node_field_symbol(f.id, 1, data_prefix(PARENT)) for f in self.function.node.data_fields
         }
         return self.ctx.psi(children_states, fields, self.state_symbols(PARENT))
 
@@ -152,7 +164,7 @@ class BotUpAutomataRunner[F](ABC):
         body = [self.node_apply(parent, data_prefix(PARENT))]
         for j, child in enumerate(children):
             body.append(self.apply(child, child_role(j)))
-            body.append(self.node_consistency(parent, child, data_prefix(PARENT), data_prefix(child_role(j))))
+            body.append(self.node_consistency(parent, child, j, data_prefix(PARENT), data_prefix(child_role(j))))
         if self.is_input_node(parent):
             body.append(self._psi(parent, children))
         errors = [self.error_symbol(child_role(j)) for j in range(len(children))]
@@ -163,7 +175,7 @@ class BotUpAutomataRunner[F](ABC):
         by_child = self.children[parent]
         if any(j not in by_child for j in range(self.k + self.m)):
             return
-        for children in product(*(sorted(by_child[j], key=lambda lab: lab.id) for j in range(self.k + self.m))):
+        for children in product(*(sorted(by_child[j], key=self._label_id) for j in range(self.k + self.m))):
             yield self.node_clause(parent, children)
 
     def query(self, root: Label[F]) -> FNode:
@@ -176,11 +188,11 @@ class BotUpAutomataRunner[F](ABC):
         return chc.Clause(body, smt.FALSE())
 
     def predicates(self) -> list[FNode]:
-        return [self.predicate(label) for label in sorted(self.labels, key=lambda lab: lab.id)]
+        return [self.predicate(label) for label in sorted(self.labels, key=self._label_id)]
 
     def clauses(self) -> list[FNode]:
         clauses: list[FNode] = []
-        for label in sorted(self.labels, key=lambda lab: lab.id):
+        for label in sorted(self.labels, key=self._label_id):
             if label in self.children:
                 clauses.extend(self.node_clauses(label))
             elif self.is_leaf(label):
@@ -188,4 +200,4 @@ class BotUpAutomataRunner[F](ABC):
         return clauses
 
     def queries(self) -> list[FNode]:
-        return [self.query(label) for label in sorted(self.labels, key=lambda lab: lab.id) if self.is_root(label)]
+        return [self.query(label) for label in sorted(self.labels, key=self._label_id) if self.is_root(label)]

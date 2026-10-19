@@ -16,7 +16,6 @@ from pychc.solvers.witness import Status
 from pychc.solvers.z3 import Z3CHCSolver
 
 from treehornx import ir
-from treehornx.chc import post
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.Lab.clauses import query
 from treehornx.chc.Lab.system import LabCHC, build_lab, to_system
@@ -26,11 +25,6 @@ from treehornx.chc.sdta.SDTAContext import (
     avl_ctx,
     bst_ctx,
     bst_strict_ctx,
-    not_avl_ctx,
-    not_bst_ctx,
-    not_bst_strict_ctx,
-    not_sll_sorted_ctx,
-    not_sll_sorted_strict_ctx,
     sll_sorted_ctx,
     sll_sorted_strict_ctx,
 )
@@ -48,11 +42,9 @@ def callback() -> None:
 
 DEFAULT_N = 128
 DEFAULT_M = 0
-DEFAULT_N_DFS = 64
 DEFAULT_ROOT = "root"
 
 PreType: TypeAlias = Literal["bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl"]
-PostType: TypeAlias = Literal["tree", "bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl"]
 
 PRE: dict[str, Callable[[], SDTAContext]] = {
     "bst": bst_ctx,
@@ -62,18 +54,7 @@ PRE: dict[str, Callable[[], SDTAContext]] = {
     "avl": avl_ctx,
 }
 
-# negations of the postconditions; "tree" checks only the shape of the output heap
-POST: dict[str, Callable[[], SDTAContext] | None] = {
-    "tree": None,
-    "bst": not_bst_ctx,
-    "bst_strict": not_bst_strict_ctx,
-    "sll_sorted": not_sll_sorted_ctx,
-    "sll_sorted_strict": not_sll_sorted_strict_ctx,
-    "avl": not_avl_ctx,
-}
-
 EXIT_CODES = (ExitCodeKind.ERR, ExitCodeKind.OOM, ExitCodeKind.LABEL_OVERFLOW)
-POST_CHECK = "POST"
 
 
 @dataclass
@@ -105,9 +86,7 @@ class Stats:
 
 
 def label_exit(label: Lab, n: int) -> set[ExitCodeKind]:
-    """Exit statuses the lace of a complete label ends with."""
-    if label.next is not None:
-        return set()
+    """Exit statuses the lace of a label ends with: ERR, OOM and overflowing frames are never followed."""
     statuses: set[ExitCodeKind] = set()
     if isinstance(label.frame.event, ERR):
         statuses.add(ExitCodeKind.ERR)
@@ -124,11 +103,11 @@ def memory_system(
     """Unsat iff some execution (on an input accepted by the precondition) ends with `exit_code`."""
     k = function.node.k
     if pre_ctx is None:
-        queries = [query(function, label) for label in lab.predicates if exit_code in label_exit(label, n)]
-        return to_system(lab.predicate_symbols(function), [*lab.clauses, *queries])
-    runner = PreRunner(function, lab.pairs, pre_ctx, k, m, n=n, exit_codes=frozenset({exit_code}))
+        queries = [query(lab.sym, label) for label in lab.predicates if exit_code in label_exit(label, n)]
+        return to_system(lab.predicate_symbols(), [*lab.clauses, *queries])
+    runner = PreRunner(function, lab.pairs, pre_ctx, k, m, sym=lab.sym, n=n, exit_codes=frozenset({exit_code}))
     return to_system(
-        [*lab.predicate_symbols(function), *runner.predicates()],
+        [*lab.predicate_symbols(), *runner.predicates()],
         [*lab.clauses, *runner.clauses(), *runner.queries()],
     )
 
@@ -155,8 +134,6 @@ def display_option_messages(
     root_name: str | None,
     n: int | None,
     m: int | None,
-    n_dfs: int | None,
-    post: str | None,
     c: int | None,
     partial_correctness: bool,
     check_sat: bool,
@@ -175,8 +152,6 @@ def display_option_messages(
         info(f"No value specified for n, using default value of {DEFAULT_N}.")
     if m is None:
         info(f"No value specified for m, using default value of {DEFAULT_M}.")
-    if n_dfs is None and post is not None:
-        info(f"No value specified for n-dfs, using default value of {DEFAULT_N_DFS}.")
     if c is not None or partial_correctness:
         critical("-c and --partial-correctness are not supported by the current encoding, they are ignored.")
     if check_sat and not any((z3, golem, eldarica)):
@@ -204,30 +179,26 @@ def check_names(function: ir.Function, function_name: str | None, root_name: str
 
 
 def display_outcome(check: str, status: Status) -> None:
-    subject = "the postcondition" if check == POST_CHECK else check
     match status:
         case Status.SAT:
-            success(f"The function is correct with respect to {subject}.")
+            success(f"The function is correct with respect to {check}.")
         case Status.UNSAT:
-            fail(f"The function is not correct with respect to {subject}.")
+            fail(f"The function is not correct with respect to {check}.")
         case _:
-            warning(f"Unknown result for {subject}.")
+            warning(f"Unknown result for {check}.")
 
 
 def verify(
     function: ir.Function,
     n: int,
     m: int,
-    n_dfs: int,
     pre_ctx: SDTAContext | None,
-    check_post: bool,
-    post_ctx: SDTAContext | None,
     smt2: bool,
     solver: CHCSolver | None,
     timeout: int | None,
 ) -> Stats:
     """Enumerates the labels, reports the exit statuses that are trivially unreachable and builds, dumps and
-    solves the CHC systems of the others and of the postcondition."""
+    solves the CHC systems of the others."""
     k = function.node.k
     stats = Stats()
 
@@ -260,8 +231,6 @@ def verify(
         for code in EXIT_CODES
         if code in reached
     ]
-    if check_post:
-        checks.append((POST_CHECK, lambda: post.make_system(function, k, m, n, n_dfs, post_ctx, pre=pre_ctx)))
 
     for check, make_system in checks:
         system, elapsed = progress(f"Creating the CHC system for {check}", make_system)
@@ -299,7 +268,6 @@ def verify_cmd(
     root_name: Annotated[str | None, typer.Option("--root", "-r")] = None,
     n: Annotated[int | None, typer.Option("-n", help="maximum number of frames per label")] = None,
     m: Annotated[int | None, typer.Option("-m", help="maximum number of nodes allocated by the function")] = None,
-    n_dfs: Annotated[int | None, typer.Option("--n-dfs", help="maximum number of frames per DFS label")] = None,
     c: Annotated[int | None, typer.Option("-c", help="not supported")] = None,
     partial_correctness: Annotated[bool, typer.Option("--partial-correctness", help="not supported")] = False,
     smt2: Annotated[bool, typer.Option("--smt2", help="dump the CHC systems as SMT-LIB2 scripts")] = False,
@@ -320,7 +288,6 @@ def verify_cmd(
         bool, typer.Option("--idg", "--internal-dep-graph", help="not supported")
     ] = False,
     pre: Annotated[PreType | None, typer.Option("--pre")] = None,
-    post_name: Annotated[PostType | None, typer.Option("--post")] = None,
     parent: Annotated[str | None, typer.Option("--parent", help="not supported")] = None,
     produce_csv: Annotated[bool, typer.Option("--csv", help="dump the statistics in a CSV file")] = False,
     produce_json: Annotated[bool, typer.Option("--json", help="dump the statistics in a JSON file")] = False,
@@ -330,8 +297,6 @@ def verify_cmd(
         root_name,
         n,
         m,
-        n_dfs,
-        post_name,
         c,
         partial_correctness,
         check_sat_flag,
@@ -353,15 +318,11 @@ def verify_cmd(
         raise typer.Exit(1)
 
     solver = make_solver(z3, golem, eldarica, solvers_dir) if check_sat_flag else None
-    post_factory = POST[post_name] if post_name is not None else None
     stats = verify(
         function,
         n or DEFAULT_N,
         m or DEFAULT_M,
-        n_dfs or DEFAULT_N_DFS,
         PRE[pre]() if pre else None,
-        post_name is not None,
-        post_factory() if post_factory else None,
         smt2,
         solver,
         timeout,
