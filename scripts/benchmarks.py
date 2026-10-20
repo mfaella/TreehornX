@@ -1,11 +1,10 @@
 """Runs every integration test case as a benchmark and dumps the measurements in a CSV file.
 
 For every case it records:
-- the time spent enumerating the labels (Lab engine, plus the DFS engine for the output checks), the time to
-  build the CHCs on top of them and to serialize the system;
-- the number of predicates (Lab, DFS, precondition) and of clauses;
+- the time spent enumerating the labels, the time to build the CHCs on top of them and to serialize the system;
+- the number of predicates (Lab, precondition) and of clauses;
 - the number of queries by type;
-- the precondition and the (negated) postcondition used;
+- the precondition used;
 - the solver time and status, compared with the status expected by the test.
 
 Usage: uv run python scripts/benchmarks.py [--timeout SECONDS] [--only SUBSTRING] [--out FILE.csv]
@@ -27,24 +26,15 @@ from pychc.solvers.witness import Status
 from pysmt.fnode import FNode
 
 from treehornx import ir
-from treehornx.chc import Lab, post, pre
+from treehornx.chc import Lab, pre
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.sdta.SDTAContext import (
     SDTAContext,
-    avl_ctx,
-    bst_ctx,
     bst_strict_ctx,
-    not_avl_ctx,
-    not_bst_ctx,
-    not_bst_strict_ctx,
-    not_sll_sorted_ctx,
-    not_sll_sorted_strict_ctx,
     sll_sorted_ctx,
     sll_sorted_strict_ctx,
 )
 from treehornx.enum_models.core.SymbolicEngine import SymbolicEngine
-from treehornx.enum_models.Dfs.Event import Acc, Conv, Dang, Loop, SelfLoop
-from treehornx.enum_models.Dfs import DfsEngine
 from treehornx.enum_models.Lab import ERR, OOM
 from treehornx.enum_models.Lab import Lab as LabLabel
 from treehornx.enum_models.Lab import LabEngine
@@ -55,9 +45,7 @@ C_FILES = ROOT / "tests" / "integration" / "c_files"
 SOLVERS = ROOT / "tests" / "integration" / "solvers"
 DEFAULT_TIMEOUT = 1800
 N = 128
-N_DFS = 64
 
-ALL_EXITS = frozenset({ExitCodeKind.ERR, ExitCodeKind.OOM, ExitCodeKind.LABEL_OVERFLOW})
 ERR_ONLY = frozenset({ExitCodeKind.ERR})
 
 type Ctx = Callable[[], SDTAContext]
@@ -74,16 +62,12 @@ class Case:
     """The integration test the case comes from."""
     program: str
     kind: str
-    """`lab` (memory safety), `pre` (memory safety under a precondition) or `post` (output checks)."""
+    """`lab` (memory safety) or `pre` (memory safety under a precondition)."""
     m: int
     expected: Status
     n: int = N
-    n_dfs: int | None = None
     pre: Ctx | None = None
-    post: Ctx | None = None
-    """Negation of the postcondition."""
     exit_codes: frozenset[ExitCodeKind] = ERR_ONLY
-    check_overflow: bool = True
 
 
 def lab_cases() -> list[Case]:
@@ -119,107 +103,7 @@ def pre_cases() -> list[Case]:
     ]
 
 
-def post_cases() -> list[Case]:
-    structure = [
-        ("sll_safe_reverse", 0, Status.SAT),
-        ("sll_safe_insert_sorted", 1, Status.SAT),
-        ("bst_safe_insert", 1, Status.SAT),
-        ("sll_unsafe_circular", 0, Status.UNSAT),
-        ("bst_unsafe_post_2", 0, Status.UNSAT),
-        ("bst_unsafe_post_1", 0, Status.UNSAT),
-    ]
-    postconditions: list[tuple[str, Ctx, int, Status]] = [
-        ("sll_post_set_zero", not_sll_sorted_ctx, 0, Status.SAT),
-        ("sll_post_set_zero", not_sll_sorted_strict_ctx, 0, Status.UNSAT),
-        ("sll_safe_find", not_sll_sorted_ctx, 0, Status.UNSAT),
-    ]
-    return [
-        *(Case("test_post_chc::test_output_is_a_tree", p, "post", m, e, n_dfs=N_DFS) for p, m, e in structure),
-        *(
-            Case("test_post_chc::test_postcondition", p, "post", m, e, n_dfs=N_DFS, post=ctx)
-            for p, ctx, m, e in postconditions
-        ),
-        *(
-            Case("test_post_chc::test_dfs_overflow", "sll_safe_reverse", "post", 0, e, n_dfs=4, check_overflow=c)
-            for c, e in [(True, Status.UNSAT), (False, Status.SAT)]
-        ),
-    ]
-
-
-def hoare_cases() -> list[Case]:
-    triples: list[tuple[str, Ctx, Ctx, int]] = [
-        ("sll_safe_insert_sorted", sll_sorted_ctx, not_sll_sorted_ctx, 1),
-        ("bst_safe_insert", bst_ctx, not_bst_ctx, 1),
-        ("avl_safe_find", avl_ctx, not_avl_ctx, 0),
-    ]
-    module = "test_hoare_chc"
-    return [
-        *(
-            Case(
-                f"{module}::test_memory_safety_and_bounds_under_precondition",
-                p,
-                "pre",
-                m,
-                Status.SAT,
-                pre=pre_ctx,
-                exit_codes=ALL_EXITS,
-            )
-            for p, pre_ctx, _, m in triples
-        ),
-        *(
-            Case(
-                f"{module}::test_postcondition_under_precondition",
-                p,
-                "post",
-                m,
-                Status.SAT,
-                n_dfs=N_DFS,
-                pre=pre_ctx,
-                post=post_ctx,
-            )
-            for p, pre_ctx, post_ctx, m in triples
-        ),
-        Case(
-            f"{module}::test_postcondition_needs_the_precondition",
-            "sll_safe_insert_sorted",
-            "post",
-            1,
-            Status.UNSAT,
-            n_dfs=N_DFS,
-            post=not_sll_sorted_ctx,
-        ),
-        Case(
-            f"{module}::test_insert_breaks_strict_bst",
-            "bst_safe_insert",
-            "post",
-            1,
-            Status.UNSAT,
-            n_dfs=N_DFS,
-            pre=bst_strict_ctx,
-            post=not_bst_strict_ctx,
-        ),
-        Case(
-            f"{module}::test_avl_safe_insert_memory_safety_under_precondition",
-            "avl_safe_insert",
-            "pre",
-            1,
-            Status.SAT,
-            pre=avl_ctx,
-        ),
-        Case(
-            f"{module}::test_avl_safe_insert_postcondition_under_precondition",
-            "avl_safe_insert",
-            "post",
-            1,
-            Status.SAT,
-            n_dfs=N_DFS,
-            pre=avl_ctx,
-            post=not_avl_ctx,
-        ),
-    ]
-
-
-CASES = [*lab_cases(), *pre_cases(), *post_cases(), *hoare_cases()]
+CASES = [*lab_cases(), *pre_cases()]
 
 
 # ---------------------------------------------------------------------------
@@ -262,18 +146,6 @@ def build_system(case: Case, function: ir.Function) -> CHCSystem:
         case "pre":
             assert case.pre is not None
             return pre.make_system(function, k, case.m, case.n, case.pre(), case.exit_codes)
-        case "post":
-            assert case.n_dfs is not None
-            return post.make_system(
-                function,
-                k,
-                case.m,
-                case.n,
-                case.n_dfs,
-                case.post() if case.post else None,
-                check_overflow=case.check_overflow,
-                pre=case.pre() if case.pre else None,
-            )
         case _:
             raise ValueError(f"unknown kind {case.kind}")
 
@@ -282,13 +154,6 @@ QUERY_TYPES = [
     "err",
     "oom",
     "lof",
-    "empty_output",
-    "dang",
-    "loop",
-    "conv",
-    "selfloop",
-    "acc",
-    "dfs_overflow",
     "pre_root",
 ]
 
@@ -322,24 +187,6 @@ def query_type(case: Case, name: str, labels: dict[int, Any]) -> str:
             return "oom"
         if len(label) == case.n + 1:
             return "lof"
-        return "empty_output"
-    if family == "Dfs":
-        assert case.n_dfs is not None
-        if len(label) == case.n_dfs + 1:
-            return "dfs_overflow"
-        match label.frame.event:
-            case Dang():
-                return "dang"
-            case Loop():
-                return "loop"
-            case Conv():
-                return "conv"
-            case SelfLoop():
-                return "selfloop"
-            case Acc():
-                return "acc"
-            case event:
-                raise ValueError(f"unexpected query on a DFS label ending with {event}")
     raise ValueError(f"unexpected query on {name}")
 
 
@@ -352,7 +199,6 @@ def run_case(case: Case, timeout: int) -> dict[str, Any]:
         system = build_system(case, function)
     build = time.perf_counter() - start
     enum_lab = enumeration[LabEngine]
-    enum_dfs = enumeration[DfsEngine] if case.kind == "post" else None
 
     families = Counter(predicate_family(p.symbol_name()) for p in system.get_predicates())
     clauses = [c.arg(0) if c.is_forall() else c for c in system.get_clauses()]
@@ -379,22 +225,17 @@ def run_case(case: Case, timeout: int) -> dict[str, Any]:
         "kind": case.kind,
         "m": case.m,
         "n": case.n,
-        "n_dfs": case.n_dfs,
         "pre": case.pre.__name__ if case.pre else None,
-        "post": case.post.__name__ if case.post else ("tree shape" if case.kind == "post" else None),
         "exit_codes": "+".join(sorted(e.name for e in case.exit_codes)) if case.kind == "pre" else None,
-        "check_dfs_overflow": case.check_overflow if case.kind == "post" else None,
         "expected": case.expected.name,
         "status": status.name,
         "as_expected": status == case.expected,
         "enum_lab_s": enum_lab,
-        "enum_dfs_s": enum_dfs,
-        "enum_total_s": enum_lab + (enum_dfs or 0.0),
-        "chc_build_s": build - enum_lab - (enum_dfs or 0.0),
+        "enum_total_s": enum_lab,
+        "chc_build_s": build - enum_lab,
         "serialize_s": serialize,
         "solver_s": solve,
         "lab_predicates": families["Lab"],
-        "dfs_predicates": families["Dfs"],
         "pre_predicates": families["Pre"],
         "predicates": sum(families.values()),
         "clauses": len(clauses),

@@ -103,7 +103,8 @@ def memory_system(
     """Unsat iff some execution (on an input accepted by the precondition) ends with `exit_code`."""
     k = function.node.k
     if pre_ctx is None:
-        queries = [query(lab.sym, label) for label in lab.predicates if exit_code in label_exit(label, n)]
+        error_labels = (label for label in lab.predicates if exit_code in label_exit(label, n))
+        queries = [q for label in error_labels if (q := query(lab.sym, label)) is not None]
         return to_system(lab.predicate_symbols(), [*lab.clauses, *queries])
     runner = PreRunner(function, lab.pairs, pre_ctx, k, m, sym=lab.sym, n=n, exit_codes=frozenset({exit_code}))
     return to_system(

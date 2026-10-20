@@ -8,11 +8,12 @@ import pysmt.typing as smtty
 from pysmt.fnode import FNode
 
 from treehornx.chc.core import ExitCodeKind
-from treehornx.chc.Lab.clauses import consistency_constraint
+from treehornx.chc.Lab.clauses import consistency_constraint, internal_constraints
 from treehornx.chc.Lab.symbols import ChcLabUtils
 from treehornx.chc.pre.runner import BotUpAutomataRunner
 from treehornx.enum_models.Lab import ERR, OOM, Frame, Lab
 from treehornx.enum_models.Lab.initial import is_initial
+from treehornx.feature_flags import ENABLE_PRE_INTERNAL_CONSTRAINTS
 
 
 @dataclass
@@ -40,6 +41,10 @@ class PreRunner(BotUpAutomataRunner[Frame]):
     @override
     def node_consistency(self, parent: Lab, child: Lab, j: int, parent_prefix: str, child_prefix: str) -> FNode:
         return consistency_constraint(self.sym, parent, child, j, parent_prefix, child_prefix)
+
+    @override
+    def node_local_constraints(self, label: Lab, prefix: str) -> list[FNode]:
+        return internal_constraints(self.sym, label, prefix) if ENABLE_PRE_INTERNAL_CONSTRAINTS else []
 
     def label_exit(self, label: Lab) -> set[ExitCodeKind]:
         """Exit statuses of the frames of the label (label_exit, CAV25 C.3)."""

@@ -103,7 +103,7 @@ class KnittedTrees:
 
 
 def generate_labels(function: ir.Function, m: int, n: int) -> KnittedTrees:
-    starts = frozenset(start_labels(function, m))
+    starts = frozenset(start_labels(function, m, n))
     backbones = frozenset(backbone_labels(function, m))
     engine = LabEngine(
         function.node.k,

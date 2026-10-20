@@ -10,9 +10,10 @@ from pysmt.fnode import FNode
 from treehornx import ir
 from treehornx.chc.Lab.clauses import external_clause, fact, internal_clause, query
 from treehornx.chc.Lab.symbols import ChcLabUtils
-from treehornx.enum_models.core.Dir import Down, Internal, Up
+from treehornx.enum_models.core.Dir import Internal
 from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.Lab import Frame, Lab, LabEngine, backbone_labels, initial_pairs, start_labels
+from treehornx.enum_models.Lab.helpers import down_links, up_links
 from treehornx.enum_models.Lab.initial import is_initial
 
 
@@ -33,21 +34,13 @@ def external_steps(pair: Pair[Lab]) -> list[tuple[Lab, Lab]]:
 
     A step is a link between a frame τ^b and the frame σ^a it follows in the lace (CHC IV/V): the receiver
     is τ^{≤b}, the sender σ^{≤a}. Links below the top frames are included, they are the steps that brought
-    the lace into or out of the internal chains of the two labels."""
+    the lace into or out of the internal chains of the two labels.
+
+    The receiver is given by the kind of link, not by the frames: a child frame entered from the parent and
+    leaving to it (e.g. a new node linked by its parent) has prev = Up but sends the lace in its up-link."""
     parent, child, j = pair.parent, pair.child, pair.j
-    steps: list[tuple[Lab, Lab]] = []
-    for c in range(2, len(child) + 1):
-        match child[c].prev:
-            case (Up(), i) if 1 <= i <= len(parent):
-                steps.append((child.cut(c), parent.cut(i)))
-            case _:
-                pass
-    for i in range(2, len(parent) + 1):
-        match parent[i].prev:
-            case (Down(j_), c) if j_ == j and 1 <= c <= len(child):
-                steps.append((parent.cut(i), child.cut(c)))
-            case _:
-                pass
+    steps: list[tuple[Lab, Lab]] = [(child.cut(c), parent.cut(i)) for i, c in down_links(parent, child, j)]
+    steps += [(parent.cut(i), child.cut(c)) for i, c in up_links(parent, child, j)]
     # both indices grow along the lace, so their sum orders the steps of the pair
     return sorted(steps, key=lambda step: len(step[0]) + len(step[1]), reverse=True)
 
@@ -62,6 +55,11 @@ class LabCHC:
     pairs: list[Pair[Lab]]
     predicates: set[Lab] = field(default_factory=set[Lab])
     clauses: list[FNode] = field(default_factory=list[FNode])
+
+    def add_clause(self, clause: FNode | None) -> None:
+        """Adds `clause`, unless the clean phase found its body unsatisfiable."""
+        if clause is not None:
+            self.clauses.append(clause)
 
     def predicate_symbols(self) -> list[FNode]:
         return [self.sym.predicate(lab) for lab in sorted(self.predicates, key=self.sym.predicate_name)]
@@ -88,9 +86,9 @@ def build_lab(function: ir.Function, k: int, m: int, n: int) -> LabCHC:
                 break
             lab.predicates.add(prefix)
             if i == 1 or (i == 2 and is_initial(prefix)):
-                lab.clauses.append(fact(lab.sym, prefix))
-            elif prefix.frame.prev is not None and prefix.frame.prev[0] == Internal():
-                lab.clauses.append(internal_clause(lab.sym, prefix))
+                lab.add_clause(fact(lab.sym, prefix))
+            elif prefix.frame.prev == Internal():
+                lab.add_clause(internal_clause(lab.sym, prefix))
 
     # external steps: walk the links of every pair, a visited step has the earlier steps of the pair visited
     visited_steps: set[tuple[Lab, Lab, int]] = set()
@@ -101,7 +99,7 @@ def build_lab(function: ir.Function, k: int, m: int, n: int) -> LabCHC:
             visited_steps.add((receiver, sender, pair.j))
             assert receiver.prefix is not None
             lab.predicates |= {receiver, receiver.prefix, sender}
-            lab.clauses.append(external_clause(lab.sym, receiver, sender, pair.j))
+            lab.add_clause(external_clause(lab.sym, receiver, sender, pair.j))
 
     return lab
 
@@ -117,5 +115,5 @@ def to_system(predicates: Iterable[FNode], clauses: Iterable[FNode]) -> CHCSyste
 
 def make_system(function: ir.Function, k: int, m: int, n: int, is_query: Callable[[Lab], bool]) -> CHCSystem:
     lab = build_lab(function, k, m, n)
-    queries = [query(lab.sym, label) for label in lab.predicates if is_query(label)]
+    queries = [q for label in lab.predicates if is_query(label) and (q := query(lab.sym, label)) is not None]
     return to_system(lab.predicate_symbols(), [*lab.clauses, *queries])

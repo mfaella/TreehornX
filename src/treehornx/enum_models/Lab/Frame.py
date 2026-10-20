@@ -14,7 +14,9 @@ class Frame:
     isnil: tuple[bool, ...]
     event: Event
     active_child: tuple[bool, ...]
-    prev: tuple[Dir, int] | None
+    prev: Dir | None
+    # direction in which the lace leaves the frame, None when it never does
+    next: Dir | None
 
     def to_mut(self) -> MutableFrame:
         return MutableFrame(
@@ -24,7 +26,8 @@ class Frame:
             list(self.isnil),
             self.event,
             list(self.active_child),
-            self.prev
+            self.prev,
+            self.next,
         )
 
 @dataclass(slots=True)
@@ -42,7 +45,9 @@ class MutableFrame:
     isnil: list[bool] | None = None
     event: Event | None = None
     active_child: list[bool] | None = None
-    prev: tuple[Dir, int] | None = None
+    prev: Dir | None = None
+    # set last, by predict_next_dir; None is a valid value (the lace never leaves the frame)
+    next: Dir | None = None
 
     def to_frozen(self) -> Frame:
         assert self.active is not None, "field 'active' of the new frame has not been set"
@@ -59,5 +64,6 @@ class MutableFrame:
             tuple(self.isnil),
             self.event,
             tuple(self.active_child),
-            self.prev
+            self.prev,
+            self.next,
         )

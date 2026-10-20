@@ -1,13 +1,13 @@
 """Auxiliary predicates and functions of the Lab encoding (CAV25, Appendix C).
 
 Positions inside a label are 1-based as in the paper: `sigma[i]` is the frame σ^i and
-`sigma[len(sigma)]` is the top frame. The `prev` link of σ^i is stored in the frame itself
-(`sigma[i].prev`); `next` links are not stored, they are implied by the `prev` links of the
-neighbouring labels.
+`sigma[len(sigma)]` is the top frame. The `prev` and `next` links of σ^i are stored in the frame
+itself as directions only: the frames they link are found by `linked_frames`.
 """
 
-from typing import Callable
+from typing import Callable, Iterator
 
+from treehornx.enum_models.core.Dir import Dir, Down, Up
 from treehornx.enum_models.Lab.Lab import Lab
 from treehornx.enum_models.Lab.Event import NOP, FieldAssignP, Here, Rewind
 from treehornx.enum_models.Lab.Frame import Frame, MutableFrame
@@ -50,6 +50,71 @@ def stop_rewind2(sigma: Lab, a: int, q1: int, q2: int) -> bool:
 def are_equal_after_rewind(sigma: Lab, a: int, p: int, q: int) -> bool:
     a_ = cur_rewind_pos(sigma, a)
     return points_here(sigma, a_, p) and points_here(sigma, a_, q)
+
+
+def rewind_target(sigma: Lab, q: int) -> int | None:
+    """a'' of rewind: the frame of σ where q was last updated, None when q is nil or points here."""
+    a = len(sigma)
+    if sigma[a].isnil[q]:
+        return None
+    a_ = cur_rewind_pos(sigma, a)
+    if points_here(sigma, a_, q):
+        return None
+    return last_upd(sigma, a_, q)
+
+
+def rewind2_target(sigma: Lab, q1: int, q2: int) -> int | None:
+    """a'' of rewind2: the latest frame of σ where q1 or q2 was updated."""
+    a = len(sigma)
+    if sigma[a].isnil[q1] or sigma[a].isnil[q2]:
+        return None
+    a_ = cur_rewind_pos(sigma, a)
+    if points_here(sigma, a_, q1) or points_here(sigma, a_, q2):
+        return None
+    return max(last_upd(sigma, a_, q1), last_upd(sigma, a_, q2))
+
+
+def rewind_special_target(sigma: Lab, r: int, a_: int) -> int | None:
+    """a'' of rewind_special: the frame of σ where r was last updated before (σ, a')."""
+    if points_here(sigma, a_, r):
+        return None
+    return last_upd(sigma, a_, r)
+
+
+# ---------------------------------------------------------------------------
+# Links between the frames of a parent and its j-th child
+# ---------------------------------------------------------------------------
+
+
+def frames_with_next(label: Lab, d: Dir) -> list[int]:
+    return [i for i, f in label.iter_indexed(1, len(label)) if f.next == d]
+
+
+def frames_with_prev(label: Lab, d: Dir) -> list[int]:
+    return [i for i, f in label.iter_indexed(1, len(label)) if f.prev == d]
+
+
+def down_links(parent: Lab, child: Lab, j: int) -> Iterator[tuple[int, int]]:
+    """Pairs (i, c) such that the lace steps from parent^i down to the frame child^c of its j-th child.
+
+    The lace is a single path, so the k-th time it leaves the parent towards the j-th child it reaches the
+    k-th frame of the child entered from above. A departure whose frame is not in the child yet has no link."""
+    yield from zip(frames_with_next(parent, Down(j)), frames_with_prev(child, Up()))
+
+
+def up_links(parent: Lab, child: Lab, j: int) -> Iterator[tuple[int, int]]:
+    """Pairs (i, c) such that the lace steps from the frame child^c of the j-th child up to parent^i."""
+    for c, i in zip(frames_with_next(child, Up()), frames_with_prev(parent, Down(j))):
+        yield i, c
+
+
+def linked_frames(parent: Lab, child: Lab, j: int) -> Iterator[tuple[int, int]]:
+    """Pairs (i, c) such that the frame parent^i and the frame child^c of its j-th child are adjacent in the lace.
+
+    The direction of a link is lost: a child frame entered from the parent and leaving to it is in two links,
+    use `down_links` and `up_links` when the direction matters."""
+    yield from down_links(parent, child, j)
+    yield from up_links(parent, child, j)
 
 
 # ---------------------------------------------------------------------------

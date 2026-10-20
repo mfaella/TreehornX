@@ -26,6 +26,8 @@ class ChcLabUtils:
     engine: LabEngine
     # every prefix of a label is a predicate, but the engine only interns the ends of internal chains
     _predicate_ids: InternedPool[Lab] = field(default_factory=InternedPool[Lab], init=False)
+    # internal_constraints of every (label, symbol prefix), built on the entry of the label's prefix
+    internal_constraints_cache: dict[tuple[Lab, str], tuple[FNode, ...]] = field(default_factory=dict, init=False)
 
     def smt_type(self, data_type: ir.DataType) -> smtty.PySMTType:
         match data_type:
@@ -56,8 +58,7 @@ class ChcLabUtils:
 
 
     def _is_internal_frame(self, label: Lab, i: int) -> bool:
-        prev = label[i].prev
-        return prev is not None and prev[0] == Internal()
+        return label[i].prev == Internal()
 
 
     def kept_frames(self, label: Lab) -> list[int]:

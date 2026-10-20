@@ -13,6 +13,7 @@ from treehornx.enum_models.core.Dir import Internal
 from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.Lab.Event import NOP, Here
 from treehornx.enum_models.Lab.Frame import Frame
+from treehornx.enum_models.Lab.next_dir import predict_next_dir
 
 
 def _first_frame(num_ptrs: int, active: bool, active_child: tuple[bool, ...]) -> Frame:
@@ -23,7 +24,8 @@ def _first_frame(num_ptrs: int, active: bool, active_child: tuple[bool, ...]) ->
         isnil=(False,) * num_ptrs,
         event=NOP(),
         active_child=active_child,
-        prev=None
+        prev=None,
+        next=None,
     )
 
 
@@ -43,11 +45,11 @@ def backbone_labels(function: ir.Function, m: int) -> Iterable[Lab]:
     yield Lab(_first_frame(num_ptrs, False, (False,) * k + (True,) * m))
 
 
-def start_labels(function: ir.Function, m: int) -> Iterable[Lab]:
+def start_labels(function: ir.Function, m: int, n: int) -> Iterable[Lab]:
     """Labels of the root holding the first frame of the lace (CHC II, predicate start).
 
     The first frame copies active and active_child from the second one (Section 3.1), the
-    second frame has prev = (−, 2) as required by initial(σ).
+    second frame has prev = − as required by initial(σ).
     """
     k, num_ptrs, root = function.node.k, len(function.pointer_vars), function.ROOT
     second_frames: list[Frame] = []
@@ -61,7 +63,8 @@ def start_labels(function: ir.Function, m: int) -> Iterable[Lab]:
                 isnil=tuple(p != root for p in range(num_ptrs)),
                 event=Here(root),
                 active_child=named + (False,) * m,
-                prev=(Internal(), 2)
+                prev=Internal(),
+                next=None,
             )
         )
     # empty input tree
@@ -73,17 +76,20 @@ def start_labels(function: ir.Function, m: int) -> Iterable[Lab]:
             isnil=(True,) * num_ptrs,
             event=NOP(),
             active_child=(False,) * (k + m),
-            prev=(Internal(), 2)
+            prev=Internal(),
+            next=None,
         )
     )
     for f2 in second_frames:
-        f1 = _first_frame(num_ptrs, f2.active, f2.active_child)
-        yield Lab(f2, prefix=Lab(f1))
+        first = Lab(_first_frame(num_ptrs, f2.active, f2.active_child))
+        second = f2.to_mut()
+        second.next = predict_next_dir(function, m, n, first, second)
+        yield Lab(second.to_frozen(), prefix=first)
 
 
 def is_initial(sigma: Lab) -> bool:
-    """initial(σ) = ¬σ.avail^2 ∧ σ.prev^2 = (−, 2)"""
-    return len(sigma) >= 2 and sigma[2].prev == (Internal(), 2)
+    """initial(σ) = ¬σ.avail^2 ∧ σ.prev^2 = −: the frames of a non-root node are all entered from above or below"""
+    return len(sigma) >= 2 and sigma[2].prev == Internal()
 
 
 def consistent_first_frames(tau: Lab, j: int, sigma: Lab, k: int) -> bool:

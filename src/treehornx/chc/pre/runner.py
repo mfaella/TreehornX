@@ -20,6 +20,7 @@ import pysmt.typing as smtty
 from pysmt.fnode import FNode
 
 from treehornx import ir
+from treehornx.chc.clean import clean_clause
 from treehornx.chc.sdta.SDTAContext import SDTAContext
 from treehornx.enum_models.core.InternedPool import InternedPool
 from treehornx.enum_models.core.Label import Label
@@ -102,6 +103,10 @@ class BotUpAutomataRunner[F](ABC):
         self, parent: Label[F], child: Label[F], j: int, parent_prefix: str, child_prefix: str
     ) -> FNode: ...
 
+    @abstractmethod
+    def node_local_constraints(self, label: Label[F], prefix: str) -> list[FNode]:
+        """Constraints between the frames of `label` that the node predicate does not take as arguments."""
+
     def _label_id(self, label: Label[F]) -> int:
         return self._label_ids.get_id(label)
 
@@ -141,11 +146,15 @@ class BotUpAutomataRunner[F](ABC):
     # clauses
     # -----------------------------------------------------------------------
 
-    def leaf_clause(self, label: Label[F]) -> FNode:
+    def leaf_clause(self, label: Label[F]) -> FNode | None:
         """Pre1: an auxiliary leaf has the nil state."""
         error = smt.Iff(self.error_symbol(PARENT), self.is_error(label))
-        body = smt.And(self.node_apply(label, data_prefix(PARENT)), error)
-        return chc.Clause(body, self.apply(label, PARENT))
+        body = [
+            self.node_apply(label, data_prefix(PARENT)),
+            *self.node_local_constraints(label, data_prefix(PARENT)),
+            error,
+        ]
+        return clean_clause(body, self.apply(label, PARENT))
 
     def _psi(self, parent: Label[F], children: tuple[Label[F], ...]) -> FNode:
         children_states = {
@@ -159,33 +168,39 @@ class BotUpAutomataRunner[F](ABC):
         }
         return self.ctx.psi(children_states, fields, self.state_symbols(PARENT))
 
-    def node_clause(self, parent: Label[F], children: tuple[Label[F], ...]) -> FNode:
+    def node_clause(self, parent: Label[F], children: tuple[Label[F], ...]) -> FNode | None:
         """Pre2: the state of an input node follows from the states of its children through ψ."""
-        body = [self.node_apply(parent, data_prefix(PARENT))]
+        body = [self.node_apply(parent, data_prefix(PARENT)), *self.node_local_constraints(parent, data_prefix(PARENT))]
         for j, child in enumerate(children):
             body.append(self.apply(child, child_role(j)))
+            body.extend(self.node_local_constraints(child, data_prefix(child_role(j))))
             body.append(self.node_consistency(parent, child, j, data_prefix(PARENT), data_prefix(child_role(j))))
         if self.is_input_node(parent):
             body.append(self._psi(parent, children))
         errors = [self.error_symbol(child_role(j)) for j in range(len(children))]
         body.append(smt.Iff(self.error_symbol(PARENT), smt.Or(*errors, self.is_error(parent))))
-        return chc.Clause(smt.And(*body), self.apply(parent, PARENT))
+        return clean_clause(body, self.apply(parent, PARENT))
 
-    def node_clauses(self, parent: Label[F]) -> Iterable[FNode]:
+    def node_clauses(self, parent: Label[F]) -> Iterable[FNode | None]:
         by_child = self.children[parent]
         if any(j not in by_child for j in range(self.k + self.m)):
             return
         for children in product(*(sorted(by_child[j], key=self._label_id) for j in range(self.k + self.m))):
             yield self.node_clause(parent, children)
 
-    def query(self, root: Label[F]) -> FNode:
+    def query(self, root: Label[F]) -> FNode | None:
         """PreQ: an accepted input tree leads to an error."""
         if self.is_input_node(root):
             accepted = self.ctx.psiF(self.state_symbols(PARENT))
         else:
             accepted = smt.Bool(self.accept_empty)
-        body = smt.And(self.apply(root, PARENT), self.error_symbol(PARENT), accepted)
-        return chc.Clause(body, smt.FALSE())
+        body = [
+            self.apply(root, PARENT),
+            *self.node_local_constraints(root, data_prefix(PARENT)),
+            self.error_symbol(PARENT),
+            accepted,
+        ]
+        return clean_clause(body, smt.FALSE())
 
     def predicates(self) -> list[FNode]:
         return [self.predicate(label) for label in sorted(self.labels, key=self._label_id)]
@@ -194,10 +209,11 @@ class BotUpAutomataRunner[F](ABC):
         clauses: list[FNode] = []
         for label in sorted(self.labels, key=self._label_id):
             if label in self.children:
-                clauses.extend(self.node_clauses(label))
-            elif self.is_leaf(label):
-                clauses.append(self.leaf_clause(label))
+                clauses.extend(c for c in self.node_clauses(label) if c is not None)
+            elif self.is_leaf(label) and (leaf := self.leaf_clause(label)) is not None:
+                clauses.append(leaf)
         return clauses
 
     def queries(self) -> list[FNode]:
-        return [self.query(label) for label in sorted(self.labels, key=self._label_id) if self.is_root(label)]
+        roots = (label for label in sorted(self.labels, key=self._label_id) if self.is_root(label))
+        return [q for root in roots if (q := self.query(root)) is not None]

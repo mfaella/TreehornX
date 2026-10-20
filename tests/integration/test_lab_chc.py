@@ -10,14 +10,13 @@ from pathlib import Path
 import pytest
 from pychc.environment import reset_env
 from pychc.solvers.witness import Status
-from pychc.solvers.eldarica import EldaricaSolver
+from pychc.solvers.z3 import Z3CHCSolver
 
 from treehornx.chc.Lab import make_system
 from treehornx.enum_models.Lab import ERR, Lab
 from treehornx.parser import parse_file
 
 C_FILES = Path(__file__).parent / "c_files"
-SOLVERS = Path(__file__).parent / "solvers"
 TIMEOUT = 120
 N = 128
 
@@ -43,6 +42,11 @@ CASES = [
     # a field compared with NULL assigned to a variable (b = p->pf == NULL)
     ("bst_safe_assign_field_nil", 0, Status.SAT),
     ("bst_unsafe_assign_field_nil", 0, Status.UNSAT),
+    # a new node linked by its parent and reached again through the field: its frame Here(q) is entered from
+    # the parent and leaves to it
+    ("bst_unsafe_linked_new", 1, Status.UNSAT),
+    # safe only under the AVL precondition (see test_pre_chc)
+    ("avl_safe_insert_bal", 1, Status.UNSAT),
 ]
 
 
@@ -57,13 +61,13 @@ def ends_with_error(label: Lab) -> bool:
     return isinstance(label.frame.event, ERR)
 
 
-@pytest.mark.skipif(shutil.which("eld", path=str(SOLVERS)) is None, reason="eldarica executable not found")
+@pytest.mark.skipif(shutil.which("z3") is None, reason="z3 executable not found")
 @pytest.mark.parametrize(("program", "m", "expected"), CASES, ids=[case[0] for case in CASES])
 def test_memory_safety(program: str, m: int, expected: Status) -> None:
     function = parse_file(str(C_FILES / f"{program}.c"))
     system = make_system(function, function.node.k, m, N, ends_with_error)
 
-    solver = EldaricaSolver(binary_path=SOLVERS)
+    solver = Z3CHCSolver()
     solver.load_system(system)
 
     assert solver.solve(timeout=TIMEOUT) == expected
