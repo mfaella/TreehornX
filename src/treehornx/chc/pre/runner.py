@@ -12,7 +12,7 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import cached_property
 from itertools import product
-from typing import Iterable
+from typing import Generic, Iterable, Iterator, TypeVar
 
 import pychc.shortcuts as chc
 import pysmt.shortcuts as smt
@@ -25,6 +25,10 @@ from treehornx.chc.sdta.SDTAContext import SDTAContext
 from treehornx.enum_models.core.InternedPool import InternedPool
 from treehornx.enum_models.core.Label import Label
 from treehornx.enum_models.core.Pair import Pair
+from treehornx.feature_flags import FeatureFlags
+
+
+F = TypeVar("F")
 
 ERROR_FLAG = "e"
 PARENT = "p"
@@ -39,7 +43,7 @@ def data_prefix(role: str) -> str:
 
 
 @dataclass
-class BotUpAutomataRunner[F](ABC):
+class BotUpAutomataRunner(ABC, Generic[F]):
     function: ir.Function
     pairs: Iterable[Pair[Label[F]]]
     ctx: SDTAContext
@@ -48,6 +52,7 @@ class BotUpAutomataRunner[F](ABC):
     name: str = "Pre"
     accept_empty: bool = True
     """ψ_F on the nil state, checked when the root is not an input node (empty input tree)."""
+    flags: FeatureFlags = field(kw_only=True)
     _label_ids: InternedPool[Label[F]] = field(default_factory=InternedPool[Label[F]], init=False)
 
     def __post_init__(self) -> None:
@@ -154,7 +159,7 @@ class BotUpAutomataRunner[F](ABC):
             *self.node_local_constraints(label, data_prefix(PARENT)),
             error,
         ]
-        return clean_clause(body, self.apply(label, PARENT))
+        return clean_clause(body, self.apply(label, PARENT), self.flags.clean_clause)
 
     def _psi(self, parent: Label[F], children: tuple[Label[F], ...]) -> FNode:
         children_states = {
@@ -163,9 +168,7 @@ class BotUpAutomataRunner[F](ABC):
             )
             for j in range(self.k)
         }
-        fields = {
-            f.name: self.node_field_symbol(f.id, 1, data_prefix(PARENT)) for f in self.function.node.data_fields
-        }
+        fields = {f.name: self.node_field_symbol(f.id, 1, data_prefix(PARENT)) for f in self.function.node.data_fields}
         return self.ctx.psi(children_states, fields, self.state_symbols(PARENT))
 
     def node_clause(self, parent: Label[F], children: tuple[Label[F], ...]) -> FNode | None:
@@ -179,7 +182,7 @@ class BotUpAutomataRunner[F](ABC):
             body.append(self._psi(parent, children))
         errors = [self.error_symbol(child_role(j)) for j in range(len(children))]
         body.append(smt.Iff(self.error_symbol(PARENT), smt.Or(*errors, self.is_error(parent))))
-        return clean_clause(body, self.apply(parent, PARENT))
+        return clean_clause(body, self.apply(parent, PARENT), self.flags.clean_clause)
 
     def node_clauses(self, parent: Label[F]) -> Iterable[FNode | None]:
         by_child = self.children[parent]
@@ -200,19 +203,18 @@ class BotUpAutomataRunner[F](ABC):
             self.error_symbol(PARENT),
             accepted,
         ]
-        return clean_clause(body, smt.FALSE())
+        return clean_clause(body, smt.FALSE(), self.flags.clean_clause)
 
     def predicates(self) -> list[FNode]:
         return [self.predicate(label) for label in sorted(self.labels, key=self._label_id)]
 
-    def clauses(self) -> list[FNode]:
-        clauses: list[FNode] = []
+    def clauses(self) -> Iterator[FNode]:
+        """Generated lazily: the product of `node_clauses` can be too large to hold in memory."""
         for label in sorted(self.labels, key=self._label_id):
             if label in self.children:
-                clauses.extend(c for c in self.node_clauses(label) if c is not None)
+                yield from (c for c in self.node_clauses(label) if c is not None)
             elif self.is_leaf(label) and (leaf := self.leaf_clause(label)) is not None:
-                clauses.append(leaf)
-        return clauses
+                yield leaf
 
     def queries(self) -> list[FNode]:
         roots = (label for label in sorted(self.labels, key=self._label_id) if self.is_root(label))

@@ -40,9 +40,10 @@ from pycparser import c_ast, c_parser
 from . import ir
 from .ir import DataType
 
+
 __all__ = ["SubsetError", "parse_program", "parse_file"]
 
-_PREAMBLE = "typedef _Bool bool; "   # kept on line 1 so line numbers match
+_PREAMBLE = "typedef _Bool bool; "  # kept on line 1 so line numbers match
 _ARITH = {"+", "-", "*", "/", "%"}
 _ORDER = {"<", "<=", ">", ">="}
 _EQ = {"==", "!="}
@@ -62,8 +63,10 @@ class SubsetError(Exception):
 
 def _strip_preprocessor_and_comments(src: str) -> str:
     """Remove comments and ``#`` lines, preserving line numbers."""
+
     def blank(m: re.Match) -> str:
         return re.sub(r"[^\n]", " ", m.group(0))
+
     src = re.sub(r"/\*.*?\*/", blank, src, flags=re.S)
     src = re.sub(r"//[^\n]*", "", src)
     src = re.sub(r"^[ \t]*#[^\n]*", "", src, flags=re.M)
@@ -103,16 +106,15 @@ class _Lowering:
         self.code: List[ir.Stmt] = []
         self.labels: List[_Label] = []
         self.named_labels: Dict[str, _Label] = {}
-        self.loops: List[Tuple[_Label, _Label]] = []   # (break, continue)
+        self.loops: List[Tuple[_Label, _Label]] = []  # (break, continue)
 
     # ------------------------------------------------------------------ top
     def run(self) -> ir.Function:
-        ext = [e for e in self.ast.ext
-               if not (isinstance(e, c_ast.Typedef) and e.name == "bool")]
+        ext = [e for e in self.ast.ext if not (isinstance(e, c_ast.Typedef) and e.name == "bool")]
         if len(ext) != 2:
             raise SubsetError(
-                "program must contain exactly one struct declaration "
-                "followed by exactly one function definition")
+                "program must contain exactly one struct declaration followed by exactly one function definition"
+            )
         sdecl, fdef = ext
         self._struct(sdecl)
         if not isinstance(fdef, c_ast.FuncDef):
@@ -124,11 +126,10 @@ class _Lowering:
         node = ir.NodeStruct(
             self.struct_name,
             tuple(sorted(self.data_fields.values(), key=lambda f: f.id)),
-            tuple(sorted(self.ptr_fields.values(), key=lambda f: f.id)))
-        pvars = tuple(ir.PointerVariable(i, n) for n, i in
-                      sorted(self.ptr_vars.items(), key=lambda kv: kv[1]))
-        dvars = tuple(ir.DataVariable(i, n, t) for n, (i, t) in
-                      sorted(self.data_vars.items(), key=lambda kv: kv[1][0]))
+            tuple(sorted(self.ptr_fields.values(), key=lambda f: f.id)),
+        )
+        pvars = tuple(ir.PointerVariable(i, n) for n, i in sorted(self.ptr_vars.items(), key=lambda kv: kv[1]))
+        dvars = tuple(ir.DataVariable(i, n, t) for n, (i, t) in sorted(self.data_vars.items(), key=lambda kv: kv[1][0]))
         return ir.Function(name, node, pvars, dvars, tuple(stmts))
 
     # ------------------------------------------------------------- types
@@ -140,21 +141,25 @@ class _Lowering:
                 return DataType.INT
             if names in (["bool"], ["_Bool"]):
                 return DataType.BOOL
-            raise SubsetError(f"{what}: unsupported type '{' '.join(names)}' "
-                              "(only int, bool and struct pointers)", t)
-        if (isinstance(t, c_ast.PtrDecl) and isinstance(t.type, c_ast.TypeDecl)
-                and isinstance(t.type.type, c_ast.Struct)):
+            raise SubsetError(f"{what}: unsupported type '{' '.join(names)}' (only int, bool and struct pointers)", t)
+        if (
+            isinstance(t, c_ast.PtrDecl)
+            and isinstance(t.type, c_ast.TypeDecl)
+            and isinstance(t.type.type, c_ast.Struct)
+        ):
             sname = t.type.type.name
             if self.struct_name and sname != self.struct_name:
-                raise SubsetError(f"{what}: pointer to 'struct {sname}', expected "
-                                  f"'struct {self.struct_name}'", t)
+                raise SubsetError(f"{what}: pointer to 'struct {sname}', expected 'struct {self.struct_name}'", t)
             return "ptr"
-        raise SubsetError(f"{what}: unsupported type (only int, bool and "
-                          "struct pointers)", t)
+        raise SubsetError(f"{what}: unsupported type (only int, bool and struct pointers)", t)
 
     def _struct(self, decl: c_ast.Node) -> None:
-        if not (isinstance(decl, c_ast.Decl) and decl.name is None
-                and isinstance(decl.type, c_ast.Struct) and decl.type.decls):
+        if not (
+            isinstance(decl, c_ast.Decl)
+            and decl.name is None
+            and isinstance(decl.type, c_ast.Struct)
+            and decl.type.decls
+        ):
             raise SubsetError("the program must start with 'struct NAME { ... };'", decl)
         st = decl.type
         self.struct_name = st.name
@@ -174,13 +179,17 @@ class _Lowering:
     def _signature(self, fdef: c_ast.FuncDef) -> str:
         fdecl = fdef.decl.type
         ret = fdecl.type
-        if not (isinstance(ret, c_ast.TypeDecl) and isinstance(ret.type, c_ast.IdentifierType)
-                and ret.type.names == ["void"]):
+        if not (
+            isinstance(ret, c_ast.TypeDecl)
+            and isinstance(ret.type, c_ast.IdentifierType)
+            and ret.type.names == ["void"]
+        ):
             raise SubsetError("the function must return void", fdef.decl)
         params = fdecl.args.params if fdecl.args else []
         if len(params) != 1 or not isinstance(params[0], c_ast.Decl):
-            raise SubsetError("the function must take exactly one parameter, the root "
-                              f"'struct {self.struct_name} *'", fdef.decl)
+            raise SubsetError(
+                f"the function must take exactly one parameter, the root 'struct {self.struct_name} *'", fdef.decl
+            )
         p = params[0]
         if self._classify(p.type, f"parameter '{p.name}'") != "ptr":
             raise SubsetError(f"the parameter must be 'struct {self.struct_name} *'", p)
@@ -227,8 +236,7 @@ class _Lowering:
             if lab.pc is None:
                 raise SubsetError(f"goto to undefined label '{name}'")
         end = len(self.code)
-        if not self.code or not isinstance(self.code[-1], ir.Exit) or \
-                any(l.pc == end for l in self.labels):
+        if not self.code or not isinstance(self.code[-1], ir.Exit) or any(l.pc == end for l in self.labels):
             self.code.append(ir.Exit())
         out: List[ir.Stmt] = []
         for s in self.code:
@@ -257,8 +265,7 @@ class _Lowering:
             else:
                 raise SubsetError(f"unsupported assignment operator '{n.op}'", n)
         elif isinstance(n, c_ast.UnaryOp) and n.op in ("p++", "++", "p--", "--"):
-            self._compound(n.expr, "+" if "+" in n.op else "-",
-                           c_ast.Constant("int", "1", coord=n.coord), n)
+            self._compound(n.expr, "+" if "+" in n.op else "-", c_ast.Constant("int", "1", coord=n.coord), n)
         elif isinstance(n, c_ast.FuncCall):
             self._call_stmt(n)
         elif isinstance(n, c_ast.If):
@@ -363,8 +370,7 @@ class _Lowering:
                 elif isinstance(rhs, c_ast.ID) and rhs.name in self.ptr_vars:
                     self._emit(ir.StorePtrField(p, fid, self.ptr_vars[rhs.name]))
                 else:
-                    raise SubsetError("a pointer field can only be assigned NULL or a "
-                                      "pointer variable", rhs)
+                    raise SubsetError("a pointer field can only be assigned NULL or a pointer variable", rhs)
             else:
                 ftype = self.data_fields[lhs.field.name].type
                 atom, t = self._atom(rhs)
@@ -381,33 +387,37 @@ class _Lowering:
         elif isinstance(rhs, c_ast.StructRef):
             q, kind, fid = self._field(rhs)
             if kind != "ptr":
-                raise SubsetError(f"'{rhs.field.name}' is a data field; cannot assign "
-                                  "it to a pointer", rhs)
+                raise SubsetError(f"'{rhs.field.name}' is a data field; cannot assign it to a pointer", rhs)
             self._emit(ir.LoadPtrField(p, q, fid))
         elif self._is_malloc(rhs):
             self._emit(ir.New(p))
         else:
-            raise SubsetError("a pointer variable can only be assigned NULL, a pointer "
-                              f"variable, 'q->field' or malloc(sizeof(struct "
-                              f"{self.struct_name}))", rhs)
+            raise SubsetError(
+                "a pointer variable can only be assigned NULL, a pointer "
+                f"variable, 'q->field' or malloc(sizeof(struct "
+                f"{self.struct_name}))",
+                rhs,
+            )
 
     def _assign_data(self, name: str, rhs: c_ast.Node, at) -> None:
         d, dtype = self.data_vars[name]
         if isinstance(rhs, c_ast.StructRef):
             q, kind, fid = self._field(rhs)
             if kind == "ptr":
-                raise SubsetError(f"'{rhs.field.name}' is a pointer field; cannot "
-                                  "assign it to a data variable", rhs)
+                raise SubsetError(f"'{rhs.field.name}' is a pointer field; cannot assign it to a data variable", rhs)
             self._check(self.data_fields[rhs.field.name].type, dtype, rhs, f"'{name}'")
             self._emit(ir.LoadDataField(d, q, fid))
             return
         if self._mentions_heap(rhs):
             cond = self._heap_atom(rhs)
             if cond is None:
-                raise SubsetError("a heap condition assigned to a variable must be a "
-                                  "single comparison (p == q, p != q, p == NULL, "
-                                  "p != NULL, p->f == NULL, p->f != NULL); combine "
-                                  "results with separate statements", rhs)
+                raise SubsetError(
+                    "a heap condition assigned to a variable must be a "
+                    "single comparison (p == q, p != q, p == NULL, "
+                    "p != NULL, p->f == NULL, p->f != NULL); combine "
+                    "results with separate statements",
+                    rhs,
+                )
             self._check(DataType.BOOL, dtype, rhs, f"'{name}'")
             self._emit(ir.AssignCond(d, cond))
             return
@@ -417,8 +427,7 @@ class _Lowering:
 
     def _compound(self, lhs: c_ast.Node, op: str, rhs: c_ast.Node, at) -> None:
         if not (isinstance(lhs, c_ast.ID) and lhs.name in self.data_vars):
-            raise SubsetError("compound assignment / ++ / -- only apply to data "
-                              "variables", at)
+            raise SubsetError("compound assignment / ++ / -- only apply to data variables", at)
         d, dtype = self.data_vars[lhs.name]
         self._check(dtype, DataType.INT, lhs, f"operator '{op}'")
         e, t = self._dexpr(rhs)
@@ -435,8 +444,7 @@ class _Lowering:
         if n.type != "->":
             raise SubsetError("use 'p->field' (the '.' operator is not supported)", n)
         if not isinstance(n.name, c_ast.ID):
-            raise SubsetError("chained dereferences are not allowed; use an "
-                              "auxiliary pointer variable", n)
+            raise SubsetError("chained dereferences are not allowed; use an auxiliary pointer variable", n)
         p = self._ptr_var(n.name, "the dereferenced expression")
         f = n.field.name
         if f in self.ptr_fields:
@@ -456,18 +464,20 @@ class _Lowering:
             if self._classify(n.to_type.type, "cast") != "ptr":
                 raise SubsetError("malloc result must be cast to a node pointer", n)
             n = n.expr
-        if not (isinstance(n, c_ast.FuncCall) and isinstance(n.name, c_ast.ID)
-                and n.name.name == "malloc"):
+        if not (isinstance(n, c_ast.FuncCall) and isinstance(n.name, c_ast.ID) and n.name.name == "malloc"):
             return False
         args = n.args.exprs if n.args else []
-        ok = (len(args) == 1 and isinstance(args[0], c_ast.UnaryOp)
-              and args[0].op == "sizeof" and isinstance(args[0].expr, c_ast.Typename)
-              and isinstance(args[0].expr.type, c_ast.TypeDecl)
-              and isinstance(args[0].expr.type.type, c_ast.Struct)
-              and args[0].expr.type.type.name == self.struct_name)
+        ok = (
+            len(args) == 1
+            and isinstance(args[0], c_ast.UnaryOp)
+            and args[0].op == "sizeof"
+            and isinstance(args[0].expr, c_ast.Typename)
+            and isinstance(args[0].expr.type, c_ast.TypeDecl)
+            and isinstance(args[0].expr.type.type, c_ast.Struct)
+            and args[0].expr.type.type.name == self.struct_name
+        )
         if not ok:
-            raise SubsetError(f"malloc must be called as malloc(sizeof(struct "
-                              f"{self.struct_name}))", n)
+            raise SubsetError(f"malloc must be called as malloc(sizeof(struct {self.struct_name}))", n)
         return True
 
     def _mentions_heap(self, n: c_ast.Node) -> bool:
@@ -495,9 +505,12 @@ class _Lowering:
                 return self._field_is_nil(n.right, neg)
             for side in (n.left, n.right):
                 if isinstance(side, c_ast.StructRef):
-                    raise SubsetError("a field can only be compared with NULL "
-                                      "('p->field == NULL'); load the field into a "
-                                      "variable first", side)
+                    raise SubsetError(
+                        "a field can only be compared with NULL "
+                        "('p->field == NULL'); load the field into a "
+                        "variable first",
+                        side,
+                    )
             lp = isinstance(n.left, c_ast.ID) and n.left.name in self.ptr_vars
             rp = isinstance(n.right, c_ast.ID) and n.right.name in self.ptr_vars
             if lp and rp:
@@ -506,17 +519,15 @@ class _Lowering:
                 return ir.IsNil(self.ptr_vars[n.left.name], neg)
             if ln and rp:
                 return ir.IsNil(self.ptr_vars[n.right.name], neg)
-            if (lp or rp or ln or rn):
-                raise SubsetError("pointers can only be compared with pointer "
-                                  "variables or NULL", n)
+            if lp or rp or ln or rn:
+                raise SubsetError("pointers can only be compared with pointer variables or NULL", n)
         return None
 
     def _field_is_nil(self, n: c_ast.StructRef, negated: bool) -> ir.FieldIsNil:
         """p->pf == NULL (or != NULL when negated), pf a pointer field."""
         p, kind, fid = self._field(n)
         if kind != "ptr":
-            raise SubsetError(f"'{n.field.name}' is a data field; only pointer fields "
-                              "can be compared with NULL", n)
+            raise SubsetError(f"'{n.field.name}' is a data field; only pointer fields can be compared with NULL", n)
         return ir.FieldIsNil(p, fid, negated)
 
     # -------------------------------------------------------- conditions
@@ -527,14 +538,14 @@ class _Lowering:
             e, t = self._dexpr(n)
             self._check(t, DataType.BOOL, n, "condition")
             c = ir.DataCond(e) if when else ir.negate(ir.DataCond(e))
-            if isinstance(c.expr, ir.Const):        # constant folding
+            if isinstance(c.expr, ir.Const):  # constant folding
                 if c.expr.value:
                     self._emit(ir.Goto(target))
                 return
             self._emit(ir.IfGoto(c, target))
             return
         if isinstance(n, c_ast.BinaryOp) and n.op in _LOGIC:
-            short = n.op == "||"     # value that short-circuits
+            short = n.op == "||"  # value that short-circuits
             if when == short:
                 self._jump(n.left, target, when)
                 self._jump(n.right, target, when)
@@ -549,9 +560,12 @@ class _Lowering:
             return
         c = self._heap_atom(n)
         if c is None:
-            raise SubsetError("unsupported condition: use pointer comparisons, NULL "
-                              "checks and Boolean data expressions over variables "
-                              "(load fields into variables first)", n)
+            raise SubsetError(
+                "unsupported condition: use pointer comparisons, NULL "
+                "checks and Boolean data expressions over variables "
+                "(load fields into variables first)",
+                n,
+            )
         self._emit(ir.IfGoto(c if when else ir.negate(c), target))
 
     # -------------------------------------------------- data expressions
@@ -560,9 +574,12 @@ class _Lowering:
         if isinstance(e, ir.UnOp) and e.op == "-" and isinstance(e.operand, ir.Const):
             e = ir.Const(-e.operand.value, DataType.INT)
         if not isinstance(e, (ir.Var, ir.Const)):
-            raise SubsetError("a data field can only be assigned a variable or a "
-                              "constant; compute the expression into a variable "
-                              "first", n)
+            raise SubsetError(
+                "a data field can only be assigned a variable or a "
+                "constant; compute the expression into a variable "
+                "first",
+                n,
+            )
         return e, t
 
     def _dexpr(self, n: c_ast.Node) -> Tuple[ir.DataExpr, DataType]:
@@ -581,8 +598,7 @@ class _Lowering:
                 d, t = self.data_vars[n.name]
                 return ir.Var(d), t
             if n.name in self.ptr_vars or n.name == "NULL":
-                raise SubsetError(f"pointer '{n.name}' cannot appear in a data "
-                                  "expression", n)
+                raise SubsetError(f"pointer '{n.name}' cannot appear in a data expression", n)
             raise SubsetError(f"undeclared variable '{n.name}'", n)
         if isinstance(n, c_ast.UnaryOp):
             if n.op in ("-", "+"):
@@ -614,8 +630,9 @@ class _Lowering:
                 return ir.BinOp(n.op, l, r), DataType.BOOL
             raise SubsetError(f"unsupported operator '{n.op}'", n)
         if isinstance(n, c_ast.StructRef):
-            raise SubsetError("field accesses cannot appear inside an expression; "
-                              "load the field into a variable first", n)
+            raise SubsetError(
+                "field accesses cannot appear inside an expression; load the field into a variable first", n
+            )
         raise SubsetError(f"unsupported expression ({type(n).__name__})", n)
 
     @staticmethod

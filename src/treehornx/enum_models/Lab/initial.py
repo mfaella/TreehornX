@@ -8,11 +8,11 @@ from itertools import product
 from typing import Iterable
 
 from treehornx import ir
-from treehornx.enum_models.Lab.Lab import Lab
 from treehornx.enum_models.core.Dir import Internal
 from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.Lab.Event import NOP, Here
 from treehornx.enum_models.Lab.Frame import Frame
+from treehornx.enum_models.Lab.Lab import Lab
 from treehornx.enum_models.Lab.next_dir import predict_next_dir
 
 
@@ -29,6 +29,13 @@ def _first_frame(num_ptrs: int, active: bool, active_child: tuple[bool, ...]) ->
     )
 
 
+def input_shapes(function: ir.Function) -> Iterable[tuple[bool, ...]]:
+    """active_child flags of the first k children of an input node: a field declared nil by default never points
+    to an input child."""
+    nil_fields = function.node.nil_fields
+    return product(*(((False,) if j in nil_fields else (True, False)) for j in range(function.node.k)))
+
+
 def backbone_labels(function: ir.Function, m: int) -> Iterable[Lab]:
     """Labels of non-root nodes before the lace reaches them (CHC I).
 
@@ -36,11 +43,11 @@ def backbone_labels(function: ir.Function, m: int) -> Iterable[Lab]:
                      ¬f.active ∧ ∧_{j∈[k+1,k+m]} f.active_child_j
 
     The active_child flags of the first k children of an active node encode the shape of
-    the input tree, so every combination is generated; for an inactive node they are
-    unconstrained and default to False.
+    the input tree, so every combination is generated (see `input_shapes`); for an inactive
+    node they are unconstrained and default to False.
     """
     k, num_ptrs = function.node.k, len(function.pointer_vars)
-    for named in product((True, False), repeat=k):
+    for named in input_shapes(function):
         yield Lab(_first_frame(num_ptrs, True, named + (False,) * m))
     yield Lab(_first_frame(num_ptrs, False, (False,) * k + (True,) * m))
 
@@ -54,7 +61,7 @@ def start_labels(function: ir.Function, m: int, n: int) -> Iterable[Lab]:
     k, num_ptrs, root = function.node.k, len(function.pointer_vars), function.ROOT
     second_frames: list[Frame] = []
     # non-empty input tree
-    for named in product((True, False), repeat=k):
+    for named in input_shapes(function):
         second_frames.append(
             Frame(
                 active=True,

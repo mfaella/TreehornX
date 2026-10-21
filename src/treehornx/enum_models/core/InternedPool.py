@@ -1,13 +1,13 @@
-
 from dataclasses import dataclass, field
-
 from itertools import count
-from typing import Iterator
+from typing import Generic, Iterator, TypeVar
+
+
+T = TypeVar("T")
 
 
 @dataclass
-class InternedPool[T]:
-
+class InternedPool(Generic[T]):
     _pool: dict[T, tuple[T, int]] = field(default_factory=dict, init=False)
 
     def intern(self, item: T) -> T:
@@ -37,9 +37,11 @@ class InternedPool[T]:
         """Return True if `item` is in the pool."""
         return item in self._pool
 
+
 @dataclass
-class InternedPoolView[T]:
+class InternedPoolView(Generic[T]):
     """A view of an InternedPool that allows iteration and length checking, but not modification."""
+
     _pool: InternedPool[T]
 
     def __iter__(self) -> Iterator[T]:

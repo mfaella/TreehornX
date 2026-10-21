@@ -9,6 +9,7 @@ from treehornx.enum_models.Lab.helpers import frames_with_prev, linked_frames
 from treehornx.enum_models.Lab.initial import is_initial
 from treehornx.parser import parse_file
 
+
 C_FILES = Path(__file__).parents[2] / "integration" / "c_files"
 N = 24
 

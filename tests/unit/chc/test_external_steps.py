@@ -8,7 +8,9 @@ from pychc.environment import reset_env
 
 from treehornx.chc.Lab import LabCHC, build_lab, external_steps
 from treehornx.enum_models.core.Dir import Down, Internal, Up
+from treehornx.feature_flags import FeatureFlags
 from treehornx.parser import parse_file
+
 
 C_FILES = Path(__file__).parents[2] / "integration" / "c_files"
 N = 128
@@ -18,7 +20,7 @@ N = 128
 def lab() -> Iterator[LabCHC]:
     reset_env()
     function = parse_file(str(C_FILES / "bst_unsafe_linked_new.c"))
-    yield build_lab(function, function.node.k, 1, N)
+    yield build_lab(function, function.node.k, 1, N, FeatureFlags())
 
 
 def test_receiver_follows_sender(lab: LabCHC) -> None:

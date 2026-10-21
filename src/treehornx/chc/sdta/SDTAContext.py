@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import Callable, Literal
 
 from loguru import logger
+from pysmt.fnode import FNode
 
 from treehornx.chc.sdta.psi import (
     PsiFType,
@@ -15,9 +16,11 @@ from treehornx.chc.sdta.psi import (
     psi_avl,
     psi_bst,
     psi_bst_strict,
+    psi_rb,
     psi_sll_sorted,
     psi_sll_sorted_strict,
     psiF_empty,
+    root_is_black,
 )
 from treehornx.enum_models.core.Label import Label
 
@@ -27,7 +30,6 @@ class SDTAContext:
     psi: PsiType
     psiF: PsiFType
     states: dict[str, Literal["int", "bool"]]
-
 
 
 def bst_ctx() -> SDTAContext:
@@ -96,5 +98,23 @@ def avl_ctx() -> SDTAContext:
 def not_avl_ctx() -> SDTAContext:
     logger.debug("Creating not-AVL context")
     psi, psiF = not_psi_avl, error_psiF  # noqa: N806
-    states: dict[str, Literal["int", "bool"]] = {"min": "int", "max": "int", "data": "int", "height": "int", "error": "bool"}
+    states: dict[str, Literal["int", "bool"]] = {
+        "min": "int",
+        "max": "int",
+        "data": "int",
+        "height": "int",
+        "error": "bool",
+    }
+    return SDTAContext(psi, psiF, states)
+
+
+def rb_ctx() -> SDTAContext:
+    psi, psiF = psi_rb, root_is_black  # noqa: N806
+    states: dict[str, Literal["int", "bool"]] = {
+        "min": "int",
+        "max": "int",
+        "data": "int",
+        "black_height": "int",
+        "red": "bool",
+    }
     return SDTAContext(psi, psiF, states)

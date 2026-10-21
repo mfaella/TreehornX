@@ -8,9 +8,10 @@ itself as directions only: the frames they link are found by `linked_frames`.
 from typing import Callable, Iterator
 
 from treehornx.enum_models.core.Dir import Dir, Down, Up
-from treehornx.enum_models.Lab.Lab import Lab
 from treehornx.enum_models.Lab.Event import NOP, FieldAssignP, Here, Rewind
 from treehornx.enum_models.Lab.Frame import Frame, MutableFrame
+from treehornx.enum_models.Lab.Lab import Lab
+
 
 # ---------------------------------------------------------------------------
 # Rewinding the lace (C.7)
@@ -164,10 +165,7 @@ def field_is_nil(sigma: Lab, a: int, pfield: int) -> bool:
 
 def upd_since(sigma: Lab, a_: int, a: int, p: int) -> bool:
     """∨_{c∈[a',a]} σ^c.event = ⟨p := here⟩ ∨ ∨_{c∈[a'+1,a]} σ^c.upd_p"""
-    return (
-        any(f.event == Here(p) for f in reversed(sigma[a_:a])) or
-        any(f.upd[p] for f in reversed(sigma[a_+1:a]))
-    )
+    return any(f.event == Here(p) for f in reversed(sigma[a_:a])) or any(f.upd[p] for f in reversed(sigma[a_ + 1 : a]))
 
 
 # ---------------------------------------------------------------------------

@@ -7,17 +7,18 @@ substituted, then body and head are simplified separately (simplifying `Implies(
 """
 
 from dataclasses import dataclass, field
-from typing import Iterable
+from typing import Generic, Iterable, TypeVar
 
 import pychc.shortcuts as chc
 import pysmt.shortcuts as smt
 from pysmt.fnode import FNode
 
-from treehornx.feature_flags import ENABLE_CLEAN_CLAUSE
+
+T = TypeVar("T")
 
 
 @dataclass
-class UnionFind[T]:
+class UnionFind(Generic[T]):
     _parent: dict[T, T] = field(default_factory=dict)
     _rank: dict[T, int] = field(default_factory=dict)
 
@@ -65,11 +66,12 @@ def _is_variable(node: FNode) -> bool:
     return node.is_symbol() and not node.symbol_type().is_function_type()
 
 
-def clean_clause(body: Iterable[FNode], head: FNode) -> FNode | None:
+def clean_clause(body: Iterable[FNode], head: FNode, enabled: bool) -> FNode | None:
     """The clause body → head with every class of equal variables replaced by a fresh variable.
 
-    Returns None when the body simplifies to false: the clause is valid and says nothing."""
-    if not ENABLE_CLEAN_CLAUSE:
+    Returns None when the body simplifies to false: the clause is valid and says nothing. When not `enabled` the
+    clause is returned as is."""
+    if not enabled:
         return chc.Clause(smt.And(*body), head)
     flat = [c for formula in body for c in conjuncts(formula)]
     classes = UnionFind[FNode]()

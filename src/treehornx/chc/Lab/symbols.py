@@ -15,10 +15,11 @@ import pysmt.typing as smtty
 from pysmt.fnode import FNode
 
 from treehornx import ir
-from treehornx.enum_models.Lab.LabEngine import LabEngine
-from treehornx.enum_models.core.InternedPool import InternedPool
 from treehornx.enum_models.core.Dir import Internal
+from treehornx.enum_models.core.InternedPool import InternedPool
 from treehornx.enum_models.Lab import Lab
+from treehornx.enum_models.Lab.LabEngine import LabEngine
+
 
 @dataclass
 class ChcLabUtils:
@@ -36,30 +37,23 @@ class ChcLabUtils:
             case ir.DataType.BOOL:
                 return smtty.BOOL
 
-
     def var_symbol(self, var_id: int, index: int, prefix: str = "") -> FNode:
         return smt.Symbol(f"{prefix}v{var_id}_{index}", self.smt_type(self.function.data_var_type(var_id)))
-
 
     def field_symbol(self, field_id: int, index: int, prefix: str = "") -> FNode:
         return smt.Symbol(f"{prefix}f{field_id}_{index}", self.smt_type(self.function.data_field_type(field_id)))
 
-
     def var_symbols(self, index: int, prefix: str = "") -> list[FNode]:
         return [self.var_symbol(v.id, index, prefix) for v in self.function.data_vars]
-
 
     def field_symbols(self, index: int, prefix: str = "") -> list[FNode]:
         return [self.field_symbol(f.id, index, prefix) for f in self.function.node.data_fields]
 
-
     def frame_symbols(self, index: int, prefix: str = "") -> list[FNode]:
         return self.var_symbols(index, prefix) + self.field_symbols(index, prefix)
 
-
     def _is_internal_frame(self, label: Lab, i: int) -> bool:
         return label[i].prev == Internal()
-
 
     def kept_frames(self, label: Lab) -> list[int]:
         """Positions of the frames whose data are arguments of the predicate of `label`.
@@ -68,34 +62,33 @@ class ChcLabUtils:
         intermediate frame of an internal chain. Frames linked to other nodes are always kept."""
         a = len(label)
         return [
-            i for i in range(1, a + 1) if i == a or not (self._is_internal_frame(label, i) and self._is_internal_frame(label, i + 1))
+            i
+            for i in range(1, a + 1)
+            if i == a or not (self._is_internal_frame(label, i) and self._is_internal_frame(label, i + 1))
         ]
-
 
     def label_symbols(self, label: Lab, prefix: str = "") -> list[FNode]:
         return [s for i in self.kept_frames(label) for s in self.frame_symbols(i, prefix)]
-
 
     def _label_id(self, label: Lab) -> int:
         self._predicate_ids.intern(label)
         return self._predicate_ids.get_id(label)
 
-
     def predicate_name(self, label: Lab) -> str:
         return f"Lab{self._label_id(label)}"
 
-
     def frame_types(self) -> list[smtty.PySMTType]:
-        return [self.smt_type(v.type) for v in self.function.data_vars] + [self.smt_type(f.type) for f in self.function.node.data_fields]
-
+        return [self.smt_type(v.type) for v in self.function.data_vars] + [
+            self.smt_type(f.type) for f in self.function.node.data_fields
+        ]
 
     def predicate(self, label: Lab) -> FNode:
-        return chc.Predicate(self.predicate_name(label), [t for _ in self.kept_frames(label) for t in self.frame_types()])
-
+        return chc.Predicate(
+            self.predicate_name(label), [t for _ in self.kept_frames(label) for t in self.frame_types()]
+        )
 
     def apply(self, label: Lab, prefix: str = "") -> FNode:
         return chc.Apply(self.predicate(label), self.label_symbols(label, prefix))
-
 
     _BINARY_OPS: ClassVar[dict[str, Callable[[FNode, FNode], FNode]]] = {
         "+": smt.Plus,
@@ -112,7 +105,6 @@ class ChcLabUtils:
         "&&": smt.And,
         "||": smt.Or,
     }
-
 
     def expr_to_smt(self, expr: ir.DataExpr, index: int, prefix: str = "") -> FNode:
         """`expr` with every data variable evaluated at the frame `index`."""

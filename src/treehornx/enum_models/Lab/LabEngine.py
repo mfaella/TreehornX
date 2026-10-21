@@ -22,16 +22,16 @@ advance the pc and data conditions take both branches.
 
 from dataclasses import dataclass, field, replace
 from functools import cached_property
-from typing import Iterable, override
+from typing import Iterable
+
+from typing_extensions import override
 
 from treehornx import ir
-from treehornx.enum_models.Lab.Lab import Lab
-from treehornx.enum_models.Lab.ExitCode import ExitCode
-from treehornx.enum_models.Lab.initial import backbone_labels, initial_pairs, start_labels
 from treehornx.enum_models.core.Dir import Dir, Down, Internal, Up
 from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.core.SymbolicEngine import SymbolicEngine
 from treehornx.enum_models.Lab.Event import ERR, OOM, FieldAssignP, Here, Rewind, RwdSpec
+from treehornx.enum_models.Lab.ExitCode import ExitCode
 from treehornx.enum_models.Lab.Frame import Frame, MutableFrame
 from treehornx.enum_models.Lab.helpers import (
     are_equal_after_rewind,
@@ -40,8 +40,8 @@ from treehornx.enum_models.Lab.helpers import (
     field_is_nil,
     frames_with_next,
     frames_with_prev,
-    is_pfield_implicit,
     get_pfield_ptr,
+    is_pfield_implicit,
     isnil_with,
     points_here,
     rewind2_target,
@@ -52,6 +52,8 @@ from treehornx.enum_models.Lab.helpers import (
     up_links,
     upd_since,
 )
+from treehornx.enum_models.Lab.initial import backbone_labels, initial_pairs, start_labels
+from treehornx.enum_models.Lab.Lab import Lab
 from treehornx.enum_models.Lab.next_dir import predict_next_dir
 
 
@@ -268,9 +270,9 @@ class LabEngine(SymbolicEngine[Lab]):
             case ir.AssignPtr(p, q):
                 return self.step_assgn_ptr_ext(sigma, tau, j, p, q, d)
             case ir.LoadPtrField(p, q, pfield):
-                return self.step_assgn_from_field_ext(sigma, tau, j, p, q, pfield, d) or self.step_assgn_from_field_down(
+                return self.step_assgn_from_field_ext(
                     sigma, tau, j, p, q, pfield, d
-                )
+                ) or self.step_assgn_from_field_down(sigma, tau, j, p, q, pfield, d)
             case ir.StoreNilField(p, _) | ir.StorePtrField(p, _, _):
                 return self.step_assgn_to_field_ext(sigma, tau, j, p, d)
             case ir.StoreDataField(p, _, _):
@@ -339,9 +341,7 @@ class LabEngine(SymbolicEngine[Lab]):
         f__ = MutableFrame(event=OOM())
         return default("active", "pc", "isnil", "active_child")(f, f, f__)
 
-    def step_new_down(
-        self, sigma: Lab, tau: Lab, j: int, p: int, expected_next_dir: Dir
-    ) -> MutableFrame | None:
+    def step_new_down(self, sigma: Lab, tau: Lab, j: int, p: int, expected_next_dir: Dir) -> MutableFrame | None:
         """new p, Case 2: normal case"""
         f, f_ = sigma.frame, tau.frame
         free = next((i for i in self.aux_children if not f.active_child[i]), None)
@@ -354,9 +354,7 @@ class LabEngine(SymbolicEngine[Lab]):
         f__ = self.advance_pc(f, f__)
         return default("active_child")(f, f_, f__)
 
-    def step_local_branch_int(
-        self, sigma: Lab, expr: ir.DataExpr, expected_next_dir: Dir
-    ) -> list[MutableFrame | None]:
+    def step_local_branch_int(self, sigma: Lab, expr: ir.DataExpr, expected_next_dir: Dir) -> list[MutableFrame | None]:
         """if r(exp_1, ..., exp_l): data are not tracked, so a non-constant condition takes both branches"""
         f1 = sigma.frame
         if expected_next_dir != Internal():
@@ -391,9 +389,7 @@ class LabEngine(SymbolicEngine[Lab]):
             return None
         return self.error(sigma.frame, expected_next_dir)
 
-    def find_or_fail_ext(
-        self, sigma: Lab, tau: Lab, j: int, p: int, expected_next_dir: Dir
-    ) -> MutableFrame | None:
+    def find_or_fail_ext(self, sigma: Lab, tau: Lab, j: int, p: int, expected_next_dir: Dir) -> MutableFrame | None:
         """find_or_fail, finding case: start or keep rewinding"""
         return self.rewind(sigma, tau, j, p, expected_next_dir)
 
@@ -414,9 +410,7 @@ class LabEngine(SymbolicEngine[Lab]):
         """p := q, Case 2: q points elsewhere; start or keep rewinding"""
         return self.rewind(sigma, tau, j, q, expected_next_dir)
 
-    def _store_field(
-        self, sigma: Lab, p: int, event: FieldAssignP, expected_next_dir: Dir
-    ) -> MutableFrame | None:
+    def _store_field(self, sigma: Lab, p: int, event: FieldAssignP, expected_next_dir: Dir) -> MutableFrame | None:
         """p points to the current node: stores `event` in a new frame"""
         f, a = sigma.frame, len(sigma)
         if not stop_rewind(sigma, a, p) or expected_next_dir != Internal():
@@ -494,9 +488,7 @@ class LabEngine(SymbolicEngine[Lab]):
         f2.isnil = [True if points_here(sigma, a, q) else f.isnil[q] for q in self.pointers]
         return default("event", "active_child")(f, f, f2)
 
-    def step_free_ext(
-        self, sigma: Lab, tau: Lab, j: int, p: int, expected_next_dir: Dir
-    ) -> MutableFrame | None:
+    def step_free_ext(self, sigma: Lab, tau: Lab, j: int, p: int, expected_next_dir: Dir) -> MutableFrame | None:
         """free p"""
         return self.find_or_fail_ext(sigma, tau, j, p, expected_next_dir)
 
@@ -605,9 +597,7 @@ class LabEngine(SymbolicEngine[Lab]):
     # Boolean conditions and control-flow instructions (C.6)
     # -----------------------------------------------------------------------
 
-    def step_cmp_ptr_int(
-        self, sigma: Lab, p: int, q: int, neg: bool, expected_next_dir: Dir
-    ) -> MutableFrame | None:
+    def step_cmp_ptr_int(self, sigma: Lab, p: int, q: int, neg: bool, expected_next_dir: Dir) -> MutableFrame | None:
         """if p = q (neg = False) / if p != q (neg = True)"""
         f, a = sigma.frame, len(sigma)
         if expected_next_dir != Internal():
@@ -663,9 +653,7 @@ class LabEngine(SymbolicEngine[Lab]):
     # Rewinding the lace (C.7)
     # -----------------------------------------------------------------------
 
-    def rewind_origin(
-        self, sigma: Lab, tau: Lab, j: int, a__: int | None, expected_next_dir: Dir
-    ) -> int | None:
+    def rewind_origin(self, sigma: Lab, tau: Lab, j: int, a__: int | None, expected_next_dir: Dir) -> int | None:
         """Part shared by rewind, rewind2 and rewind_special, returns b' such that
 
         σ^{a''}.prev = dir ∧ dir = expected_next_dir ≠ − ∧ τ^{b'} is linked to σ^{a''}
@@ -695,9 +683,7 @@ class LabEngine(SymbolicEngine[Lab]):
         f2 = MutableFrame(event=Rewind(b_))
         return default("active", "pc", "isnil", "active_child")(f, tau.frame, f2)
 
-    def rewind2(
-        self, sigma: Lab, tau: Lab, j: int, q1: int, q2: int, expected_next_dir: Dir
-    ) -> MutableFrame | None:
+    def rewind2(self, sigma: Lab, tau: Lab, j: int, q1: int, q2: int, expected_next_dir: Dir) -> MutableFrame | None:
         f = sigma.frame
         b_ = self.rewind_origin(sigma, tau, j, rewind2_target(sigma, q1, q2), expected_next_dir)
         if b_ is None:

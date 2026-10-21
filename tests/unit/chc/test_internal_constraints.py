@@ -10,7 +10,9 @@ from treehornx.chc.Lab.clauses import SIGMA_PREFIX
 from treehornx.enum_models.core.Dir import Internal
 from treehornx.enum_models.Lab import Lab
 from treehornx.enum_models.Lab.initial import is_initial
+from treehornx.feature_flags import FeatureFlags
 from treehornx.parser import parse_file
+
 
 C_FILES = Path(__file__).parents[2] / "integration" / "c_files"
 N = 24
@@ -18,12 +20,10 @@ N = 24
 
 @pytest.fixture(scope="module")
 def lab() -> Iterator[LabCHC]:
-    """The system is built once for the module, so the flag is patched for the module too."""
+    """The system is built once for the module."""
     reset_env()
     function = parse_file(str(C_FILES / "sll_safe_length.c"))
-    with pytest.MonkeyPatch.context() as monkeypatch:
-        monkeypatch.setattr("treehornx.chc.clean.ENABLE_CLEAN_CLAUSE", True)
-        yield build_lab(function, function.node.k, 0, N)
+    yield build_lab(function, function.node.k, 0, N, FeatureFlags(clean_clause=True))
 
 
 def is_internal(label: Lab) -> bool:

@@ -16,14 +16,15 @@ from treehornx.enum_models.core.Dir import Internal, Up
 from treehornx.enum_models.Lab import ERR, Lab
 from treehornx.enum_models.Lab.helpers import are_equal_after_rewind, field_is_nil, linked_frames
 from treehornx.enum_models.Lab.initial import is_initial
-from treehornx.feature_flags import ENABLE_LAB_INTERNAL_CONSTRAINTS
+from treehornx.feature_flags import FeatureFlags
+
 
 SIGMA_PREFIX = "s"
 TAU_PREFIX = "t"
 
 
-def _clause(constraints: list[FNode], head: FNode) -> FNode | None:
-    return clean_clause(constraints, head)
+def _clause(constraints: list[FNode], head: FNode, clean: bool) -> FNode | None:
+    return clean_clause(constraints, head, clean)
 
 
 def consistency_constraint(
@@ -44,9 +45,9 @@ def initial_constraints(sym: ChcLabUtils, prefix: str = "") -> list[FNode]:
     return [smt.EqualsOrIff(f2, f1) for f2, f1 in zip(sym.field_symbols(2, prefix), sym.field_symbols(1, prefix))]
 
 
-def fact(sym: ChcLabUtils, label: Lab) -> FNode | None:
+def fact(sym: ChcLabUtils, label: Lab, flags: FeatureFlags) -> FNode | None:
     """CHC I (non-root nodes) and CHC II (root): the root's second frame copies val from the first."""
-    return _clause(_head_constraints(sym, label), sym.apply(label))
+    return _clause(_head_constraints(sym, label, flags.lab_internal_constraints), sym.apply(label), flags.clean_clause)
 
 
 def _assign_cond_value(label: Lab, a: int, cond: ir.HeapCond) -> bool:
@@ -125,24 +126,25 @@ def internal_constraints(sym: ChcLabUtils, label: Lab, prefix: str = "") -> list
     return list(cached)
 
 
-def _head_constraints(sym: ChcLabUtils, label: Lab) -> list[FNode]:
+def _head_constraints(sym: ChcLabUtils, label: Lab, every_step: bool) -> list[FNode]:
     """Constraints of the head label: only the step to its top frame, unless every internal step is added."""
-    return internal_constraints(sym, label) if ENABLE_LAB_INTERNAL_CONSTRAINTS else _local_constraints(sym, label, "")
+    return internal_constraints(sym, label) if every_step else _local_constraints(sym, label, "")
 
 
-def _body_constraints(sym: ChcLabUtils, label: Lab, prefix: str = "") -> list[FNode]:
+def _body_constraints(sym: ChcLabUtils, label: Lab, every_step: bool, prefix: str = "") -> list[FNode]:
     """Constraints of a body label, already enforced by the clauses deriving it unless every internal step is added."""
-    return internal_constraints(sym, label, prefix) if ENABLE_LAB_INTERNAL_CONSTRAINTS else []
+    return internal_constraints(sym, label, prefix) if every_step else []
 
 
-def internal_clause(sym: ChcLabUtils, label: Lab) -> FNode | None:
+def internal_clause(sym: ChcLabUtils, label: Lab, flags: FeatureFlags) -> FNode | None:
     """CHC III, compressed: the frame label^{b-1} is dropped from the head if it is in the middle of an
     internal chain. The constraints of the label include the step to its top frame."""
     assert label.prefix is not None
-    return _clause([sym.apply(label.prefix), *_head_constraints(sym, label)], sym.apply(label))
+    head_constraints = _head_constraints(sym, label, flags.lab_internal_constraints)
+    return _clause([sym.apply(label.prefix), *head_constraints], sym.apply(label), flags.clean_clause)
 
 
-def external_clause(sym: ChcLabUtils, receiver: Lab, sender: Lab, j: int) -> FNode | None:
+def external_clause(sym: ChcLabUtils, receiver: Lab, sender: Lab, j: int, flags: FeatureFlags) -> FNode | None:
     """CHC IV/V: the top frame of `receiver` (τ) follows in the lace the top frame of `sender` (σ), one of
     them being the j-th child of the other.
 
@@ -159,10 +161,10 @@ def external_clause(sym: ChcLabUtils, receiver: Lab, sender: Lab, j: int) -> FNo
         sym.apply(sender, SIGMA_PREFIX),
         consistency(sym, receiver, sender, j),
         *fields_below,
-        *_body_constraints(sym, receiver, TAU_PREFIX),
-        *_body_constraints(sym, sender, SIGMA_PREFIX),
+        *_body_constraints(sym, receiver, flags.lab_internal_constraints, TAU_PREFIX),
+        *_body_constraints(sym, sender, flags.lab_internal_constraints, SIGMA_PREFIX),
     ]
-    return _clause(body, sym.apply(receiver, TAU_PREFIX))
+    return _clause(body, sym.apply(receiver, TAU_PREFIX), flags.clean_clause)
 
 
 def consistency(sym: ChcLabUtils, receiver: Lab, sender: Lab, j: int) -> FNode:
@@ -174,5 +176,6 @@ def consistency(sym: ChcLabUtils, receiver: Lab, sender: Lab, j: int) -> FNode:
             return consistency_constraint(sym, receiver, sender, j, TAU_PREFIX, SIGMA_PREFIX)
 
 
-def query(sym: ChcLabUtils, label: Lab) -> FNode | None:
-    return _clause([sym.apply(label), *_body_constraints(sym, label)], smt.FALSE())
+def query(sym: ChcLabUtils, label: Lab, flags: FeatureFlags) -> FNode | None:
+    body = [sym.apply(label), *_body_constraints(sym, label, flags.lab_internal_constraints)]
+    return _clause(body, smt.FALSE(), flags.clean_clause)

@@ -12,7 +12,16 @@ from treehornx.chc.Lab.clauses import (
     query,
 )
 from treehornx.chc.Lab.symbols import ChcLabUtils
-from treehornx.chc.Lab.system import LabCHC, build_lab, enumerate_labels, external_steps, make_system, to_system
+from treehornx.chc.Lab.system import (
+    LabCHC,
+    build_lab,
+    enumerate_labels,
+    external_steps,
+    make_system,
+    to_system,
+    write_smt2,
+)
+
 
 __all__ = [
     "SIGMA_PREFIX",
@@ -33,4 +42,5 @@ __all__ = [
     "psi_internal",
     "query",
     "to_system",
+    "write_smt2",
 ]

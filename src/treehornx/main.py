@@ -1,10 +1,13 @@
 """TreehornX CLI."""
 
 import csv
+import itertools
 import json
-from dataclasses import asdict, dataclass, field
+import shutil
+import sys
+from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Annotated, Callable, Literal, TypeAlias, cast
+from typing import Annotated, Callable, Iterable, Literal, TypeAlias, cast
 
 import typer
 from humanfriendly import format_timespan
@@ -14,23 +17,27 @@ from pychc.solvers.eldarica import EldaricaSolver
 from pychc.solvers.golem import GolemSolver
 from pychc.solvers.witness import Status
 from pychc.solvers.z3 import Z3CHCSolver
+from pysmt.fnode import FNode
 
 from treehornx import ir
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.Lab.clauses import query
-from treehornx.chc.Lab.system import LabCHC, build_lab, to_system
+from treehornx.chc.Lab.system import LabCHC, build_lab, to_system, write_smt2
 from treehornx.chc.pre import PreRunner
 from treehornx.chc.sdta.SDTAContext import (
     SDTAContext,
     avl_ctx,
     bst_ctx,
     bst_strict_ctx,
+    rb_ctx,
     sll_sorted_ctx,
     sll_sorted_strict_ctx,
 )
 from treehornx.enum_models.Lab import ERR, OOM, Lab
+from treehornx.feature_flags import FeatureFlags
 from treehornx.parser import SubsetError, parse_file
 from treehornx.tui import console, critical, error, fail, info, progress, success, warning
+
 
 app = typer.Typer(help="TreehornX CLI.")
 
@@ -44,7 +51,7 @@ DEFAULT_N = 128
 DEFAULT_M = 0
 DEFAULT_ROOT = "root"
 
-PreType: TypeAlias = Literal["bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl"]
+PreType: TypeAlias = Literal["bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl", "rb"]
 
 PRE: dict[str, Callable[[], SDTAContext]] = {
     "bst": bst_ctx,
@@ -52,6 +59,7 @@ PRE: dict[str, Callable[[], SDTAContext]] = {
     "sll_sorted": sll_sorted_ctx,
     "sll_sorted_strict": sll_sorted_strict_ctx,
     "avl": avl_ctx,
+    "rb": rb_ctx,
 }
 
 EXIT_CODES = (ExitCodeKind.ERR, ExitCodeKind.OOM, ExitCodeKind.LABEL_OVERFLOW)
@@ -97,20 +105,56 @@ def label_exit(label: Lab, n: int) -> set[ExitCodeKind]:
     return statuses
 
 
-def memory_system(
+def memory_clauses(
     function: ir.Function, lab: LabCHC, m: int, n: int, exit_code: ExitCodeKind, pre_ctx: SDTAContext | None
-) -> CHCSystem:
-    """Unsat iff some execution (on an input accepted by the precondition) ends with `exit_code`."""
+) -> tuple[list[FNode], Iterable[FNode]]:
+    """Predicates and (lazily generated) clauses of a system that is unsat iff some execution (on an input accepted
+    by the precondition) ends with `exit_code`."""
     k = function.node.k
     if pre_ctx is None:
         error_labels = (label for label in lab.predicates if exit_code in label_exit(label, n))
-        queries = [q for label in error_labels if (q := query(lab.sym, label)) is not None]
-        return to_system(lab.predicate_symbols(), [*lab.clauses, *queries])
-    runner = PreRunner(function, lab.pairs, pre_ctx, k, m, sym=lab.sym, n=n, exit_codes=frozenset({exit_code}))
-    return to_system(
-        [*lab.predicate_symbols(), *runner.predicates()],
-        [*lab.clauses, *runner.clauses(), *runner.queries()],
+        queries = (q for label in error_labels if (q := query(lab.sym, label, lab.flags)) is not None)
+        return lab.predicate_symbols(), itertools.chain(lab.clauses, queries)
+    runner = PreRunner(
+        function, lab.pairs, pre_ctx, k, m, sym=lab.sym, n=n, exit_codes=frozenset({exit_code}), flags=lab.flags
     )
+    return [*lab.predicate_symbols(), *runner.predicates()], itertools.chain(
+        lab.clauses, runner.clauses(), runner.queries()
+    )
+
+
+def memory_system(
+    function: ir.Function, lab: LabCHC, m: int, n: int, exit_code: ExitCodeKind, pre_ctx: SDTAContext | None
+) -> CHCSystem:
+    return to_system(*memory_clauses(function, lab, m, n, exit_code, pre_ctx))
+
+
+def dump_system(
+    function: ir.Function,
+    lab: LabCHC,
+    m: int,
+    n: int,
+    exit_code: ExitCodeKind,
+    pre_ctx: SDTAContext | None,
+    smt2: bool,
+    print_chc: bool,
+) -> Path | None:
+    """Streams the system to `<function>_<check>.smt2` and/or stdout without building a `CHCSystem`."""
+    predicates, clauses = memory_clauses(function, lab, m, n, exit_code, pre_ctx)
+    if not smt2:
+        sys.stdout.write(f"; CHC system for {exit_code.name}\n")
+        write_smt2(predicates, clauses, sys.stdout)
+        sys.stdout.flush()
+        return None
+    file_path = Path(f"{function.name}_{exit_code.name}.smt2")
+    with file_path.open("w") as f:
+        write_smt2(predicates, clauses, f)
+    if print_chc:
+        sys.stdout.write(f"; CHC system for {exit_code.name}\n")
+        with file_path.open() as f:
+            shutil.copyfileobj(f, sys.stdout)
+        sys.stdout.flush()
+    return file_path
 
 
 def make_solver(z3: bool, golem: bool, eldarica: bool, solvers_dir: Path | None) -> CHCSolver:
@@ -179,6 +223,20 @@ def check_names(function: ir.Function, function_name: str | None, root_name: str
     return True
 
 
+def with_nil_fields(function: ir.Function, names: list[str]) -> ir.Function | None:
+    """Declares the pointer fields `names` nil in every input node, None if one of them is not a pointer field."""
+    pointer_fields = {f.name: f.id for f in function.node.pointer_fields}
+    unknown = [name for name in names if name not in pointer_fields]
+    if unknown:
+        error(
+            f"--nil-field: struct {function.node.name} has no pointer field {', '.join(map(repr, unknown))}, "
+            f"its pointer fields are {', '.join(pointer_fields)}."
+        )
+        return None
+    nil_fields = function.node.nil_fields | {pointer_fields[name] for name in names}
+    return replace(function, node=replace(function.node, nil_fields=nil_fields))
+
+
 def display_outcome(check: str, status: Status) -> None:
     match status:
         case Status.SAT:
@@ -195,15 +253,17 @@ def verify(
     m: int,
     pre_ctx: SDTAContext | None,
     smt2: bool,
+    print_chc: bool,
     solver: CHCSolver | None,
     timeout: int | None,
+    flags: FeatureFlags,
 ) -> Stats:
-    """Enumerates the labels, reports the exit statuses that are trivially unreachable and builds, dumps and
-    solves the CHC systems of the others."""
+    """Enumerates the labels, reports the exit statuses that are trivially unreachable and builds, dumps, prints
+    and solves the CHC systems of the others."""
     k = function.node.k
     stats = Stats()
 
-    lab, stats.generation_elapsed_time = progress("Generating labels", lambda: build_lab(function, k, m, n))
+    lab, stats.generation_elapsed_time = progress("Generating labels", lambda: build_lab(function, k, m, n, flags))
     final_labels, _ = lab.engine.finals()
     stats.labels_count = len(final_labels)
     stats.largest_label_length = max((len(label) for label in final_labels), default=0)
@@ -224,27 +284,27 @@ def verify(
                 f"{exit_code.name} is trivially satisfiable, the function is correct with respect to {exit_code.name}."
             )
 
-    if not (smt2 or solver):
+    if not (smt2 or print_chc or solver):
         return stats
 
-    checks: list[tuple[str, Callable[[], CHCSystem]]] = [
-        (code.name, lambda code=code: memory_system(function, lab, m, n, code, pre_ctx))
-        for code in EXIT_CODES
-        if code in reached
-    ]
-
-    for check, make_system in checks:
-        system, elapsed = progress(f"Creating the CHC system for {check}", make_system)
-        stats.system_creation_elapsed_time[check] = elapsed
-        console.print(f"CHC system for {check} created in {format_timespan(elapsed)}.")
-
-        if smt2:
-            file_path = Path(f"{function.name}_{check}.smt2")
-            _, elapsed = progress(f"Creating SMT2 script for {check}", lambda: system.serialize(file_path))
+    for code in (code for code in EXIT_CODES if code in reached):
+        check = code.name
+        if smt2 or print_chc:
+            file_path, elapsed = progress(
+                f"Writing the CHC system for {check}",
+                lambda code=code: dump_system(function, lab, m, n, code, pre_ctx, smt2, print_chc),
+            )
             stats.smt2_dumping_elapsed_time[check] = elapsed
-            console.print(f"SMT2 script for {check} created in {format_timespan(elapsed)}: {file_path}.")
+            where = f": {file_path}" if file_path else " on stdout"
+            console.print(f"CHC system for {check} written in {format_timespan(elapsed)}{where}.")
 
         if solver is not None:
+            system, elapsed = progress(
+                f"Creating the CHC system for {check}",
+                lambda code=code: memory_system(function, lab, m, n, code, pre_ctx),
+            )
+            stats.system_creation_elapsed_time[check] = elapsed
+            console.print(f"CHC system for {check} created in {format_timespan(elapsed)}.")
             status, elapsed = progress(f"Solving {check}", lambda: check_sat(solver, system, timeout))
             stats.check_sat_elapsed_time[check] = elapsed
             stats.outcome[check] = status.value
@@ -272,6 +332,9 @@ def verify_cmd(
     c: Annotated[int | None, typer.Option("-c", help="not supported")] = None,
     partial_correctness: Annotated[bool, typer.Option("--partial-correctness", help="not supported")] = False,
     smt2: Annotated[bool, typer.Option("--smt2", help="dump the CHC systems as SMT-LIB2 scripts")] = False,
+    print_chc: Annotated[
+        bool, typer.Option("--print-chc", help="print the CHC systems on stdout, every other message goes to stderr")
+    ] = False,
     check_sat_flag: Annotated[bool, typer.Option("--check-sat", help="solve the CHC systems")] = False,
     interactive_check_sat: Annotated[bool, typer.Option("--interactive-check-sat", help="not supported")] = False,
     z3: Annotated[bool, typer.Option("--z3")] = False,
@@ -290,8 +353,29 @@ def verify_cmd(
     ] = False,
     pre: Annotated[PreType | None, typer.Option("--pre")] = None,
     parent: Annotated[str | None, typer.Option("--parent", help="not supported")] = None,
+    nil_fields: Annotated[
+        list[str] | None,
+        typer.Option("--nil-field", help="pointer field that is nil in every input node (repeatable)"),
+    ] = None,
     produce_csv: Annotated[bool, typer.Option("--csv", help="dump the statistics in a CSV file")] = False,
     produce_json: Annotated[bool, typer.Option("--json", help="dump the statistics in a JSON file")] = False,
+    clean_clause: Annotated[
+        bool, typer.Option("--clean-clause", help="merge the variables equated in a clause body")
+    ] = False,
+    lab_internal_constraints: Annotated[
+        bool,
+        typer.Option(
+            "--lab-internal-constraints",
+            help="repeat the constraints of every internal step of a label in each Lab clause",
+        ),
+    ] = False,
+    pre_internal_constraints: Annotated[
+        bool,
+        typer.Option(
+            "--pre-internal-constraints",
+            help="repeat the constraints of every internal step of a label in each precondition clause",
+        ),
+    ] = False,
 ) -> None:
     display_option_messages(
         function_name,
@@ -317,6 +401,11 @@ def verify_cmd(
         raise typer.Exit(1) from e
     if not check_names(function, function_name, root_name):
         raise typer.Exit(1)
+    if nil_fields:
+        function = with_nil_fields(function, nil_fields)
+        if function is None:
+            raise typer.Exit(1)
+        info(f"Pointer fields nil in every input node: {', '.join(nil_fields)}.")
 
     solver = make_solver(z3, golem, eldarica, solvers_dir) if check_sat_flag else None
     stats = verify(
@@ -325,8 +414,10 @@ def verify_cmd(
         m or DEFAULT_M,
         PRE[pre]() if pre else None,
         smt2,
+        print_chc,
         solver,
         timeout,
+        FeatureFlags(clean_clause, lab_internal_constraints, pre_internal_constraints),
     )
     dump_stats(function, stats, produce_csv, produce_json)
 

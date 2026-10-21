@@ -1,11 +1,15 @@
 #include <stdlib.h>
 
 /*
- * Iterative AVL insertion (Knuth, TAOCP vol. 3, 6.2.3, Algorithm A).
+ * Iterative AVL insertion (Knuth, TAOCP vol. 3, 6.2.3, Algorithm A),
+ * NO sentinel, no key movement:
+ * `root` is the top node of the tree, and the final value of the variable
+ * `root` is the top node of the resulting tree.
  *
- * `root` is a header (sentinel) node: the actual AVL tree hangs from
- * root->right.  This lets rotations change the tree's top node even though
- * the function returns void and takes only one parameter.
+ * Rotations relink nodes; keys never move between nodes.  When the
+ * rotation happens at the top of the tree, the new top node is assigned to
+ * `root`.  An empty tree (root == NULL) becomes a single node assigned to
+ * `root`.
  *
  * `key` is left uninitialised on purpose: in the verifier's semantics an
  * uninitialised data variable is a non-deterministic input.
@@ -15,7 +19,7 @@
  * No parent field is needed: while going down we keep
  *   p : the current node (parent of q),
  *   s : the deepest node on the path with bal != 0 (rebalancing point),
- *   t : the parent of s.
+ *   t : the parent of s (NULL while s is the top node).
  */
 struct node {
     int data;
@@ -24,7 +28,7 @@ struct node {
     struct node *right;
 };
 
-void avl_safe_insert_bal(struct node *root) {
+void avl_insert(struct node *root) {
     struct node *t;
     struct node *s;
     struct node *p;
@@ -40,24 +44,21 @@ void avl_safe_insert_bal(struct node *root) {
     int br;
     int bp;
 
-    if (root == NULL)
-        return;
-
-    /* empty tree */
-    s = root->right;
-    if (s == NULL) {
+    /* empty tree: the new node becomes the top */
+    if (root == NULL) {
         q = malloc(sizeof(struct node));
         q->data = key;
         q->bal = 0;
         q->left = NULL;
         q->right = NULL;
-        root->right = q;
+        root = q;
         return;
     }
 
     /* ---- descent: find the insertion point, tracking t and s ---- */
-    t = root;
-    q = s;
+    t = NULL;
+    s = root;
+    q = root;
     while (q != NULL) {
         p = q;
         k = p->data;
@@ -186,10 +187,14 @@ void avl_safe_insert_bal(struct node *root) {
         }
     }
 
-    /* ---- hang the rebalanced subtree back under t ---- */
-    x = t->right;
-    if (x == s)
-        t->right = p;
-    else
-        t->left = p;
+    /* ---- hang the rebalanced subtree back under t, or make it the top ---- */
+    if (s == root) {
+        root = p;                       /* p is the new top of the tree */
+    } else {
+        x = t->right;
+        if (x == s)
+            t->right = p;
+        else
+            t->left = p;
+    }
 }

@@ -1,13 +1,16 @@
 """Terminal output of the CLI."""
 
 import time
-from typing import Callable, override
+from typing import Callable, TypeVar
 
 from rich.console import Console
 from rich.progress import Progress, SpinnerColumn, Task, TextColumn, TimeElapsedColumn
 from rich.text import Text
+from typing_extensions import override
 
-console = Console()
+
+# stdout is reserved for the CHC systems printed by `--print-chc`
+console = Console(stderr=True)
 
 
 def warning(message: str) -> None:
@@ -42,10 +45,18 @@ class GreyTimeElapsedColumn(TimeElapsedColumn):
         return text
 
 
-def progress[T](description: str, func: Callable[[], T]) -> tuple[T, float]:
+T = TypeVar("T")
+
+
+def progress(description: str, func: Callable[[], T]) -> tuple[T, float]:
     """Runs `func` behind a spinner, returns its result and the elapsed time in seconds."""
     with Progress(
-        SpinnerColumn(), TextColumn("[progress.description]{task.description}"), GreyTimeElapsedColumn(), transient=True
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        GreyTimeElapsedColumn(),
+        transient=True,
+        console=console,
+        redirect_stdout=False,  # --print-chc writes the systems on stdout while the spinner runs
     ) as _progress:
         _progress.add_task(description=description)
         start = time.perf_counter()

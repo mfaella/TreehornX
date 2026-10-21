@@ -2,11 +2,16 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from itertools import islice
-from typing import Iterable, overload, override
+from typing import Generic, Iterable, TypeVar, overload
+
+from typing_extensions import override
+
+
+F = TypeVar("F")
 
 
 @dataclass(frozen=True, slots=True)
-class Label[F]:
+class Label(Generic[F]):
     frame: F
     prefix: Label[F] | None = field(default=None)
     _hash: int = field(init=False)
@@ -19,7 +24,7 @@ class Label[F]:
         object.__setattr__(self, "_length", 1 + (len(self.prefix) if self.prefix is not None else 0))
 
     def __iter__(self) -> Iterable[F]:
-        return iter(self[1:len(self)])
+        return iter(self[1 : len(self)])
 
     def __reversed__(self) -> Iterable[F]:
         return map(lambda label: label.frame, self._naive_iter_prefixes())
@@ -55,15 +60,15 @@ class Label[F]:
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, Label):
             return NotImplemented
-        if not isinstance(other.frame, type(self.frame)): # pyright: ignore[reportUnknownMemberType]
+        if not isinstance(other.frame, type(self.frame)):  # pyright: ignore[reportUnknownMemberType]
             return NotImplemented
         if self is other:
             return True
         if self.frame != other.frame:
             return False
-        if self.prefix is other.prefix: # pyright: ignore[reportUnknownMemberType]
+        if self.prefix is other.prefix:  # pyright: ignore[reportUnknownMemberType]
             return True
-        return self.prefix == other.prefix # pyright: ignore[reportUnknownMemberType]
+        return self.prefix == other.prefix  # pyright: ignore[reportUnknownMemberType]
 
     def cut(self, index: int) -> Label[F]:
         return next(islice(self._naive_iter_prefixes(), len(self) - index, None))

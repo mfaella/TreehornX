@@ -27,6 +27,7 @@ from typing import Iterator, List, Optional, Tuple, Union
 # Types
 # --------------------------------------------------------------------------
 
+
 class DataType(Enum):
     INT = "int"
     BOOL = "bool"
@@ -39,6 +40,7 @@ class DataType(Enum):
 # Data expressions (over data variables and constants only)
 # --------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class Const:
     value: Union[int, bool]
@@ -48,18 +50,19 @@ class Const:
 @dataclass(frozen=True)
 class Var:
     """Reference to a data variable by id."""
+
     id: int
 
 
 @dataclass(frozen=True)
 class UnOp:
-    op: str            # '-', '!'
+    op: str  # '-', '!'
     operand: "DataExpr"
 
 
 @dataclass(frozen=True)
 class BinOp:
-    op: str            # + - * / %  < <= > >= == !=  && ||
+    op: str  # + - * / %  < <= > >= == !=  && ||
     left: "DataExpr"
     right: "DataExpr"
 
@@ -72,9 +75,11 @@ Atom = Union[Const, Var]
 # Conditions usable by IfGoto
 # --------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class PtrEq:
     """``left == right`` (or ``!=`` when negated) between pointer variables."""
+
     left: int
     right: int
     negated: bool = False
@@ -83,6 +88,7 @@ class PtrEq:
 @dataclass(frozen=True)
 class IsNil:
     """``ptr == NULL`` (or ``!= NULL`` when negated)."""
+
     ptr: int
     negated: bool = False
 
@@ -90,6 +96,7 @@ class IsNil:
 @dataclass(frozen=True)
 class FieldIsNil:
     """``ptr->field == NULL`` (or ``!= NULL`` when negated), ``field`` a pointer field."""
+
     ptr: int
     field: int
     negated: bool = False
@@ -98,6 +105,7 @@ class FieldIsNil:
 @dataclass(frozen=True)
 class DataCond:
     """A Boolean data expression."""
+
     expr: DataExpr
 
 
@@ -129,9 +137,11 @@ _FLIP = {"==": "!=", "!=": "==", "<": ">=", ">=": "<", ">": "<=", "<=": ">"}
 # Statements
 # --------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class AssignData:
     """d := expr"""
+
     target: int
     expr: DataExpr
 
@@ -139,6 +149,7 @@ class AssignData:
 @dataclass(frozen=True)
 class AssignCond:
     """dbool := heap_cond   (p == q, p != q, p == NULL, p != NULL)"""
+
     target: int
     cond: HeapCond
 
@@ -146,12 +157,14 @@ class AssignCond:
 @dataclass(frozen=True)
 class AssignNil:
     """p := nil"""
+
     target: int
 
 
 @dataclass(frozen=True)
 class AssignPtr:
     """p := q"""
+
     target: int
     source: int
 
@@ -159,6 +172,7 @@ class AssignPtr:
 @dataclass(frozen=True)
 class LoadPtrField:
     """p := q->pfield"""
+
     target: int
     source: int
     field: int
@@ -167,6 +181,7 @@ class LoadPtrField:
 @dataclass(frozen=True)
 class StoreNilField:
     """p->pfield := nil"""
+
     ptr: int
     field: int
 
@@ -174,6 +189,7 @@ class StoreNilField:
 @dataclass(frozen=True)
 class StorePtrField:
     """p->pfield := q"""
+
     ptr: int
     field: int
     source: int
@@ -182,6 +198,7 @@ class StorePtrField:
 @dataclass(frozen=True)
 class LoadDataField:
     """d := p->dfield"""
+
     target: int
     ptr: int
     field: int
@@ -190,6 +207,7 @@ class LoadDataField:
 @dataclass(frozen=True)
 class StoreDataField:
     """p->dfield := atom   (a data variable or a constant)"""
+
     ptr: int
     field: int
     value: Atom
@@ -198,18 +216,21 @@ class StoreDataField:
 @dataclass(frozen=True)
 class New:
     """new p   (from ``p = malloc(sizeof(struct NODE))``)"""
+
     target: int
 
 
 @dataclass(frozen=True)
 class Free:
     """free p"""
+
     ptr: int
 
 
 @dataclass(frozen=True)
 class IfGoto:
     """if cond then goto target else fall through to pc+1"""
+
     cond: Cond
     target: int
 
@@ -224,17 +245,40 @@ class Exit:
     pass
 
 
-Stmt = Union[AssignData, AssignCond, AssignNil, AssignPtr, LoadPtrField,
-             StoreNilField, StorePtrField, LoadDataField, StoreDataField,
-             New, Free, IfGoto, Goto, Exit]
+Stmt = Union[
+    AssignData,
+    AssignCond,
+    AssignNil,
+    AssignPtr,
+    LoadPtrField,
+    StoreNilField,
+    StorePtrField,
+    LoadDataField,
+    StoreDataField,
+    New,
+    Free,
+    IfGoto,
+    Goto,
+    Exit,
+]
 
-HEAP_STMTS = (AssignNil, AssignPtr, LoadPtrField, StoreNilField,
-              StorePtrField, LoadDataField, StoreDataField, New, Free)
+HEAP_STMTS = (
+    AssignNil,
+    AssignPtr,
+    LoadPtrField,
+    StoreNilField,
+    StorePtrField,
+    LoadDataField,
+    StoreDataField,
+    New,
+    Free,
+)
 
 
 # --------------------------------------------------------------------------
 # Declarations
 # --------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class DataField:
@@ -267,6 +311,7 @@ class NodeStruct:
     name: str
     data_fields: Tuple[DataField, ...]
     pointer_fields: Tuple[PointerField, ...]
+    nil_fields: frozenset[int] = frozenset()  # pointer fields that are nil in every input node
 
     @property
     def k(self) -> int:
@@ -300,7 +345,7 @@ NextPc = Union[None, int, Tuple[int, int]]
 class Function:
     name: str
     node: NodeStruct
-    pointer_vars: Tuple[PointerVariable, ...]   # pointer_vars[0] is the root
+    pointer_vars: Tuple[PointerVariable, ...]  # pointer_vars[0] is the root
     data_vars: Tuple[DataVariable, ...]
     statements: Tuple[Stmt, ...]
 
@@ -403,9 +448,9 @@ class Function:
 
     def fmt_stmt(self, s: Stmt) -> str:
         p = lambda i: self.pointer_vars[i].name  # noqa: E731
-        d = lambda i: self.data_vars[i].name     # noqa: E731
+        d = lambda i: self.data_vars[i].name  # noqa: E731
         pf = lambda i: self.node.pointer_fields[i].name  # noqa: E731
-        df = lambda i: self.node.data_fields[i].name     # noqa: E731
+        df = lambda i: self.node.data_fields[i].name  # noqa: E731
         if isinstance(s, AssignData):
             return f"{d(s.target)} := {self.fmt_expr(s.expr)}"
         if isinstance(s, AssignCond):

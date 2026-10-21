@@ -2,8 +2,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from treehornx.enum_models.Lab.Event import Event
 from treehornx.enum_models.core.Dir import Dir
+from treehornx.enum_models.Lab.Event import Event
 
 
 @dataclass(slots=True, frozen=True)
@@ -29,6 +29,7 @@ class Frame:
             self.prev,
             self.next,
         )
+
 
 @dataclass(slots=True)
 class MutableFrame:

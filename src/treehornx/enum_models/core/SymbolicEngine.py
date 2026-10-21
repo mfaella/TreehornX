@@ -1,27 +1,28 @@
-
-
-
 from abc import ABC, abstractmethod
 from collections import defaultdict, deque
 from dataclasses import dataclass, field, replace
 from functools import cached_property
 from itertools import chain, count
-from typing import Iterable
-
+from typing import Generic, Iterable, TypeVar
 
 from treehornx.enum_models.core.Dir import Dir, Down, Internal, Up
 from treehornx.enum_models.core.InternedPool import InternedPool, InternedPoolView
 from treehornx.enum_models.core.Label import Label
 from treehornx.enum_models.core.Pair import Pair
 
+
+SN = TypeVar("SN")
+
+
 @dataclass(frozen=True, slots=True)
-class Transition[SN]:
+class Transition(Generic[SN]):
     label: SN
     label_new: SN
     dir: Dir
 
+
 @dataclass
-class SymbolicEngine[SN](ABC):
+class SymbolicEngine(ABC, Generic[SN]):
     k: int
     m: int
     initial_pairs: set[Pair[SN]]
@@ -31,8 +32,12 @@ class SymbolicEngine[SN](ABC):
 
     transitions: dict[SN, set[Transition[SN]]] = field(default_factory=lambda: defaultdict(set), init=False)
     dirty: set[Transition[SN]] = field(default_factory=set, init=False)
-    parent_pending_updates: defaultdict[Transition[SN], deque[Pair[SN]]] = field(default_factory=lambda: defaultdict(deque), init=False)
-    child_pending_updates: defaultdict[Transition[SN], deque[Pair[SN]]] = field(default_factory=lambda: defaultdict(deque), init=False)
+    parent_pending_updates: defaultdict[Transition[SN], deque[Pair[SN]]] = field(
+        default_factory=lambda: defaultdict(deque), init=False
+    )
+    child_pending_updates: defaultdict[Transition[SN], deque[Pair[SN]]] = field(
+        default_factory=lambda: defaultdict(deque), init=False
+    )
 
     pair_parent_index: defaultdict[SN, set[Pair[SN]]] = field(default_factory=lambda: defaultdict(set), init=False)
     pair_child_index: defaultdict[SN, set[Pair[SN]]] = field(default_factory=lambda: defaultdict(set), init=False)
@@ -46,23 +51,19 @@ class SymbolicEngine[SN](ABC):
             self.add_state(state)
 
     @abstractmethod
-    def step_up(self, pair: Pair[SN]) -> Pair[SN] | None:
-        ...
+    def step_up(self, pair: Pair[SN]) -> Pair[SN] | None: ...
 
     @abstractmethod
-    def step_down(self, pair: Pair[SN]) -> Pair[SN] | None:
-        ...
+    def step_down(self, pair: Pair[SN]) -> Pair[SN] | None: ...
 
     @abstractmethod
-    def step_int(self, label: SN) -> Iterable[SN] | None:
-        ...
+    def step_int(self, label: SN) -> Iterable[SN] | None: ...
 
     @abstractmethod
-    def consistent(self, pair: Pair[SN]) -> bool:
-        ...
+    def consistent(self, pair: Pair[SN]) -> bool: ...
 
     def _excluded_child(self, dir: Dir) -> int:
-        excluded_child = self.k+self.m if isinstance(dir, (Up, Internal)) else dir.child
+        excluded_child = self.k + self.m if isinstance(dir, (Up, Internal)) else dir.child
         return excluded_child
 
     def _enqueue_parent(self, trans: Transition[SN], pair: Pair[SN]):
@@ -172,7 +173,7 @@ class SymbolicEngine[SN](ABC):
                 qp.append(pair)
                 visited.add(pair)
 
-        while (qp or qs):
+        while qp or qs:
             while qs:
                 state = qs.popleft()
 
@@ -208,8 +209,7 @@ class SymbolicEngine[SN](ABC):
                 qpappend(pair)
 
     @abstractmethod
-    def is_end_of_computation(self, state: SN) -> bool:
-        ...
+    def is_end_of_computation(self, state: SN) -> bool: ...
 
     def finals(self) -> tuple[set[SN], set[Pair[SN]]]:
         q: deque[tuple[SN, Dir]] = deque((ns, Internal()) for ns in iter(self.states) if self.is_end_of_computation(ns))
