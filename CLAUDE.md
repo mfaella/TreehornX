@@ -10,9 +10,8 @@ the next goal but are **not implemented** (an earlier DFS engine and post CHC we
 ## Commands
 
 Dependencies are managed with `uv`. The project runs on PyPy 3.11 (`.python-version`), so code must stay 3.11-compatible:
-no PEP 695 generics/`type` aliases, `override` comes from `typing_extensions`. `pychc` comes from git and declares
-Python ≥ 3.12; `[[tool.uv.dependency-metadata]]` in `pyproject.toml` overrides that, so update it when pychc's
-version or dependencies change.
+no PEP 695 generics/`type` aliases, `override` comes from `typing_extensions`. There is no SMT library dependency:
+terms and clauses are the in-house `chc/smt` package and solvers run as external processes.
 
 ```bash
 uv sync                                   # install
@@ -24,16 +23,17 @@ uv run task verify                        # format + validate + coverage (what C
 uv run pytest tests/integration/test_lab_chc.py -k sll_safe_find   # single case
 uv run pytest -m "not slow"                                         # skip verification runs taking minutes
 
-uv run treehornx verify FILE.c --pre bst -m 1 -n 128 --check-sat --z3   # CLI (Golem is the default solver)
+uv run treehornx verify FILE.c --pre bst -m 1 -n 128 --check-sat         # CLI (Z3 by default, --eldarica)
 uv run treehornx verify FILE.c --smt2                                   # dump one SMT-LIB2 system per exit status
 uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.csv]
 ```
 
-- Integration tests call the `z3` binary and are skipped when it is not on `PATH`. Solver binaries (golem, z3, eld)
-  are shipped under `scripts/solvers/linux/x86-64/` and `tests/integration/solvers/`; the CLI takes `--solvers-dir`.
-- Integration tests call `pychc.environment.reset_env()` before each case: label/predicate ids are interned
-  process-wide, so the same predicate name can get a different signature in two programs. Do the same in any new
-  script that builds several systems in one process.
+- Integration tests call the `z3`/`eld` binaries and are skipped when they are not found. Solver binaries are shipped
+  under `scripts/solvers/linux/x86-64/` (z3) and `tests/integration/solvers/` (eld); the CLI takes `--solvers-dir`
+  and falls back to `PATH`. (The golem binaries there are no longer used.)
+- Terms carry their own types and predicates their own signatures, so several systems can be built in one process
+  without resetting any environment. Terms are hash-consed in a weak cache (identity equality); `sx.reset_env()`
+  empties it, after which older terms are no longer equal to new ones.
 - `docs/replicating_benchmarks.md` explains how to reproduce the paper benchmarks (they were produced on the `post`
   branch).
 
@@ -61,11 +61,15 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
    carrying an error flag `e` up to the root. `chc/pre/PreRunner.py` binds it to Lab labels. Available automata are
    in `chc/sdta/SDTAContext.py` + `psi.py` (`bst`, `bst_strict`, `sll_sorted`, `sll_sorted_strict`, `avl`, `rb`).
    The ψ functions hard-code the field names (`next`, `left`, `right`, `data`), so input programs must use them.
-5. **Solve** — `pychc` serializes to SMT-LIB2 (`QF_UFLIA`) and calls Golem / Z3 / Eldarica.
+5. **Solve** — `chc/smt/sexpr.py` holds the terms (`Var`, `Constant`, `OpExpr`, `Application`, `Clause`, whose
+   constructors return the cached instance from one weak cache per class; operators are built as
+   `sx.OpExpr(sx.Operator.X, ...)`, `sx.Max` builds the `ite` chain) and `CHCSystem`, which prints a `HORN` script declaring only the predicates used;
+   `chc/smt/preprocess.py` has `substitute`/`simplify`/`fresh_var` (used by `clean.py`). `chc/solvers` pipes the
+   script into `z3 -in` (`Z3Solver`) or `eld -in` (`EldaricaSolver`) and returns `Status` SAT/UNSAT/UNKNOWN.
    **sat = safe, unsat = an error is reachable.** One system is built per exit status (ERR, OOM, LABEL_OVERFLOW)
    that the enumeration actually reaches; unreached ones are reported as "trivially" safe without calling a solver.
 
-`feature_flags.py::FeatureFlags` (CLI: `--clean-clause`, `--lab-internal-constraints`, `--pre-internal-constraints`): `clean_clause` (merge variables equated in a clause body, `chc/clean.py`),
+`feature_flags.py::FeatureFlags` (CLI: `--clean-clause`, `--lab-internal-constraints`, `--pre-internal-constraints`): `clean_clause` (merge variables equated in a clause body, `chc/clean.py`; clauses are built uncleaned and cleaned lazily one at a time when printed, via `CHCSystem.transform`/`write_smt2(..., clean)`),
 `lab_internal_constraints` / `pre_internal_constraints` (repeat the constraints of every internal step
 of a label in each clause instead of only the step to its top frame). They change the size/shape of the systems, not
 their meaning; all default to off. `LabCHC` and `BotUpAutomataRunner` carry the flags, helpers needing one take a bool.

@@ -5,22 +5,20 @@ program, the bounds, the input restrictions (nil fields, precondition), the feat
 the expected status, the same choices as the `treehornx verify` options.
 """
 
+import multiprocessing
 import shutil
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Literal, TypeAlias
 
 import pytest
 from _pytest.mark import ParameterSet
-from pychc.chc_system import CHCSystem
-from pychc.solvers.chc_solver import CHCSolver
-from pychc.solvers.eldarica import EldaricaSolver
-from pychc.solvers.golem import GolemSolver
-from pychc.solvers.witness import Status
-from pychc.solvers.z3 import Z3CHCSolver
 
 from treehornx.chc import Lab, pre
 from treehornx.chc.core import ExitCodeKind
+from treehornx.chc.smt.sexpr import CHCSystem
+from treehornx.chc.solvers import CHCSolver, EldaricaSolver, Status, Z3Solver
 from treehornx.feature_flags import FeatureFlags
 from treehornx.main import DEFAULT_N, PRE, PreType, label_exit, with_nil_fields
 from treehornx.parser import parse_file
@@ -29,11 +27,10 @@ from treehornx.parser import parse_file
 C_FILES = Path(__file__).parent / "c_files"
 SOLVERS_DIR = Path(__file__).parent / "solvers"
 
-SolverName: TypeAlias = Literal["z3", "golem", "eldarica"]
+SolverName: TypeAlias = Literal["z3", "eldarica"]
 
-SOLVERS: dict[SolverName, type[CHCSolver]] = {
-    "z3": Z3CHCSolver,
-    "golem": GolemSolver,
+SOLVERS: dict[SolverName, type[Z3Solver | EldaricaSolver]] = {
+    "z3": Z3Solver,
     "eldarica": EldaricaSolver,
 }
 
@@ -102,7 +99,13 @@ def make_system(config: TestConfig) -> CHCSystem:
     )
 
 
+def _solve(config: TestConfig) -> Status:
+    solver: CHCSolver = SOLVERS[config.solver](solver_dir(config.solver))
+    return solver.solve(make_system(config), config.timeout)
+
+
 def run(config: TestConfig) -> Status:
-    solver = SOLVERS[config.solver](binary_path=solver_dir(config.solver))
-    solver.load_system(make_system(config))
-    return solver.solve(timeout=config.timeout)
+    """Builds and solves the system in a forked process: PyPy keeps the memory a large system takes for the
+    rest of the session, a process exiting returns it to the OS. Exceptions are raised again here."""
+    with ProcessPoolExecutor(max_workers=1, mp_context=multiprocessing.get_context("fork")) as executor:
+        return executor.submit(_solve, config).result()

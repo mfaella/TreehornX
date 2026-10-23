@@ -6,12 +6,11 @@ the lace comes from, are prefixed with `s`, those of τ, the label receiving the
 `t`.
 """
 
-import pysmt.shortcuts as smt
-from pysmt.fnode import FNode
+from typing import Literal, Sequence
 
 from treehornx import ir
-from treehornx.chc.clean import clean_clause
 from treehornx.chc.Lab.symbols import ChcLabUtils
+from treehornx.chc.smt import sexpr as sx
 from treehornx.enum_models.core.Dir import Internal, Up
 from treehornx.enum_models.Lab import ERR, Lab
 from treehornx.enum_models.Lab.helpers import are_equal_after_rewind, field_is_nil, linked_frames
@@ -23,31 +22,31 @@ SIGMA_PREFIX = "s"
 TAU_PREFIX = "t"
 
 
-def _clause(constraints: list[FNode], head: FNode, clean: bool) -> FNode | None:
-    return clean_clause(constraints, head, clean)
+def _clause(constraints: Sequence[sx.SExpr | sx.Application], head: sx.Application | Literal[False]) -> sx.Clause:
+    return sx.Clause(head, *constraints)
 
 
 def consistency_constraint(
     sym: ChcLabUtils, parent: Lab, child: Lab, j: int, parent_prefix: str = "", child_prefix: str = ""
-) -> FNode:
+) -> list[sx.SExpr]:
     """The data variables agree on every pair of frames of the parent and its j-th child adjacent in the lace."""
-    return smt.And(
-        *(
-            smt.EqualsOrIff(left, right)
-            for i, c in linked_frames(parent, child, j)
-            for left, right in zip(sym.var_symbols(i, parent_prefix), sym.var_symbols(c, child_prefix))
-        )
-    )
+    return [
+        sx.OpExpr(sx.Operator.EQ, left, right)
+        for i, c in linked_frames(parent, child, j)
+        for left, right in zip(sym.var_symbols(i, parent_prefix), sym.var_symbols(c, child_prefix))
+    ]
 
 
-def initial_constraints(sym: ChcLabUtils, prefix: str = "") -> list[FNode]:
+def initial_constraints(sym: ChcLabUtils, prefix: str = "") -> list[sx.SExpr]:
     """The root's second frame copies val from the first (CHC II)."""
-    return [smt.EqualsOrIff(f2, f1) for f2, f1 in zip(sym.field_symbols(2, prefix), sym.field_symbols(1, prefix))]
+    return [
+        sx.OpExpr(sx.Operator.EQ, f2, f1) for f2, f1 in zip(sym.field_symbols(2, prefix), sym.field_symbols(1, prefix))
+    ]
 
 
-def fact(sym: ChcLabUtils, label: Lab, flags: FeatureFlags) -> FNode | None:
+def fact(sym: ChcLabUtils, label: Lab, flags: FeatureFlags) -> sx.Clause:
     """CHC I (non-root nodes) and CHC II (root): the root's second frame copies val from the first."""
-    return _clause(_head_constraints(sym, label, flags.lab_internal_constraints), sym.apply(label), flags.clean_clause)
+    return _clause(_head_constraints(sym, label, flags.lab_internal_constraints), sym.apply(label))
 
 
 def _assign_cond_value(label: Lab, a: int, cond: ir.HeapCond) -> bool:
@@ -65,23 +64,23 @@ def _assign_cond_value(label: Lab, a: int, cond: ir.HeapCond) -> bool:
             return field_is_nil(label.cut(a), a, pfield) != neg
 
 
-def psi_internal(sym: ChcLabUtils, label: Lab, prefix: str = "") -> list[FNode]:
+def psi_internal(sym: ChcLabUtils, label: Lab, prefix: str = "") -> list[sx.SExpr]:
     """Data constraints of the internal step from label^{b-1} to the top frame label^b."""
     b = len(label)
     a = b - 1
     f_a, f_b = label[a], label[b]
-    vars_value: dict[int, FNode] = {}
-    fields_value: dict[int, FNode] = {}
-    constraints: list[FNode] = []
+    vars_value: dict[int, sx.SExpr] = {}
+    fields_value: dict[int, sx.SExpr] = {}
+    constraints: list[sx.SExpr] = []
 
     match sym.function[f_a.pc]:
         case ir.AssignData(d, expr):
             vars_value[d] = sym.expr_to_smt(expr, a, prefix)
         case ir.AssignCond(d, cond) if not isinstance(f_b.event, ERR):
-            vars_value[d] = smt.Bool(_assign_cond_value(label, a, cond))
+            vars_value[d] = sx.Constant(_assign_cond_value(label, a, cond))
         case ir.IfGoto(ir.DataCond(expr), target) if target != f_a.pc + 1:
             cond = sym.expr_to_smt(expr, a, prefix)
-            constraints.append(cond if f_b.pc == target else smt.Not(cond))
+            constraints.append(cond if f_b.pc == target else sx.OpExpr(sx.Operator.NOT, cond))
         case ir.StoreDataField(_, field, value) if not isinstance(f_b.event, ERR):
             fields_value[field] = sym.expr_to_smt(value, a, prefix)
         case ir.LoadDataField(d, _, field) if not isinstance(f_b.event, ERR):
@@ -91,14 +90,14 @@ def psi_internal(sym: ChcLabUtils, label: Lab, prefix: str = "") -> list[FNode]:
 
     for v in sym.function.data_vars:
         value = vars_value.get(v.id, sym.var_symbol(v.id, a, prefix))
-        constraints.append(smt.EqualsOrIff(sym.var_symbol(v.id, b, prefix), value))
+        constraints.append(sx.OpExpr(sx.Operator.EQ, sym.var_symbol(v.id, b, prefix), value))
     for fd in sym.function.node.data_fields:
         value = fields_value.get(fd.id, sym.field_symbol(fd.id, a, prefix))
-        constraints.append(smt.EqualsOrIff(sym.field_symbol(fd.id, b, prefix), value))
+        constraints.append(sx.OpExpr(sx.Operator.EQ, sym.field_symbol(fd.id, b, prefix), value))
     return constraints
 
 
-def _local_constraints(sym: ChcLabUtils, label: Lab, prefix: str) -> list[FNode]:
+def _local_constraints(sym: ChcLabUtils, label: Lab, prefix: str) -> list[sx.SExpr]:
     """Constraints of the internal step reaching the top frame of `label`, if any."""
     if label.frame.prev != Internal():
         return []
@@ -108,7 +107,7 @@ def _local_constraints(sym: ChcLabUtils, label: Lab, prefix: str) -> list[FNode]
     return psi_internal(sym, label, prefix)
 
 
-def internal_constraints(sym: ChcLabUtils, label: Lab, prefix: str = "") -> list[FNode]:
+def internal_constraints(sym: ChcLabUtils, label: Lab, prefix: str = "") -> list[sx.SExpr]:
     """Constraints of every internal step of `label`, including those between frames dropped from its predicate.
 
     The frames dropped by the compression only occur here, so they are quantified variables of the clause."""
@@ -126,25 +125,25 @@ def internal_constraints(sym: ChcLabUtils, label: Lab, prefix: str = "") -> list
     return list(cached)
 
 
-def _head_constraints(sym: ChcLabUtils, label: Lab, every_step: bool) -> list[FNode]:
+def _head_constraints(sym: ChcLabUtils, label: Lab, every_step: bool) -> list[sx.SExpr]:
     """Constraints of the head label: only the step to its top frame, unless every internal step is added."""
     return internal_constraints(sym, label) if every_step else _local_constraints(sym, label, "")
 
 
-def _body_constraints(sym: ChcLabUtils, label: Lab, every_step: bool, prefix: str = "") -> list[FNode]:
+def _body_constraints(sym: ChcLabUtils, label: Lab, every_step: bool, prefix: str = "") -> list[sx.SExpr]:
     """Constraints of a body label, already enforced by the clauses deriving it unless every internal step is added."""
     return internal_constraints(sym, label, prefix) if every_step else []
 
 
-def internal_clause(sym: ChcLabUtils, label: Lab, flags: FeatureFlags) -> FNode | None:
+def internal_clause(sym: ChcLabUtils, label: Lab, flags: FeatureFlags) -> sx.Clause:
     """CHC III, compressed: the frame label^{b-1} is dropped from the head if it is in the middle of an
     internal chain. The constraints of the label include the step to its top frame."""
     assert label.prefix is not None
     head_constraints = _head_constraints(sym, label, flags.lab_internal_constraints)
-    return _clause([sym.apply(label.prefix), *head_constraints], sym.apply(label), flags.clean_clause)
+    return _clause([sym.apply(label.prefix), *head_constraints], sym.apply(label))
 
 
-def external_clause(sym: ChcLabUtils, receiver: Lab, sender: Lab, j: int, flags: FeatureFlags) -> FNode | None:
+def external_clause(sym: ChcLabUtils, receiver: Lab, sender: Lab, j: int, flags: FeatureFlags) -> sx.Clause:
     """CHC IV/V: the top frame of `receiver` (τ) follows in the lace the top frame of `sender` (σ), one of
     them being the j-th child of the other.
 
@@ -153,21 +152,21 @@ def external_clause(sym: ChcLabUtils, receiver: Lab, sender: Lab, j: int, flags:
     assert receiver.prefix is not None
     b = len(receiver)
     fields_below = [
-        smt.EqualsOrIff(f_b, f_below)
+        sx.OpExpr(sx.Operator.EQ, f_b, f_below)
         for f_b, f_below in zip(sym.field_symbols(b, TAU_PREFIX), sym.field_symbols(b - 1, TAU_PREFIX))
     ]
-    body = [
+    body: list[sx.SExpr | sx.Application] = [
         sym.apply(receiver.prefix, TAU_PREFIX),
         sym.apply(sender, SIGMA_PREFIX),
-        consistency(sym, receiver, sender, j),
+        *consistency(sym, receiver, sender, j),
         *fields_below,
         *_body_constraints(sym, receiver, flags.lab_internal_constraints, TAU_PREFIX),
         *_body_constraints(sym, sender, flags.lab_internal_constraints, SIGMA_PREFIX),
     ]
-    return _clause(body, sym.apply(receiver, TAU_PREFIX), flags.clean_clause)
+    return _clause(body, sym.apply(receiver, TAU_PREFIX))
 
 
-def consistency(sym: ChcLabUtils, receiver: Lab, sender: Lab, j: int) -> FNode:
+def consistency(sym: ChcLabUtils, receiver: Lab, sender: Lab, j: int) -> list[sx.SExpr]:
     """consistency_constraint between τ and σ, oriented by the direction of the link of τ's top frame."""
     match receiver.frame.prev:
         case Up():
@@ -176,6 +175,9 @@ def consistency(sym: ChcLabUtils, receiver: Lab, sender: Lab, j: int) -> FNode:
             return consistency_constraint(sym, receiver, sender, j, TAU_PREFIX, SIGMA_PREFIX)
 
 
-def query(sym: ChcLabUtils, label: Lab, flags: FeatureFlags) -> FNode | None:
-    body = [sym.apply(label), *_body_constraints(sym, label, flags.lab_internal_constraints)]
-    return _clause(body, smt.FALSE(), flags.clean_clause)
+def query(sym: ChcLabUtils, label: Lab, flags: FeatureFlags) -> sx.Clause:
+    body: list[sx.SExpr | sx.Application] = [
+        sym.apply(label),
+        *_body_constraints(sym, label, flags.lab_internal_constraints),
+    ]
+    return _clause(body, False)

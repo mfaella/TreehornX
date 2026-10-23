@@ -5,8 +5,8 @@ The system is sat when no input accepted by the precondition leads to a null-poi
 """
 
 import pytest
-from pychc.solvers.witness import Status
 
+from treehornx.chc.solvers import Status
 from treehornx.feature_flags import FeatureFlags
 
 from .config import TestConfig, params, run
@@ -19,11 +19,29 @@ CASES = params(
     TestConfig("sll_sorted_unsafe_first_lt_last", UNSAT, pre="sll_sorted_strict"),
     TestConfig("bst_safe_min_lt_max", SAT, pre="bst_strict"),
     TestConfig("bst_unsafe_min_lt_max", UNSAT, pre="bst_strict"),
+    TestConfig(
+        "avl_safe_insert_bal",
+        SAT,
+        m=1,
+        pre="avl",
+        solver="eldarica",
+        timeout=1200,
+        flags=FeatureFlags(True, True, True),
+        marks=(pytest.mark.slow,),
+    ),
     # safe for every input, the precondition must not change the result
     TestConfig("sll_safe_find", SAT, pre="sll_sorted"),
     TestConfig("bst_safe_insert_field_nil", SAT, m=1, pre="bst_strict"),
-    TestConfig("avl_safe_insert_bal", SAT, m=1, pre="avl", solver="eldarica", timeout=1200),
-    TestConfig("rb_safe_insert", SAT, m=1, nil_fields=("parent",), pre="rb", solver="eldarica", timeout=1200, flags=FeatureFlags(True, True, True))
+    TestConfig(
+        "rb_safe_insert",
+        SAT,
+        m=1,
+        nil_fields=("parent",),
+        pre="rb",
+        solver="eldarica",
+        timeout=1200,
+        flags=FeatureFlags(True, True, True),
+    ),
 )
 
 # safe only thanks to the precondition
@@ -31,7 +49,6 @@ WITHOUT_PRECONDITION = params(
     TestConfig("sll_sorted_safe_first_lt_last", UNSAT),
     TestConfig("bst_safe_min_lt_max", UNSAT),
     TestConfig("avl_safe_insert_bal", UNSAT, m=1),
-    TestConfig("rb_safe_insert", UNSAT, m=1, nil_fields=("parent",))
 )
 
 

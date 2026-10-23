@@ -1,4 +1,5 @@
 """Options changing the size/shape of the CHC systems, not their meaning."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

@@ -5,7 +5,8 @@ such label is reachable (the program is safe within the bounds m, n) and unsat o
 """
 
 import pytest
-from pychc.solvers.witness import Status
+
+from treehornx.chc.solvers import Status
 
 from .config import TestConfig, params, run
 
@@ -19,7 +20,7 @@ CASES = params(
     TestConfig("sll_unsafe_insert", UNSAT, m=1),
     TestConfig("sll_safe_length", SAT),
     TestConfig("sll_unsafe_length", UNSAT),
-    TestConfig("sll_safe_find_last", SAT),
+    TestConfig("sll_safe_find_last", SAT, solver="eldarica"),
     TestConfig("sll_unsafe_find_last", UNSAT),
     TestConfig("bst_safe_find", SAT),
     TestConfig("bst_unsafe_find", UNSAT),

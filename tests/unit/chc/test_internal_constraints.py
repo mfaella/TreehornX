@@ -2,11 +2,17 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from pychc.environment import reset_env
 
-from treehornx.chc.clean import conjuncts
-from treehornx.chc.Lab import LabCHC, build_lab, initial_constraints, internal_constraints, psi_internal
+from treehornx.chc.Lab import (
+    LabCHC,
+    build_lab,
+    initial_constraints,
+    internal_constraints,
+    psi_internal,
+    to_system,
+)
 from treehornx.chc.Lab.clauses import SIGMA_PREFIX
+from treehornx.chc.smt import sexpr as sx
 from treehornx.enum_models.core.Dir import Internal
 from treehornx.enum_models.Lab import Lab
 from treehornx.enum_models.Lab.initial import is_initial
@@ -21,7 +27,6 @@ N = 24
 @pytest.fixture(scope="module")
 def lab() -> Iterator[LabCHC]:
     """The system is built once for the module."""
-    reset_env()
     function = parse_file(str(C_FILES / "sll_safe_length.c"))
     yield build_lab(function, function.node.k, 0, N, FeatureFlags(clean_clause=True))
 
@@ -32,7 +37,7 @@ def is_internal(label: Lab) -> bool:
 
 def test_one_block_per_internal_frame(lab: LabCHC) -> None:
     for label in lab.predicates:
-        expected = []
+        expected: list[sx.SExpr] = []
         for i in range(2, len(label) + 1):
             prefix = label.cut(i)
             if not is_internal(prefix):
@@ -57,7 +62,7 @@ def test_dropped_frames_are_constrained(lab: LabCHC) -> None:
     assert dropped, "the program has no internal chain long enough to drop a frame"
     for label in dropped:
         arguments = set(lab.sym.label_symbols(label))
-        constrained = {s for c in internal_constraints(lab.sym, label) for s in c.get_free_variables()}
+        constrained = {s for c in internal_constraints(lab.sym, label) for s in c.free_variables()}
         for i in range(1, len(label) + 1):
             if i in lab.sym.kept_frames(label):
                 continue
@@ -75,10 +80,16 @@ def test_external_top_frame_adds_no_constraint(lab: LabCHC) -> None:
             )
 
 
-def test_clauses_have_no_top_level_variable_equality(lab: LabCHC) -> None:
-    for clause in lab.clauses:
-        if not clause.is_implies():
-            continue
-        for c in conjuncts(clause.arg(0)):
-            if c.is_equals() or c.is_iff():
-                assert not all(arg.is_symbol() for arg in c.args()), c
+def variable_equalities(clause: sx.Clause) -> list[sx.SExpr]:
+    return [
+        c
+        for c in clause.body
+        if isinstance(c, sx.OpExpr) and c.op is sx.Operator.EQ and all(isinstance(arg, sx.Var) for arg in c.args)
+    ]
+
+
+def test_clauses_are_cleaned_only_when_printed(lab: LabCHC) -> None:
+    system = to_system(lab.predicate_symbols(), lab.clauses, lab.flags.clean_clause)
+    assert any(variable_equalities(clause) for clause in system.clauses), "the built clauses are not cleaned"
+    for clause in system.printed_clauses():
+        assert not variable_equalities(clause), clause

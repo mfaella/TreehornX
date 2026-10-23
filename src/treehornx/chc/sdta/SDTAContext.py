@@ -2,7 +2,6 @@ from dataclasses import dataclass
 from typing import Callable, Literal
 
 from loguru import logger
-from pysmt.fnode import FNode
 
 from treehornx.chc.sdta.psi import (
     PsiFType,

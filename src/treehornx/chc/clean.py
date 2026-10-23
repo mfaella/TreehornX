@@ -3,15 +3,16 @@
 The non-predicate symbols of a clause are universally quantified, so for a top-level conjunct x = y of the body
   ∀x,y,X. (x = y ∧ B) → H  ≡  ∀z,X. B[z/x, z/y] → H[z/x, z/y]
 Only positive top-level equalities between two variables are merged; every occurrence of a merged variable is
-substituted, then body and head are simplified separately (simplifying `Implies(b, FALSE)` would give `Not(b)`).
+substituted, then the constraints of the body and the arguments of every application are simplified.
+
+Clauses are built uncleaned: the phase runs lazily on each clause when the system is printed (`CHCSystem.clean`).
 """
 
 from dataclasses import dataclass, field
-from typing import Generic, Iterable, TypeVar
+from typing import Generic, TypeVar
 
-import pychc.shortcuts as chc
-import pysmt.shortcuts as smt
-from pysmt.fnode import FNode
+from treehornx.chc.smt.preprocess import conjuncts, fresh_var, simplify_clause, substitute
+from treehornx.chc.smt.sexpr import FALSE, Application, Clause, Operator, OpExpr, SExpr, Var
 
 
 T = TypeVar("T")
@@ -19,8 +20,8 @@ T = TypeVar("T")
 
 @dataclass
 class UnionFind(Generic[T]):
-    _parent: dict[T, T] = field(default_factory=dict)
-    _rank: dict[T, int] = field(default_factory=dict)
+    _parent: dict[T, T] = field(default_factory=dict[T, T])
+    _rank: dict[T, int] = field(default_factory=dict[T, int])
 
     def add(self, item: T) -> None:
         if item not in self._parent:
@@ -54,40 +55,31 @@ class UnionFind(Generic[T]):
         return list(by_root.values())
 
 
-def conjuncts(formula: FNode) -> Iterable[FNode]:
-    if formula.is_and():
-        for arg in formula.args():
-            yield from conjuncts(arg)
-    else:
-        yield formula
+def _merged_equality(constraint: SExpr) -> tuple[Var, Var] | None:
+    """The two variables of `constraint` when it is x = y."""
+    match constraint:
+        case OpExpr(Operator.EQ, (Var() as left, Var() as right)):
+            return left, right
+        case _:
+            return None
 
 
-def _is_variable(node: FNode) -> bool:
-    return node.is_symbol() and not node.symbol_type().is_function_type()
+def clean_clause(clause: Clause) -> Clause | None:
+    """`clause` with every class of equal variables replaced by a fresh variable.
 
-
-def clean_clause(body: Iterable[FNode], head: FNode, enabled: bool) -> FNode | None:
-    """The clause body → head with every class of equal variables replaced by a fresh variable.
-
-    Returns None when the body simplifies to false: the clause is valid and says nothing. When not `enabled` the
-    clause is returned as is."""
-    if not enabled:
-        return chc.Clause(smt.And(*body), head)
-    flat = [c for formula in body for c in conjuncts(formula)]
-    classes = UnionFind[FNode]()
+    Returns None when the body simplifies to false: the clause is valid and says nothing."""
+    flat = [c for b in clause.body for c in ((b,) if isinstance(b, Application) else conjuncts(b))]
+    classes = UnionFind[Var]()
     for c in flat:
-        if (c.is_equals() or c.is_iff()) and all(_is_variable(arg) for arg in c.args()):
-            classes.union(c.arg(0), c.arg(1))
-    subst: dict[FNode, FNode] = {}
+        if not isinstance(c, Application) and (pair := _merged_equality(c)) is not None:
+            classes.union(*pair)
+    subst: dict[Var, SExpr] = {}
     for group in classes.groups():
         if len(group) < 2:
             continue
-        fresh = smt.FreshSymbol(group[0].symbol_type(), "e%d")
+        fresh = fresh_var(group[0].type)
         subst |= {variable: fresh for variable in group}
-    new_body = smt.substitute(smt.And(*flat), subst).simplify()
-    new_head = smt.substitute(head, subst).simplify()
-    if new_body.is_false():
+    cleaned = simplify_clause(substitute(Clause(clause.head, *flat), subst))
+    if FALSE in cleaned.body:
         return None
-    if new_body.is_true():
-        return new_head
-    return chc.Clause(new_body, new_head)
+    return cleaned

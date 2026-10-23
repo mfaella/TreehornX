@@ -1,20 +1,13 @@
 """Compressed CHC system of the Lab encoding."""
 
-import shutil
-import tempfile
 from dataclasses import dataclass, field
 from typing import Callable, Iterable, TextIO
 
-import pysmt.shortcuts as smt
-import pysmt.typing as smtty
-from pychc.chc_system import CHCSystem
-from pysmt import logics
-from pysmt.fnode import FNode
-from pysmt.smtlib.printers import SmtPrinter
-
 from treehornx import ir
+from treehornx.chc.clean import clean_clause
 from treehornx.chc.Lab.clauses import external_clause, fact, internal_clause, query
 from treehornx.chc.Lab.symbols import ChcLabUtils
+from treehornx.chc.smt.sexpr import CHCSystem, Clause, Predicate, Transform, write_horn
 from treehornx.enum_models.core.Dir import Internal
 from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.Lab import Frame, Lab, LabEngine, backbone_labels, initial_pairs, start_labels
@@ -61,14 +54,12 @@ class LabCHC:
     pairs: list[Pair[Lab]]
     flags: FeatureFlags
     predicates: set[Lab] = field(default_factory=set[Lab])
-    clauses: list[FNode] = field(default_factory=list[FNode])
+    clauses: list[Clause] = field(default_factory=list[Clause])
 
-    def add_clause(self, clause: FNode | None) -> None:
-        """Adds `clause`, unless the clean phase found its body unsatisfiable."""
-        if clause is not None:
-            self.clauses.append(clause)
+    def add_clause(self, clause: Clause) -> None:
+        self.clauses.append(clause)
 
-    def predicate_symbols(self) -> list[FNode]:
+    def predicate_symbols(self) -> list[Predicate]:
         return [self.sym.predicate(lab) for lab in sorted(self.predicates, key=self.sym.predicate_name)]
 
 
@@ -112,50 +103,24 @@ def build_lab(function: ir.Function, k: int, m: int, n: int, flags: FeatureFlags
     return lab
 
 
-def to_system(predicates: Iterable[FNode], clauses: Iterable[FNode]) -> CHCSystem:
-    system = CHCSystem(logics.QF_UFLIA)
-    for pred in predicates:
-        system.add_predicate(pred)
-    for clause in clauses:
-        system.add_clause(clause)
-    return system
+def printing_transform(clean: bool) -> Transform | None:
+    """The rewriting applied to the clauses when they are printed: the clean phase, if enabled."""
+    return clean_clause if clean else None
 
 
-def write_smt2(predicates: Iterable[FNode], clauses: Iterable[FNode], out: TextIO) -> None:
-    """Writes the system as `CHCSystem.serialize` does without holding the clauses together in memory: they are
-    spooled to a temporary file as they are generated, then copied after the declarations of the used predicates."""
-    preds = set(predicates)
-    used: set[FNode] = set()
-    with tempfile.TemporaryFile("w+") as spool:
-        printer = SmtPrinter(spool)
-        for clause in clauses:
-            free = clause.get_free_variables()
-            used |= preds & free
-            closed = clause
-            if not clause.is_forall():
-                bound = [v for v in free if v not in preds and not v.get_type().is_function_type()]
-                closed = smt.ForAll(sorted(bound, key=lambda v: v.symbol_name()), clause)
-            spool.write("(assert ")
-            printer.printer(closed)
-            spool.write(")\n")
+def to_system(predicates: Iterable[Predicate], clauses: Iterable[Clause], clean: bool = False) -> CHCSystem:
+    """The system of `clauses`, cleaned lazily when printed if `clean`."""
+    return CHCSystem(list(predicates), list(clauses), printing_transform(clean))
 
-        out.write("(set-logic HORN)\n")
-        header = SmtPrinter(out)
-        for pred in sorted(used, key=lambda p: p.symbol_name()):
-            params: tuple[smtty.PySMTType, ...] = getattr(pred.get_type(), "param_types", ())
-            args = " ".join(str(t) for t in params) if params else " "
-            out.write("(declare-fun ")
-            header.printer(pred)
-            out.write(f" ({args}) Bool)\n")
-        out.write("\n")
-        spool.seek(0)
-        shutil.copyfileobj(spool, out)
-        out.write("(check-sat)\n")
+
+def write_smt2(clauses: Iterable[Clause], out: TextIO, clean: bool = False) -> None:
+    """Writes the system as `CHCSystem.write` does, without holding the clauses together in memory."""
+    write_horn(clauses, out, printing_transform(clean))
 
 
 def make_system(
     function: ir.Function, k: int, m: int, n: int, is_query: Callable[[Lab], bool], flags: FeatureFlags
 ) -> CHCSystem:
     lab = build_lab(function, k, m, n, flags)
-    queries = [q for label in lab.predicates if is_query(label) and (q := query(lab.sym, label, flags)) is not None]
-    return to_system(lab.predicate_symbols(), [*lab.clauses, *queries])
+    queries = [query(lab.sym, label, flags) for label in lab.predicates if is_query(label)]
+    return to_system(lab.predicate_symbols(), [*lab.clauses, *queries], flags.clean_clause)

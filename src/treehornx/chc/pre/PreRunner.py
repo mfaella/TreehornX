@@ -2,15 +2,13 @@
 
 from dataclasses import dataclass, field
 
-import pysmt.shortcuts as smt
-import pysmt.typing as smtty
-from pysmt.fnode import FNode
 from typing_extensions import override
 
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.Lab.clauses import consistency_constraint, internal_constraints
 from treehornx.chc.Lab.symbols import ChcLabUtils
 from treehornx.chc.pre.runner import BotUpAutomataRunner
+from treehornx.chc.smt import sexpr as sx
 from treehornx.enum_models.Lab import ERR, OOM, Frame, Lab
 from treehornx.enum_models.Lab.initial import is_initial
 
@@ -22,27 +20,29 @@ class PreRunner(BotUpAutomataRunner[Frame]):
     exit_codes: frozenset[ExitCodeKind] = field(default=frozenset({ExitCodeKind.ERR}), kw_only=True)
 
     @override
-    def node_data_symbols(self, label: Lab, prefix: str) -> list[FNode]:
+    def node_data_symbols(self, label: Lab, prefix: str) -> list[sx.Var]:
         return self.sym.label_symbols(label, prefix)
 
     @override
-    def node_data_types(self, label: Lab) -> list[smtty.PySMTType]:
+    def node_data_types(self, label: Lab) -> list[sx.Type]:
         return [t for _ in self.sym.kept_frames(label) for t in self.sym.frame_types()]
 
     @override
-    def node_field_symbol(self, field_id: int, index: int, prefix: str) -> FNode:
+    def node_field_symbol(self, field_id: int, index: int, prefix: str) -> sx.Var:
         return self.sym.field_symbol(field_id, index, prefix)
 
     @override
-    def node_apply(self, label: Lab, prefix: str) -> FNode:
+    def node_apply(self, label: Lab, prefix: str) -> sx.Application:
         return self.sym.apply(label, prefix)
 
     @override
-    def node_consistency(self, parent: Lab, child: Lab, j: int, parent_prefix: str, child_prefix: str) -> FNode:
+    def node_consistency(
+        self, parent: Lab, child: Lab, j: int, parent_prefix: str, child_prefix: str
+    ) -> list[sx.SExpr]:
         return consistency_constraint(self.sym, parent, child, j, parent_prefix, child_prefix)
 
     @override
-    def node_local_constraints(self, label: Lab, prefix: str) -> list[FNode]:
+    def node_local_constraints(self, label: Lab, prefix: str) -> list[sx.SExpr]:
         return internal_constraints(self.sym, label, prefix) if self.flags.pre_internal_constraints else []
 
     def label_exit(self, label: Lab) -> set[ExitCodeKind]:
@@ -58,8 +58,8 @@ class PreRunner(BotUpAutomataRunner[Frame]):
         return statuses
 
     @override
-    def is_error(self, label: Lab) -> FNode:
-        return smt.Bool(bool(self.label_exit(label) & self.exit_codes))
+    def is_error(self, label: Lab) -> sx.SExpr:
+        return sx.Constant(bool(self.label_exit(label) & self.exit_codes))
 
     @override
     def is_input_node(self, label: Lab) -> bool:

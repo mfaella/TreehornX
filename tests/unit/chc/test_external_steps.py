@@ -4,9 +4,9 @@ from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
-from pychc.environment import reset_env
 
 from treehornx.chc.Lab import LabCHC, build_lab, external_steps
+from treehornx.chc.smt import sexpr as sx
 from treehornx.enum_models.core.Dir import Down, Internal, Up
 from treehornx.feature_flags import FeatureFlags
 from treehornx.parser import parse_file
@@ -18,7 +18,6 @@ N = 128
 
 @pytest.fixture(scope="module")
 def lab() -> Iterator[LabCHC]:
-    reset_env()
     function = parse_file(str(C_FILES / "bst_unsafe_linked_new.c"))
     yield build_lab(function, function.node.k, 1, N, FeatureFlags())
 
@@ -47,7 +46,7 @@ def test_frame_entered_from_parent_and_leaving_to_it(lab: LabCHC) -> None:
 def test_every_label_entered_from_another_node_has_a_clause(lab: LabCHC) -> None:
     """Every predicate whose top frame comes from another node is the head of an external clause: the parent
     of the new node, entered from it by s->left = q, is derivable."""
-    heads = {clause.arg(1).function_name() for clause in lab.clauses if clause.is_implies()}
+    heads = {clause.head.predicate for clause in lab.clauses if clause.body and isinstance(clause.head, sx.Application)}
     entered = [label for label in lab.predicates if len(label) >= 2 and label.frame.prev != Internal()]
     assert any(label.frame.prev == Down(2) for label in entered)
     for label in entered:

@@ -7,10 +7,11 @@ maintainers = [{ name = "Nicola Gentile", email = "nicola.gentile.developer@gmai
 readme = { file = "README.md", content-type = "text/markdown" }
 # license = { file = "LICENSE" }
 keywords = ["programming languages", "program verification", "formal methods", "static analysis"]
-requires-python = ">=3.12"
+requires-python = ">=3.11"
 dependencies = [
     # general purpose
     "frozendict",
+    "typing-extensions",
     "loguru",
     # tui
     "typer",
@@ -24,8 +25,6 @@ dependencies = [
     # parsing
     "pycparser",
     "antlr4-python3-runtime",
-    # sat
-    "pychc @ git+https://github.com/nicola-gentile/pychc.git@build-system",
     "networkx",
     "types-networkx>=3.6.1.20260321",
     "z3-solver",
@@ -33,7 +32,7 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pyinstrument>=5.1.2",
+    "pyinstrument>=5.1.2; platform_python_implementation == 'CPython'",  # C extension, no PyPy build
     "ruff",
     "pylint",
     "pyright",
@@ -65,7 +64,7 @@ pythonpath = ["src/treehornx"]
 markers = ["slow: verification runs taking minutes (deselect with -m \"not slow\")"]
 
 [tool.ruff]
-target-version = "py312"
+target-version = "py311"
 src = ["src, tests"]
 line-length = 120
 indent-width = 4
@@ -107,7 +106,7 @@ color_output = true
 stubPath = "typings"
 include = ["src", "tests"]
 exclude = ["src/treehornx/chc/pplang"]
-pythonVersion = "3.12"
+pythonVersion = "3.11"
 extraPaths = ["src"]
 typeCheckingMode = "strict"
 reportMissingImports = true

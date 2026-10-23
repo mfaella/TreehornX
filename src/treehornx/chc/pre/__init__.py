@@ -1,11 +1,10 @@
-from pychc.chc_system import CHCSystem
-
 from treehornx import ir
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.Lab.system import build_lab, to_system
 from treehornx.chc.pre.PreRunner import PreRunner
 from treehornx.chc.pre.runner import BotUpAutomataRunner
 from treehornx.chc.sdta.SDTAContext import SDTAContext
+from treehornx.chc.smt.sexpr import CHCSystem
 from treehornx.feature_flags import FeatureFlags
 
 
@@ -25,6 +24,7 @@ def make_system(
     return to_system(
         [*lab.predicate_symbols(), *runner.predicates()],
         [*lab.clauses, *runner.clauses(), *runner.queries()],
+        flags.clean_clause,
     )
 
 

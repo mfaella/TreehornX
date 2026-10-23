@@ -11,13 +11,6 @@ from typing import Annotated, Callable, Iterable, Literal, TypeAlias, cast
 
 import typer
 from humanfriendly import format_timespan
-from pychc.chc_system import CHCSystem
-from pychc.solvers.chc_solver import CHCSolver
-from pychc.solvers.eldarica import EldaricaSolver
-from pychc.solvers.golem import GolemSolver
-from pychc.solvers.witness import Status
-from pychc.solvers.z3 import Z3CHCSolver
-from pysmt.fnode import FNode
 
 from treehornx import ir
 from treehornx.chc.core import ExitCodeKind
@@ -33,6 +26,8 @@ from treehornx.chc.sdta.SDTAContext import (
     sll_sorted_ctx,
     sll_sorted_strict_ctx,
 )
+from treehornx.chc.smt.sexpr import CHCSystem, Clause, Predicate
+from treehornx.chc.solvers import CHCSolver, EldaricaSolver, SolverError, Status, Z3Solver
 from treehornx.enum_models.Lab import ERR, OOM, Lab
 from treehornx.feature_flags import FeatureFlags
 from treehornx.parser import SubsetError, parse_file
@@ -107,13 +102,13 @@ def label_exit(label: Lab, n: int) -> set[ExitCodeKind]:
 
 def memory_clauses(
     function: ir.Function, lab: LabCHC, m: int, n: int, exit_code: ExitCodeKind, pre_ctx: SDTAContext | None
-) -> tuple[list[FNode], Iterable[FNode]]:
+) -> tuple[list[Predicate], Iterable[Clause]]:
     """Predicates and (lazily generated) clauses of a system that is unsat iff some execution (on an input accepted
     by the precondition) ends with `exit_code`."""
     k = function.node.k
     if pre_ctx is None:
         error_labels = (label for label in lab.predicates if exit_code in label_exit(label, n))
-        queries = (q for label in error_labels if (q := query(lab.sym, label, lab.flags)) is not None)
+        queries = (query(lab.sym, label, lab.flags) for label in error_labels)
         return lab.predicate_symbols(), itertools.chain(lab.clauses, queries)
     runner = PreRunner(
         function, lab.pairs, pre_ctx, k, m, sym=lab.sym, n=n, exit_codes=frozenset({exit_code}), flags=lab.flags
@@ -126,7 +121,7 @@ def memory_clauses(
 def memory_system(
     function: ir.Function, lab: LabCHC, m: int, n: int, exit_code: ExitCodeKind, pre_ctx: SDTAContext | None
 ) -> CHCSystem:
-    return to_system(*memory_clauses(function, lab, m, n, exit_code, pre_ctx))
+    return to_system(*memory_clauses(function, lab, m, n, exit_code, pre_ctx), lab.flags.clean_clause)
 
 
 def dump_system(
@@ -140,15 +135,15 @@ def dump_system(
     print_chc: bool,
 ) -> Path | None:
     """Streams the system to `<function>_<check>.smt2` and/or stdout without building a `CHCSystem`."""
-    predicates, clauses = memory_clauses(function, lab, m, n, exit_code, pre_ctx)
+    _, clauses = memory_clauses(function, lab, m, n, exit_code, pre_ctx)
     if not smt2:
         sys.stdout.write(f"; CHC system for {exit_code.name}\n")
-        write_smt2(predicates, clauses, sys.stdout)
+        write_smt2(clauses, sys.stdout, lab.flags.clean_clause)
         sys.stdout.flush()
         return None
     file_path = Path(f"{function.name}_{exit_code.name}.smt2")
     with file_path.open("w") as f:
-        write_smt2(predicates, clauses, f)
+        write_smt2(clauses, f, lab.flags.clean_clause)
     if print_chc:
         sys.stdout.write(f"; CHC system for {exit_code.name}\n")
         with file_path.open() as f:
@@ -157,18 +152,15 @@ def dump_system(
     return file_path
 
 
-def make_solver(z3: bool, golem: bool, eldarica: bool, solvers_dir: Path | None) -> CHCSolver:
-    if z3:
-        return Z3CHCSolver(binary_path=solvers_dir)
-    if eldarica:
-        return EldaricaSolver(binary_path=solvers_dir)
-    return GolemSolver(binary_path=solvers_dir)
+def make_solver(z3: bool, eldarica: bool, solvers_dir: Path | None) -> CHCSolver:
+    if eldarica and not z3:
+        return EldaricaSolver(solvers_dir)
+    return Z3Solver(solvers_dir)
 
 
 def check_sat(solver: CHCSolver, system: CHCSystem, timeout: int | None) -> Status:
-    solver.load_system(system)
     try:
-        return solver.solve(timeout=timeout)
+        return solver.solve(system, timeout)
     except Exception as e:  # the solver gives up without a result
         warning(f"the solver did not return a result: {e}")
         return Status.UNKNOWN
@@ -184,7 +176,6 @@ def display_option_messages(
     check_sat: bool,
     interactive_check_sat: bool,
     z3: bool,
-    golem: bool,
     eldarica: bool,
     parent: str | None,
     dependency_graphs: bool,
@@ -199,12 +190,12 @@ def display_option_messages(
         info(f"No value specified for m, using default value of {DEFAULT_M}.")
     if c is not None or partial_correctness:
         critical("-c and --partial-correctness are not supported by the current encoding, they are ignored.")
-    if check_sat and not any((z3, golem, eldarica)):
-        info("Using golem by default.")
+    if check_sat and not any((z3, eldarica)):
+        info("Using z3 by default.")
     if interactive_check_sat:
         critical("--interactive-check-sat not supported, it is ignored.")
-    if len([solver for solver in (z3, golem, eldarica) if solver]) > 1:
-        warning("Multiple solvers specified, using " + ("z3." if z3 else "eldarica."))
+    if z3 and eldarica:
+        warning("Multiple solvers specified, using z3.")
     if parent is not None:
         critical("--parent not supported: the parser does not accept parent pointers, it is ignored.")
     if dependency_graphs:
@@ -338,7 +329,6 @@ def verify_cmd(
     check_sat_flag: Annotated[bool, typer.Option("--check-sat", help="solve the CHC systems")] = False,
     interactive_check_sat: Annotated[bool, typer.Option("--interactive-check-sat", help="not supported")] = False,
     z3: Annotated[bool, typer.Option("--z3")] = False,
-    golem: Annotated[bool, typer.Option("--golem")] = False,
     eldarica: Annotated[bool, typer.Option("--eldarica")] = False,
     solvers_dir: Annotated[
         Path | None, typer.Option("--solvers-dir", help="directory of the solver binaries, PATH by default")
@@ -387,7 +377,6 @@ def verify_cmd(
         check_sat_flag,
         interactive_check_sat,
         z3,
-        golem,
         eldarica,
         parent,
         full_dep_graph or compressed_dep_graph or internal_dependency_graph,
@@ -407,7 +396,11 @@ def verify_cmd(
             raise typer.Exit(1)
         info(f"Pointer fields nil in every input node: {', '.join(nil_fields)}.")
 
-    solver = make_solver(z3, golem, eldarica, solvers_dir) if check_sat_flag else None
+    try:
+        solver = make_solver(z3, eldarica, solvers_dir) if check_sat_flag else None
+    except SolverError as e:
+        error(str(e))
+        raise typer.Exit(1) from e
     stats = verify(
         function,
         n or DEFAULT_N,

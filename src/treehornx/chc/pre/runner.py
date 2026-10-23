@@ -12,16 +12,11 @@ from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import cached_property
 from itertools import product
-from typing import Generic, Iterable, Iterator, TypeVar
-
-import pychc.shortcuts as chc
-import pysmt.shortcuts as smt
-import pysmt.typing as smtty
-from pysmt.fnode import FNode
+from typing import Generic, Iterable, Iterator, Literal, TypeVar
 
 from treehornx import ir
-from treehornx.chc.clean import clean_clause
 from treehornx.chc.sdta.SDTAContext import SDTAContext
+from treehornx.chc.smt import sexpr as sx
 from treehornx.enum_models.core.InternedPool import InternedPool
 from treehornx.enum_models.core.Label import Label
 from treehornx.enum_models.core.Pair import Pair
@@ -64,7 +59,7 @@ class BotUpAutomataRunner(ABC, Generic[F]):
             self._label_ids.intern(pair.child)
 
     @abstractmethod
-    def is_error(self, label: Label[F]) -> FNode:
+    def is_error(self, label: Label[F]) -> sx.SExpr:
         """Whether the enumerated part of `label` is an error."""
 
     @abstractmethod
@@ -78,56 +73,56 @@ class BotUpAutomataRunner(ABC, Generic[F]):
     # symbols
     # -----------------------------------------------------------------------
 
-    def _smt_type(self, state: str) -> smtty.PySMTType:
-        return smtty.INT if self.ctx.states[state] == "int" else smtty.BOOL
+    def _smt_type(self, state: str) -> sx.Type:
+        return sx.Type.Int if self.ctx.states[state] == "int" else sx.Type.Bool
 
-    def state_symbols(self, role: str) -> dict[str, FNode]:
-        return {state: smt.Symbol(f"pre_{role}_{state}", self._smt_type(state)) for state in self.ctx.states}
+    def state_symbols(self, role: str) -> dict[str, sx.Var]:
+        return {state: sx.Var(f"pre_{role}_{state}", self._smt_type(state)) for state in self.ctx.states}
 
-    def error_symbol(self, role: str) -> FNode:
-        return smt.Symbol(f"pre_{role}_{ERROR_FLAG}", smtty.BOOL)
+    def error_symbol(self, role: str) -> sx.Var:
+        return sx.Var(f"pre_{role}_{ERROR_FLAG}", sx.Type.Bool)
 
     # The node predicate the automaton runs alongside, its data and the consistency between a parent and
     # its j-th child: implemented by the runner attached to each kind of label.
 
     @abstractmethod
-    def node_data_symbols(self, label: Label[F], prefix: str) -> list[FNode]: ...
+    def node_data_symbols(self, label: Label[F], prefix: str) -> list[sx.Var]: ...
 
     @abstractmethod
-    def node_data_types(self, label: Label[F]) -> list[smtty.PySMTType]: ...
+    def node_data_types(self, label: Label[F]) -> list[sx.Type]: ...
 
     @abstractmethod
-    def node_field_symbol(self, field_id: int, index: int, prefix: str) -> FNode:
+    def node_field_symbol(self, field_id: int, index: int, prefix: str) -> sx.Var:
         """The data field `field_id` of the node at the frame `index`."""
 
     @abstractmethod
-    def node_apply(self, label: Label[F], prefix: str) -> FNode: ...
+    def node_apply(self, label: Label[F], prefix: str) -> sx.Application: ...
 
     @abstractmethod
     def node_consistency(
         self, parent: Label[F], child: Label[F], j: int, parent_prefix: str, child_prefix: str
-    ) -> FNode: ...
+    ) -> list[sx.SExpr]: ...
 
     @abstractmethod
-    def node_local_constraints(self, label: Label[F], prefix: str) -> list[FNode]:
+    def node_local_constraints(self, label: Label[F], prefix: str) -> list[sx.SExpr]:
         """Constraints between the frames of `label` that the node predicate does not take as arguments."""
 
     def _label_id(self, label: Label[F]) -> int:
         return self._label_ids.get_id(label)
 
-    def _args(self, label: Label[F], role: str) -> list[FNode]:
+    def _args(self, label: Label[F], role: str) -> list[sx.Var]:
         data = self.node_data_symbols(label, data_prefix(role))
         return [*data, *self.state_symbols(role).values(), self.error_symbol(role)]
 
-    def _arg_types(self, label: Label[F]) -> list[smtty.PySMTType]:
+    def _arg_types(self, label: Label[F]) -> list[sx.Type]:
         data_types = self.node_data_types(label)
-        return [*data_types, *(self._smt_type(state) for state in self.ctx.states), smtty.BOOL]
+        return [*data_types, *(self._smt_type(state) for state in self.ctx.states), sx.Type.Bool]
 
-    def predicate(self, label: Label[F]) -> FNode:
-        return chc.Predicate(f"{self.name}{self._label_id(label)}", self._arg_types(label))
+    def predicate(self, label: Label[F]) -> sx.Predicate:
+        return sx.Predicate(f"{self.name}{self._label_id(label)}", self._arg_types(label))
 
-    def apply(self, label: Label[F], role: str) -> FNode:
-        return chc.Apply(self.predicate(label), self._args(label, role))
+    def apply(self, label: Label[F], role: str) -> sx.Application:
+        return sx.Application(self.predicate(label), *self._args(label, role))
 
     # -----------------------------------------------------------------------
     # backbone
@@ -151,17 +146,17 @@ class BotUpAutomataRunner(ABC, Generic[F]):
     # clauses
     # -----------------------------------------------------------------------
 
-    def leaf_clause(self, label: Label[F]) -> FNode | None:
+    def leaf_clause(self, label: Label[F]) -> sx.Clause:
         """Pre1: an auxiliary leaf has the nil state."""
-        error = smt.Iff(self.error_symbol(PARENT), self.is_error(label))
-        body = [
+        error = sx.OpExpr(sx.Operator.EQ, self.error_symbol(PARENT), self.is_error(label))
+        body: list[sx.SExpr | sx.Application] = [
             self.node_apply(label, data_prefix(PARENT)),
             *self.node_local_constraints(label, data_prefix(PARENT)),
             error,
         ]
-        return clean_clause(body, self.apply(label, PARENT), self.flags.clean_clause)
+        return sx.Clause(self.apply(label, PARENT), *body)
 
-    def _psi(self, parent: Label[F], children: tuple[Label[F], ...]) -> FNode:
+    def _psi(self, parent: Label[F], children: tuple[Label[F], ...]) -> sx.SExpr:
         children_states = {
             self.function.node.pointer_fields[j].name: (
                 self.state_symbols(child_role(j)) if self.is_input_node(children[j]) else None
@@ -171,51 +166,55 @@ class BotUpAutomataRunner(ABC, Generic[F]):
         fields = {f.name: self.node_field_symbol(f.id, 1, data_prefix(PARENT)) for f in self.function.node.data_fields}
         return self.ctx.psi(children_states, fields, self.state_symbols(PARENT))
 
-    def node_clause(self, parent: Label[F], children: tuple[Label[F], ...]) -> FNode | None:
+    def node_clause(self, parent: Label[F], children: tuple[Label[F], ...]) -> sx.Clause:
         """Pre2: the state of an input node follows from the states of its children through ψ."""
-        body = [self.node_apply(parent, data_prefix(PARENT)), *self.node_local_constraints(parent, data_prefix(PARENT))]
+        body: list[sx.SExpr | sx.Application] = [
+            self.node_apply(parent, data_prefix(PARENT)),
+            *self.node_local_constraints(parent, data_prefix(PARENT)),
+        ]
         for j, child in enumerate(children):
             body.append(self.apply(child, child_role(j)))
             body.extend(self.node_local_constraints(child, data_prefix(child_role(j))))
-            body.append(self.node_consistency(parent, child, j, data_prefix(PARENT), data_prefix(child_role(j))))
+            body.extend(self.node_consistency(parent, child, j, data_prefix(PARENT), data_prefix(child_role(j))))
         if self.is_input_node(parent):
             body.append(self._psi(parent, children))
-        errors = [self.error_symbol(child_role(j)) for j in range(len(children))]
-        body.append(smt.Iff(self.error_symbol(PARENT), smt.Or(*errors, self.is_error(parent))))
-        return clean_clause(body, self.apply(parent, PARENT), self.flags.clean_clause)
+        errors = [*(self.error_symbol(child_role(j)) for j in range(len(children))), self.is_error(parent)]
+        some_error = errors[0] if len(errors) == 1 else sx.OpExpr(sx.Operator.OR, *errors)
+        body.append(sx.OpExpr(sx.Operator.EQ, self.error_symbol(PARENT), some_error))
+        return sx.Clause(self.apply(parent, PARENT), *body)
 
-    def node_clauses(self, parent: Label[F]) -> Iterable[FNode | None]:
+    def node_clauses(self, parent: Label[F]) -> Iterable[sx.Clause]:
         by_child = self.children[parent]
         if any(j not in by_child for j in range(self.k + self.m)):
             return
         for children in product(*(sorted(by_child[j], key=self._label_id) for j in range(self.k + self.m))):
             yield self.node_clause(parent, children)
 
-    def query(self, root: Label[F]) -> FNode | None:
+    def query(self, root: Label[F]) -> sx.Clause:
         """PreQ: an accepted input tree leads to an error."""
         if self.is_input_node(root):
             accepted = self.ctx.psiF(self.state_symbols(PARENT))
         else:
-            accepted = smt.Bool(self.accept_empty)
-        body = [
+            accepted = sx.Constant(self.accept_empty)
+        body: list[sx.SExpr | sx.Application] = [
             self.apply(root, PARENT),
             *self.node_local_constraints(root, data_prefix(PARENT)),
             self.error_symbol(PARENT),
             accepted,
         ]
-        return clean_clause(body, smt.FALSE(), self.flags.clean_clause)
+        return sx.Clause(False, *body)
 
-    def predicates(self) -> list[FNode]:
+    def predicates(self) -> list[sx.Predicate]:
         return [self.predicate(label) for label in sorted(self.labels, key=self._label_id)]
 
-    def clauses(self) -> Iterator[FNode]:
+    def clauses(self) -> Iterator[sx.Clause]:
         """Generated lazily: the product of `node_clauses` can be too large to hold in memory."""
         for label in sorted(self.labels, key=self._label_id):
             if label in self.children:
-                yield from (c for c in self.node_clauses(label) if c is not None)
-            elif self.is_leaf(label) and (leaf := self.leaf_clause(label)) is not None:
-                yield leaf
+                yield from self.node_clauses(label)
+            elif self.is_leaf(label):
+                yield self.leaf_clause(label)
 
-    def queries(self) -> list[FNode]:
+    def queries(self) -> list[sx.Clause]:
         roots = (label for label in sorted(self.labels, key=self._label_id) if self.is_root(label))
-        return [q for root in roots if (q := self.query(root)) is not None]
+        return [self.query(root) for root in roots]

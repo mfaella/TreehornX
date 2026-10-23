@@ -1,14 +1,13 @@
 """psi_rb against a reference red-black check, on every shape and colouring with up to 5 nodes."""
 
 import itertools
-from typing import Iterator
+from typing import Any, Iterator
 
-import pysmt.shortcuts as smt
 import pytest
-from pysmt.fnode import FNode
-from pysmt.typing import INT
+import z3  # pyright: ignore[reportMissingTypeStubs]
 
 from treehornx.chc.sdta.psi import psi_rb, root_is_black
+from treehornx.chc.smt import sexpr as sx
 
 
 # a tree is None (nil) or the pair (left, right)
@@ -45,23 +44,30 @@ def black_height(tree: Tree, red: dict[int, bool]) -> int | None:
 
 def run_psi(
     tree: Tree, red: dict[int, bool], key: dict[int, int], counter: Iterator[int]
-) -> tuple[list[FNode], dict[str, FNode] | None]:
+) -> tuple[list[sx.SExpr], dict[str, sx.SExpr] | None]:
     """Constraints of the automaton run on `tree` and the state of its root."""
     if tree is None:
         return [], None
     left_constraints, left_state = run_psi(tree[0], red, key, counter)
     right_constraints, right_state = run_psi(tree[1], red, key, counter)
     i = next(counter)
-    state = {
-        "min": smt.Symbol(f"min{i}", INT),
-        "max": smt.Symbol(f"max{i}", INT),
-        "data": smt.Symbol(f"data{i}", INT),
-        "black_height": smt.Symbol(f"black_height{i}", INT),
-        "red": smt.Symbol(f"red{i}"),
+    state: dict[str, sx.SExpr] = {
+        "min": sx.Var(f"min{i}", sx.Type.Int),
+        "max": sx.Var(f"max{i}", sx.Type.Int),
+        "data": sx.Var(f"data{i}", sx.Type.Int),
+        "black_height": sx.Var(f"black_height{i}", sx.Type.Int),
+        "red": sx.Var(f"red{i}", sx.Type.Bool),
     }
-    fields = {"data": smt.Int(key[id(tree)]), "red": smt.Bool(red[id(tree)])}
+    fields: dict[str, sx.SExpr] = {"data": sx.Constant(key[id(tree)]), "red": sx.Constant(red[id(tree)])}
     psi = psi_rb({"left": left_state, "right": right_state}, fields, state)
     return [*left_constraints, *right_constraints, psi], state
+
+
+def is_sat(formula: sx.SExpr) -> bool:
+    declarations = "".join(f"(declare-const {v.name} {v.type.value})" for v in set(formula.free_variables()))
+    solver: Any = z3.Solver()
+    solver.from_string(f"{declarations}(assert {formula.to_smt()})")
+    return bool(solver.check() == z3.sat)
 
 
 def cases() -> Iterator[tuple[Tree, tuple[bool, ...]]]:
@@ -79,4 +85,4 @@ def test_psi_rb_matches_reference(tree: Tree, colours: tuple[bool, ...]) -> None
     constraints, root = run_psi(tree, red, key, itertools.count())
     assert root is not None
     expected = black_height(tree, red) is not None and not red[id(tree)]
-    assert smt.is_sat(smt.And(*constraints, root_is_black(root))) == expected
+    assert is_sat(sx.OpExpr(sx.Operator.AND, *constraints, root_is_black(root))) == expected
