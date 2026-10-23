@@ -4,16 +4,20 @@ A predicate `<name><ID>` is attached to every label (POPL, Sec. 5, Fig. 4). Its 
 symbols of the label, the automaton state of the node and the flag `e`, true when some node of the subtree
 is an error according to `is_error`. Its clauses carry every data constraint of the node and of the links
 to its children, so they are the whole system: the steps of the lace have no clauses of their own.
+
+The children of a node are collected one at a time instead of in a single clause over their product: the
+predicate `<name><ID>_<N>` holds the data of the node, the states of the first N children read by ψ and the
+error flag accumulated so far, and `<name><ID>` follows from `<name><ID>_<k+m>` through ψ.
 Symbols of the parent are prefixed with `p`, those of the j-th child with `c<j>` (children indexed from 0):
 data symbols as `p_v0_1`, `c0_f0_1`,
-states as `pre_p_<STATE>`, `pre_c<j>_<STATE>`, and the flag as `pre_p_e`, `pre_c<j>_e`.
+states as `pre_p_<STATE>`, `pre_c<j>_<STATE>`, and the flag as `pre_p_e`, `pre_c<j>_e`; the flag accumulated
+over the first N children is `pre_p_e<N>`.
 """
 
 from abc import ABC, abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass, field
 from functools import cached_property
-from itertools import product
 from typing import Generic, Iterable, Iterator, Literal, TypeVar
 
 from treehornx import ir
@@ -36,6 +40,16 @@ def child_role(j: int) -> str:
 
 def data_prefix(role: str) -> str:
     return f"{role}_"
+
+
+def _or(*args: sx.SExpr) -> sx.SExpr:
+    """The disjunction of `args`, simplified when one of them is a constant."""
+    if sx.TRUE in args:
+        return sx.TRUE
+    args = tuple(a for a in args if a != sx.FALSE)
+    if not args:
+        return sx.FALSE
+    return args[0] if len(args) == 1 else sx.OpExpr(sx.Operator.OR, *args)
 
 
 @dataclass
@@ -67,6 +81,11 @@ class BotUpAutomataRunner(ABC, Generic[F]):
         """Whether the node belongs to the input tree of the automaton; otherwise its state is nil."""
 
     @abstractmethod
+    def is_input_child(self, parent: Label[F], j: int) -> bool:
+        """Whether the j-th child of `parent` is an input node: decided by the parent, so the arguments of
+        `<name><ID>_<N>` do not depend on the children collected."""
+
+    @abstractmethod
     def is_root(self, label: Label[F]) -> bool: ...
 
     # -----------------------------------------------------------------------
@@ -81,6 +100,10 @@ class BotUpAutomataRunner(ABC, Generic[F]):
 
     def error_symbol(self, role: str) -> sx.Var:
         return sx.Var(f"pre_{role}_{ERROR_FLAG}", sx.Type.Bool)
+
+    def chain_error_symbol(self, n: int) -> sx.Var:
+        """The error flag accumulated over the parent and its first `n` children."""
+        return sx.Var(f"pre_{PARENT}_{ERROR_FLAG}{n}", sx.Type.Bool)
 
     # The data of a node, the constraints between them and the consistency between a parent and its j-th
     # child: implemented by the runner attached to each kind of label.
@@ -121,6 +144,20 @@ class BotUpAutomataRunner(ABC, Generic[F]):
     def apply(self, label: Label[F], role: str) -> sx.Application:
         return sx.Application(self.predicate(label), *self._args(label, role))
 
+    def _stored_children(self, parent: Label[F], n: int) -> list[int]:
+        """The children among the first `n` whose states are read by ψ."""
+        return [j for j in range(min(n, self.k)) if self.is_input_child(parent, j)]
+
+    def chain_predicate(self, parent: Label[F], n: int) -> sx.Predicate:
+        states = [self._smt_type(state) for _ in self._stored_children(parent, n) for state in self.ctx.states]
+        types = [*self.node_data_types(parent), *states, sx.Type.Bool]
+        return sx.Predicate(f"{self.name}{self._label_id(parent)}_{n}", types)
+
+    def chain_apply(self, parent: Label[F], n: int) -> sx.Application:
+        data = self.node_data_symbols(parent, data_prefix(PARENT))
+        states = [s for j in self._stored_children(parent, n) for s in self.state_symbols(child_role(j)).values()]
+        return sx.Application(self.chain_predicate(parent, n), *data, *states, self.chain_error_symbol(n))
+
     # -----------------------------------------------------------------------
     # backbone
     # -----------------------------------------------------------------------
@@ -149,42 +186,59 @@ class BotUpAutomataRunner(ABC, Generic[F]):
         body: list[sx.SExpr | sx.Application] = [*self.node_local_constraints(label, data_prefix(PARENT)), error]
         return sx.Clause(self.apply(label, PARENT), *body)
 
-    def _psi(self, parent: Label[F], children: tuple[Label[F], ...]) -> sx.SExpr:
+    def _psi(self, parent: Label[F]) -> sx.SExpr:
         children_states = {
             self.function.node.pointer_fields[j].name: (
-                self.state_symbols(child_role(j)) if self.is_input_node(children[j]) else None
+                self.state_symbols(child_role(j)) if self.is_input_child(parent, j) else None
             )
             for j in range(self.k)
         }
         fields = {f.name: self.node_field_symbol(f.id, 1, data_prefix(PARENT)) for f in self.function.node.data_fields}
         return self.ctx.psi(children_states, fields, self.state_symbols(PARENT))
 
-    def node_clause(self, parent: Label[F], children: tuple[Label[F], ...]) -> sx.Clause:
+    def init_clause(self, parent: Label[F]) -> sx.Clause:
+        """PreInit: no child collected yet, the flag is the error of the parent."""
+        error = sx.OpExpr(sx.Operator.EQ, self.chain_error_symbol(0), self.is_error(parent))
+        body: list[sx.SExpr | sx.Application] = [*self.node_local_constraints(parent, data_prefix(PARENT)), error]
+        return sx.Clause(self.chain_apply(parent, 0), *body)
+
+    def collect_clause(self, parent: Label[F], child: Label[F], j: int) -> sx.Clause:
+        """PreCollect: the j-th child is collected, its data are projected away."""
+        assert self.is_input_node(child) == self.is_input_child(parent, j)
+        role = child_role(j)
+        body: list[sx.SExpr | sx.Application] = [
+            self.chain_apply(parent, j),
+            self.apply(child, role),
+            *self.node_local_constraints(child, data_prefix(role)),
+            *self.node_consistency(parent, child, j, data_prefix(PARENT), data_prefix(role)),
+            sx.OpExpr(
+                sx.Operator.EQ, self.chain_error_symbol(j + 1), _or(self.chain_error_symbol(j), self.error_symbol(role))
+            ),
+        ]
+        return sx.Clause(self.chain_apply(parent, j + 1), *body)
+
+    def node_clause(self, parent: Label[F]) -> sx.Clause:
         """Pre2: the state of an input node follows from the states of its children through ψ."""
-        body: list[sx.SExpr | sx.Application] = [*self.node_local_constraints(parent, data_prefix(PARENT))]
-        for j, child in enumerate(children):
-            body.append(self.apply(child, child_role(j)))
-            body.extend(self.node_local_constraints(child, data_prefix(child_role(j))))
-            body.extend(self.node_consistency(parent, child, j, data_prefix(PARENT), data_prefix(child_role(j))))
+        last = self.k + self.m
+        body: list[sx.SExpr | sx.Application] = [self.chain_apply(parent, last)]
         if self.is_input_node(parent):
-            body.append(self._psi(parent, children))
-        # is_error is a constant: true makes the flag true, false is left out of the disjunction
-        error = self.is_error(parent)
-        errors = [*(self.error_symbol(child_role(j)) for j in range(len(children))), error]
-        errors = [e for e in errors if e != sx.FALSE]
-        if error == sx.TRUE:
-            some_error: sx.SExpr = sx.TRUE
-        else:
-            some_error = errors[0] if len(errors) == 1 else sx.OpExpr(sx.Operator.OR, *errors)
-        body.append(sx.OpExpr(sx.Operator.EQ, self.error_symbol(PARENT), some_error))
+            body.append(self._psi(parent))
+        body.append(sx.OpExpr(sx.Operator.EQ, self.error_symbol(PARENT), self.chain_error_symbol(last)))
         return sx.Clause(self.apply(parent, PARENT), *body)
 
+    def _has_all_children(self, parent: Label[F]) -> bool:
+        by_child = self.children.get(parent)
+        return by_child is not None and all(j in by_child for j in range(self.k + self.m))
+
     def node_clauses(self, parent: Label[F]) -> Iterable[sx.Clause]:
-        by_child = self.children[parent]
-        if any(j not in by_child for j in range(self.k + self.m)):
+        if not self._has_all_children(parent):
             return
-        for children in product(*(sorted(by_child[j], key=self._label_id) for j in range(self.k + self.m))):
-            yield self.node_clause(parent, children)
+        yield self.init_clause(parent)
+        by_child = self.children[parent]
+        for j in range(self.k + self.m):
+            for child in sorted(by_child[j], key=self._label_id):
+                yield self.collect_clause(parent, child, j)
+        yield self.node_clause(parent)
 
     def query(self, root: Label[F]) -> sx.Clause:
         """PreQ: an accepted input tree leads to an error."""
@@ -201,10 +255,15 @@ class BotUpAutomataRunner(ABC, Generic[F]):
         return sx.Clause(False, *body)
 
     def predicates(self) -> list[sx.Predicate]:
-        return [self.predicate(label) for label in sorted(self.labels, key=self._label_id)]
+        predicates: list[sx.Predicate] = []
+        for label in sorted(self.labels, key=self._label_id):
+            predicates.append(self.predicate(label))
+            if self._has_all_children(label):
+                predicates.extend(self.chain_predicate(label, n) for n in range(self.k + self.m + 1))
+        return predicates
 
     def clauses(self) -> Iterator[sx.Clause]:
-        """Generated lazily: the product of `node_clauses` can be too large to hold in memory."""
+        """Generated lazily, one parent at a time."""
         for label in sorted(self.labels, key=self._label_id):
             if label in self.children:
                 yield from self.node_clauses(label)

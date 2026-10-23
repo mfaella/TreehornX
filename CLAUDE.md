@@ -62,7 +62,10 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
 4. **Bottom-up automaton (the whole system)** — `chc/pre/runner.py::BotUpAutomataRunner` attaches a predicate
    `Pre<id>` to every label and runs an SDTA bottom-up over the backbone pairs (POPL-style, Fig. 4), carrying an
    error flag `e` up to the root. Its clauses carry `label_constraints` of every node and the consistency with its
-   children, so there are no Lab predicates and no clauses for the steps of the lace. `chc/pre/PreRunner.py` binds
+   children, so there are no Lab predicates and no clauses for the steps of the lace. The children of a node are
+   collected one at a time, not over their product: `Pre<id>_<N>` holds the node's data, the states of the first N
+   children that ψ reads (input pointer children, decided by `is_input_child(parent, j)`) and the error flag
+   accumulated so far (`pre_p_e<N>`); `Pre<id>` follows from `Pre<id>_<k+m>` through ψ. `chc/pre/PreRunner.py` binds
    it to Lab labels. Without `--pre` the trivial automaton `true_ctx()` (no states, ψ = ψ_F = true) is used.
    Automata are in `chc/sdta/SDTAContext.py` + `psi.py` (`bst`, `bst_strict`, `sll_sorted`, `sll_sorted_strict`,
    `avl`, `rb`). The ψ functions hard-code the field names (`next`, `left`, `right`, `data`), so input programs

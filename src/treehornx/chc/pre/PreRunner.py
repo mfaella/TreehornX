@@ -63,5 +63,10 @@ class PreRunner(BotUpAutomataRunner[Frame]):
         return label[1].active
 
     @override
+    def is_input_child(self, parent: Lab, j: int) -> bool:
+        # the first frames of a pair agree on it (consistent_first_frames)
+        return parent[1].active_child[j]
+
+    @override
     def is_root(self, label: Lab) -> bool:
         return is_initial(label)
