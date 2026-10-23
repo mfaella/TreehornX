@@ -18,6 +18,7 @@ from treehornx.chc.sdta.psi import (
     psi_rb,
     psi_sll_sorted,
     psi_sll_sorted_strict,
+    psi_true,
     psiF_empty,
     root_is_black,
 )
@@ -117,3 +118,8 @@ def rb_ctx() -> SDTAContext:
         "red": "bool",
     }
     return SDTAContext(psi, psiF, states)
+
+
+def true_ctx() -> SDTAContext:
+    """The automaton accepting every tree, with no state: memory safety without a precondition."""
+    return SDTAContext(psi_true, psiF_empty, {})

@@ -23,14 +23,16 @@ uv run task verify                        # format + validate + coverage (what C
 uv run pytest tests/integration/test_lab_chc.py -k sll_safe_find   # single case
 uv run pytest -m "not slow"                                         # skip verification runs taking minutes
 
-uv run treehornx verify FILE.c --pre bst -m 1 -n 128 --check-sat         # CLI (Z3 by default, --eldarica)
+uv run treehornx verify FILE.c --pre bst -m 1 -n 128 --check-sat         # CLI (Z3 by default, --eldarica, --golem, --portfolio)
 uv run treehornx verify FILE.c --smt2                                   # dump one SMT-LIB2 system per exit status
 uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.csv]
 ```
 
 - Integration tests call the `z3`/`eld` binaries and are skipped when they are not found. Solver binaries are shipped
-  under `scripts/solvers/linux/x86-64/` (z3) and `tests/integration/solvers/` (eld); the CLI takes `--solvers-dir`
-  and falls back to `PATH`. (The golem binaries there are no longer used.)
+  under `scripts/solvers/linux/x86-64/` (z3, golem) and `tests/integration/solvers/` (eld, golem); the CLI takes
+  `--solvers-dir` and falls back to `PATH`. `PortfolioSolver` writes the system to a temporary file and races golem,
+  z3 and eldarica on it (first sat/unsat wins, the others' process groups are killed); golem has no timeout flag, so
+  it is killed when the timeout expires.
 - Terms carry their own types and predicates their own signatures, so several systems can be built in one process
   without resetting any environment. Terms are hash-consed in a weak cache (identity equality); `sx.reset_env()`
   empties it, after which older terms are no longer equal to new ones.
@@ -52,15 +54,19 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
    Initial labels/pairs come from `Lab/initial.py` (CHC I/II), step predicates of Appendix C are methods
    `step_*_{int,ext,down}`, auxiliary predicates (`points_here`, `stop_rewind`, `rewind_target`, …) live in
    `Lab/helpers.py`.
-3. **Build CHCs over data only** — `chc/Lab/system.py::build_lab` turns enumerated labels into one predicate per
-   label (`Lab<id>`) whose arguments are only the data symbols (`v<id>_<frame>`, `f<id>_<frame>`;
-   `chc/Lab/symbols.py`). `chc/Lab/clauses.py` emits facts (CHC I/II), internal clauses (CHC III) and external
-   clauses (CHC IV/V), plus one query per label ending with the checked exit status.
-4. **Precondition layer (optional, `--pre`)** — `chc/pre/runner.py::BotUpAutomataRunner` attaches a companion
-   predicate `Pre<id>` to every label and runs the SDTA bottom-up over the backbone pairs (POPL-style, Fig. 4),
-   carrying an error flag `e` up to the root. `chc/pre/PreRunner.py` binds it to Lab labels. Available automata are
-   in `chc/sdta/SDTAContext.py` + `psi.py` (`bst`, `bst_strict`, `sll_sorted`, `sll_sorted_strict`, `avl`, `rb`).
-   The ψ functions hard-code the field names (`next`, `left`, `right`, `data`), so input programs must use them.
+3. **Data constraints** — `chc/Lab/system.py::build_lab` keeps the final labels and pairs; the data of a label are
+   the symbols `v<id>_<frame>`, `f<id>_<frame>` of its kept frames (`chc/Lab/symbols.py`). `chc/Lab/clauses.py`
+   has no clauses any more, only constraint builders: `label_constraints` (every step reaching a frame of the
+   label: ψ_internal for internal steps, the field copy from the frame below for external steps, CHC II for the
+   root) and `consistency_constraint` (data variables equal on the frames of a parent and child linked in the lace).
+4. **Bottom-up automaton (the whole system)** — `chc/pre/runner.py::BotUpAutomataRunner` attaches a predicate
+   `Pre<id>` to every label and runs an SDTA bottom-up over the backbone pairs (POPL-style, Fig. 4), carrying an
+   error flag `e` up to the root. Its clauses carry `label_constraints` of every node and the consistency with its
+   children, so there are no Lab predicates and no clauses for the steps of the lace. `chc/pre/PreRunner.py` binds
+   it to Lab labels. Without `--pre` the trivial automaton `true_ctx()` (no states, ψ = ψ_F = true) is used.
+   Automata are in `chc/sdta/SDTAContext.py` + `psi.py` (`bst`, `bst_strict`, `sll_sorted`, `sll_sorted_strict`,
+   `avl`, `rb`). The ψ functions hard-code the field names (`next`, `left`, `right`, `data`), so input programs
+   must use them.
 5. **Solve** — `chc/smt/sexpr.py` holds the terms (`Var`, `Constant`, `OpExpr`, `Application`, `Clause`, whose
    constructors return the cached instance from one weak cache per class; operators are built as
    `sx.OpExpr(sx.Operator.X, ...)`, `sx.Max` builds the `ite` chain) and `CHCSystem`, which prints a `HORN` script declaring only the predicates used;
@@ -69,15 +75,15 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
    **sat = safe, unsat = an error is reachable.** One system is built per exit status (ERR, OOM, LABEL_OVERFLOW)
    that the enumeration actually reaches; unreached ones are reported as "trivially" safe without calling a solver.
 
-`feature_flags.py::FeatureFlags` (CLI: `--clean-clause`, `--lab-internal-constraints`, `--pre-internal-constraints`): `clean_clause` (merge variables equated in a clause body, `chc/clean.py`; clauses are built uncleaned and cleaned lazily one at a time when printed, via `CHCSystem.transform`/`write_smt2(..., clean)`),
-`lab_internal_constraints` / `pre_internal_constraints` (repeat the constraints of every internal step
-of a label in each clause instead of only the step to its top frame). They change the size/shape of the systems, not
-their meaning; all default to off. `LabCHC` and `BotUpAutomataRunner` carry the flags, helpers needing one take a bool.
+`feature_flags.py::FeatureFlags` (CLI: `--clean-clause`): `clean_clause` (merge variables equated in a clause body,
+`chc/clean.py`; clauses are built uncleaned and cleaned lazily one at a time when printed, via
+`CHCSystem.transform`/`write_smt2(..., clean)`). It changes the size/shape of the systems, not their meaning, and
+defaults to off.
 
 Conventions: positions inside a label are **1-based** like the paper (`sigma[1]` is the first frame,
 `sigma[len(sigma)]` the top one); `σ`/`τ` naming follows the paper (σ sends the lace, τ receives the new frame). Child
-indices `j` are 0-based, auxiliary (allocation) children are `j ∈ [k, k+m)`. In external clauses σ's symbols are
-prefixed `s`, τ's `t`; in Pre clauses the parent's `p_`, children's `c<j>_`.
+indices `j` are 0-based, auxiliary (allocation) children are `j ∈ [k, k+m)`. In clauses the parent's symbols are
+prefixed `p_`, the children's `c<j>_`.
 
 ## How the implementation differs from CAV25
 
@@ -100,11 +106,12 @@ everything. The implementation follows the paper's "Efficient Implementation" fu
 - **Data conditions are not evaluated during enumeration.** `if (data-cond)` takes both branches
   (`step_local_branch_int`) and the CHC clause adds the guard; `d := e`, `p->df := x`, `x := p->df` only advance the
   pc in the shape and are expressed in `psi_internal`.
-- **Internal-chain compression.** Frames strictly inside a chain of internal steps are dropped from the predicate's
-  arguments (`ChcLabUtils.kept_frames`), and CHC III is emitted only for kept prefixes. With the internal-constraints
-  flags off, a clause only constrains the step to its head's top frame.
-- **Only labels that can reach the end of a lace are kept** (`SymbolicEngine.finals`), and queries are issued per
-  label instead of the single `label_exit(σ, Ex)` query CHC VI.
+- **No clauses for the steps of the lace.** CHC I–V are not emitted: the steps of a label become its
+  `label_constraints`, the links between nodes the consistency constraints, and both are conjoined in the
+  bottom-up automaton clauses over complete backbone trees. Frames strictly inside a chain of internal steps are
+  dropped from the predicate's arguments (`ChcLabUtils.kept_frames`) and only occur as quantified variables.
+- **Only labels that can reach the end of a lace are kept** (`SymbolicEngine.finals`), and the query CHC VI is
+  issued on the root of the automaton run (with the trivial automaton when there is no precondition).
 - **Event set extended** (`Lab/Event.py`, rationale in `FORMULAS_UPDATES.md`, in Italian): `FieldHere(pfield)`
   (⟨pfield := here⟩) disambiguates `p->pfield := q` when q already points to the current node; `LOF` marks label
   overflow; `Rewind(i)`/`RwdSpec(i, p)` are the paper's `rwd_i`/`rwd_{i,p}`. `step_assgn_to_field`,
@@ -126,6 +133,7 @@ everything. The implementation follows the paper's "Efficient Implementation" fu
 - `notes/predicates.md` (+ `notes/rsc/*.png`) is the reference list of the paper's predicates/formulas the engine
   implements; consult it alongside the PDF when touching a `step_*` method.
 - `enum_models/__init__.py` (`KnittedTrees`, `generate_labels`) is a legacy wrapper whose `LabEngine(...)` call no
-  longer matches the constructor; the live entry point is `chc/Lab/system.py::build_lab`.
+  longer matches the constructor; the live entry points are `chc/Lab/system.py::build_lab` and
+  `chc/pre/__init__.py::make_system`.
 - The repo root contains large generated artifacts (`*.smt2`, `*.log`, `prolog.horn`, `smt/`, `.profile/`); don't read
   them whole and don't commit them.

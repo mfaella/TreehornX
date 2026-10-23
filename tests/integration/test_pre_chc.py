@@ -1,4 +1,4 @@
-"""Memory safety under a precondition through the Lab CHC system and the precondition layer.
+"""Memory safety under a precondition through the bottom-up run of its automaton.
 
 The system is sat when no input accepted by the precondition leads to a null-pointer dereference. The
 "safe" programs below are safe only thanks to the precondition: without it they can dereference nil.
@@ -26,7 +26,7 @@ CASES = params(
         pre="avl",
         solver="eldarica",
         timeout=1200,
-        flags=FeatureFlags(True, True, True),
+        flags=FeatureFlags(clean_clause=True),
         marks=(pytest.mark.slow,),
     ),
     # safe for every input, the precondition must not change the result
@@ -40,7 +40,7 @@ CASES = params(
         pre="rb",
         solver="eldarica",
         timeout=1200,
-        flags=FeatureFlags(True, True, True),
+        flags=FeatureFlags(clean_clause=True),
     ),
 )
 
@@ -48,7 +48,7 @@ CASES = params(
 WITHOUT_PRECONDITION = params(
     TestConfig("sll_sorted_safe_first_lt_last", UNSAT),
     TestConfig("bst_safe_min_lt_max", UNSAT),
-    TestConfig("avl_safe_insert_bal", UNSAT, m=1),
+    TestConfig("avl_safe_insert_bal", UNSAT, m=1, flags=FeatureFlags(True)),
 )
 
 

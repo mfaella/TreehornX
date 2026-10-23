@@ -1,29 +1,17 @@
-"""Clauses of the Lab CHC system (CAV25, Fig. 3), restricted to the data part of the frames.
+"""Data constraints of the Lab encoding (CAV25, Fig. 3), restricted to the data part of the frames.
 
-The shape part is fixed by the enumerated labels, so every clause only constrains the data
-symbols (see `symbols.py`). In external clauses the symbols of σ, the label holding the frame
-the lace comes from, are prefixed with `s`, those of τ, the label receiving the new frame, with
-`t`.
+The shape part is fixed by the enumerated labels, so the constraints only relate the data
+symbols (see `symbols.py`): those between the frames of a label (`label_constraints`) and those
+between the frames of a parent and its child adjacent in the lace (`consistency_constraint`).
 """
-
-from typing import Literal, Sequence
 
 from treehornx import ir
 from treehornx.chc.Lab.symbols import ChcLabUtils
 from treehornx.chc.smt import sexpr as sx
-from treehornx.enum_models.core.Dir import Internal, Up
+from treehornx.enum_models.core.Dir import Internal
 from treehornx.enum_models.Lab import ERR, Lab
 from treehornx.enum_models.Lab.helpers import are_equal_after_rewind, field_is_nil, linked_frames
 from treehornx.enum_models.Lab.initial import is_initial
-from treehornx.feature_flags import FeatureFlags
-
-
-SIGMA_PREFIX = "s"
-TAU_PREFIX = "t"
-
-
-def _clause(constraints: Sequence[sx.SExpr | sx.Application], head: sx.Application | Literal[False]) -> sx.Clause:
-    return sx.Clause(head, *constraints)
 
 
 def consistency_constraint(
@@ -42,11 +30,6 @@ def initial_constraints(sym: ChcLabUtils, prefix: str = "") -> list[sx.SExpr]:
     return [
         sx.OpExpr(sx.Operator.EQ, f2, f1) for f2, f1 in zip(sym.field_symbols(2, prefix), sym.field_symbols(1, prefix))
     ]
-
-
-def fact(sym: ChcLabUtils, label: Lab, flags: FeatureFlags) -> sx.Clause:
-    """CHC I (non-root nodes) and CHC II (root): the root's second frame copies val from the first."""
-    return _clause(_head_constraints(sym, label, flags.lab_internal_constraints), sym.apply(label))
 
 
 def _assign_cond_value(label: Lab, a: int, cond: ir.HeapCond) -> bool:
@@ -98,20 +81,29 @@ def psi_internal(sym: ChcLabUtils, label: Lab, prefix: str = "") -> list[sx.SExp
 
 
 def _local_constraints(sym: ChcLabUtils, label: Lab, prefix: str) -> list[sx.SExpr]:
-    """Constraints of the internal step reaching the top frame of `label`, if any."""
-    if label.frame.prev != Internal():
+    """Constraints of the step reaching the top frame of `label`, if any.
+
+    An internal step is constrained by ψ_internal; an external one (CHC IV/V) copies the data fields from the
+    frame below in the same node, the data variables being copied by `consistency_constraint`."""
+    b = len(label)
+    if b == 1:
         return []
-    if len(label) == 2 and is_initial(label):
+    if label.frame.prev != Internal():
+        return [
+            sx.OpExpr(sx.Operator.EQ, f_b, f_below)
+            for f_b, f_below in zip(sym.field_symbols(b, prefix), sym.field_symbols(b - 1, prefix))
+        ]
+    if b == 2 and is_initial(label):
         # (Internal(), 2) marks the second frame of the root, it is not a step of the program
         return initial_constraints(sym, prefix)
     return psi_internal(sym, label, prefix)
 
 
-def internal_constraints(sym: ChcLabUtils, label: Lab, prefix: str = "") -> list[sx.SExpr]:
-    """Constraints of every internal step of `label`, including those between frames dropped from its predicate.
+def label_constraints(sym: ChcLabUtils, label: Lab, prefix: str = "") -> list[sx.SExpr]:
+    """Constraints of every step reaching a frame of `label`, including the frames dropped from its arguments.
 
     The frames dropped by the compression only occur here, so they are quantified variables of the clause."""
-    cache = sym.internal_constraints_cache
+    cache = sym.label_constraints_cache
     # walk back to the longest prefix already computed, then extend it frame by frame
     missing: list[Lab] = []
     current: Lab | None = label
@@ -123,61 +115,3 @@ def internal_constraints(sym: ChcLabUtils, label: Lab, prefix: str = "") -> list
         cached = cached + tuple(_local_constraints(sym, prefix_label, prefix))
         cache[prefix_label, prefix] = cached
     return list(cached)
-
-
-def _head_constraints(sym: ChcLabUtils, label: Lab, every_step: bool) -> list[sx.SExpr]:
-    """Constraints of the head label: only the step to its top frame, unless every internal step is added."""
-    return internal_constraints(sym, label) if every_step else _local_constraints(sym, label, "")
-
-
-def _body_constraints(sym: ChcLabUtils, label: Lab, every_step: bool, prefix: str = "") -> list[sx.SExpr]:
-    """Constraints of a body label, already enforced by the clauses deriving it unless every internal step is added."""
-    return internal_constraints(sym, label, prefix) if every_step else []
-
-
-def internal_clause(sym: ChcLabUtils, label: Lab, flags: FeatureFlags) -> sx.Clause:
-    """CHC III, compressed: the frame label^{b-1} is dropped from the head if it is in the middle of an
-    internal chain. The constraints of the label include the step to its top frame."""
-    assert label.prefix is not None
-    head_constraints = _head_constraints(sym, label, flags.lab_internal_constraints)
-    return _clause([sym.apply(label.prefix), *head_constraints], sym.apply(label))
-
-
-def external_clause(sym: ChcLabUtils, receiver: Lab, sender: Lab, j: int, flags: FeatureFlags) -> sx.Clause:
-    """CHC IV/V: the top frame of `receiver` (τ) follows in the lace the top frame of `sender` (σ), one of
-    them being the j-th child of the other.
-
-    The data variables are copied from σ^a by the consistency constraint (which includes the new
-    link), the data fields are copied from τ^{b-1}, the frame below in the same node."""
-    assert receiver.prefix is not None
-    b = len(receiver)
-    fields_below = [
-        sx.OpExpr(sx.Operator.EQ, f_b, f_below)
-        for f_b, f_below in zip(sym.field_symbols(b, TAU_PREFIX), sym.field_symbols(b - 1, TAU_PREFIX))
-    ]
-    body: list[sx.SExpr | sx.Application] = [
-        sym.apply(receiver.prefix, TAU_PREFIX),
-        sym.apply(sender, SIGMA_PREFIX),
-        *consistency(sym, receiver, sender, j),
-        *fields_below,
-        *_body_constraints(sym, receiver, flags.lab_internal_constraints, TAU_PREFIX),
-        *_body_constraints(sym, sender, flags.lab_internal_constraints, SIGMA_PREFIX),
-    ]
-    return _clause(body, sym.apply(receiver, TAU_PREFIX))
-
-
-def consistency(sym: ChcLabUtils, receiver: Lab, sender: Lab, j: int) -> list[sx.SExpr]:
-    """consistency_constraint between τ and σ, oriented by the direction of the link of τ's top frame."""
-    match receiver.frame.prev:
-        case Up():
-            return consistency_constraint(sym, sender, receiver, j, SIGMA_PREFIX, TAU_PREFIX)
-        case _:
-            return consistency_constraint(sym, receiver, sender, j, TAU_PREFIX, SIGMA_PREFIX)
-
-
-def query(sym: ChcLabUtils, label: Lab, flags: FeatureFlags) -> sx.Clause:
-    body: list[sx.SExpr | sx.Application] = [
-        sym.apply(label),
-        *_body_constraints(sym, label, flags.lab_internal_constraints),
-    ]
-    return _clause(body, False)

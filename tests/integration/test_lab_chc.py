@@ -1,7 +1,8 @@
-"""Memory safety of tree-manipulating programs through the compressed Lab CHC system.
+"""Memory safety of tree-manipulating programs without a precondition.
 
-Every label whose lace ends with a null-pointer dereference is queried: the system is sat when no
-such label is reachable (the program is safe within the bounds m, n) and unsat otherwise.
+The automaton accepting every tree runs bottom-up over the backbone and the root's query fires when some
+node of the tree ends with a null-pointer dereference: the system is sat when no such tree exists (the
+program is safe within the bounds m, n) and unsat otherwise.
 """
 
 import pytest
@@ -30,7 +31,7 @@ CASES = params(
     TestConfig("bst_safe_min_field_nil", SAT),
     TestConfig("bst_unsafe_min_field_nil", UNSAT),
     TestConfig("bst_safe_insert_field_nil", SAT, m=1),
-    TestConfig("bst_safe_insert_load", SAT, m=1),
+    TestConfig("bst_safe_insert_load", SAT, m=1, solver="eldarica"),
     # a field compared with NULL assigned to a variable (b = p->pf == NULL)
     TestConfig("bst_safe_assign_field_nil", SAT),
     TestConfig("bst_unsafe_assign_field_nil", UNSAT),

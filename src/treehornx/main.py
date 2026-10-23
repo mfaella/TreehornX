@@ -14,9 +14,8 @@ from humanfriendly import format_timespan
 
 from treehornx import ir
 from treehornx.chc.core import ExitCodeKind
-from treehornx.chc.Lab.clauses import query
 from treehornx.chc.Lab.system import LabCHC, build_lab, to_system, write_smt2
-from treehornx.chc.pre import PreRunner
+from treehornx.chc.pre import PreRunner, label_exit
 from treehornx.chc.sdta.SDTAContext import (
     SDTAContext,
     avl_ctx,
@@ -25,10 +24,18 @@ from treehornx.chc.sdta.SDTAContext import (
     rb_ctx,
     sll_sorted_ctx,
     sll_sorted_strict_ctx,
+    true_ctx,
 )
 from treehornx.chc.smt.sexpr import CHCSystem, Clause, Predicate
-from treehornx.chc.solvers import CHCSolver, EldaricaSolver, SolverError, Status, Z3Solver
-from treehornx.enum_models.Lab import ERR, OOM, Lab
+from treehornx.chc.solvers import (
+    CHCSolver,
+    EldaricaSolver,
+    GolemSolver,
+    PortfolioSolver,
+    SolverError,
+    Status,
+    Z3Solver,
+)
 from treehornx.feature_flags import FeatureFlags
 from treehornx.parser import SubsetError, parse_file
 from treehornx.tui import console, critical, error, fail, info, progress, success, warning
@@ -65,7 +72,6 @@ class Stats:
     generation_elapsed_time: float = 0.0
     labels_count: int = 0
     largest_label_length: int = 0
-    lab_predicates: int = 0
     trivially_safe: dict[str, bool] = field(default_factory=dict[str, bool])
     system_creation_elapsed_time: dict[str, float] = field(default_factory=dict[str, float])
     smt2_dumping_elapsed_time: dict[str, float] = field(default_factory=dict[str, float])
@@ -88,40 +94,28 @@ class Stats:
 # ---------------------------------------------------------------------------
 
 
-def label_exit(label: Lab, n: int) -> set[ExitCodeKind]:
-    """Exit statuses the lace of a label ends with: ERR, OOM and overflowing frames are never followed."""
-    statuses: set[ExitCodeKind] = set()
-    if isinstance(label.frame.event, ERR):
-        statuses.add(ExitCodeKind.ERR)
-    if isinstance(label.frame.event, OOM):
-        statuses.add(ExitCodeKind.OOM)
-    if len(label) == n + 1:
-        statuses.add(ExitCodeKind.LABEL_OVERFLOW)
-    return statuses
-
-
 def memory_clauses(
     function: ir.Function, lab: LabCHC, m: int, n: int, exit_code: ExitCodeKind, pre_ctx: SDTAContext | None
 ) -> tuple[list[Predicate], Iterable[Clause]]:
     """Predicates and (lazily generated) clauses of a system that is unsat iff some execution (on an input accepted
-    by the precondition) ends with `exit_code`."""
+    by the precondition) ends with `exit_code`. Without a precondition every input is accepted."""
     k = function.node.k
-    if pre_ctx is None:
-        error_labels = (label for label in lab.predicates if exit_code in label_exit(label, n))
-        queries = (query(lab.sym, label, lab.flags) for label in error_labels)
-        return lab.predicate_symbols(), itertools.chain(lab.clauses, queries)
     runner = PreRunner(
-        function, lab.pairs, pre_ctx, k, m, sym=lab.sym, n=n, exit_codes=frozenset({exit_code}), flags=lab.flags
+        function, lab.pairs, pre_ctx or true_ctx(), k, m, sym=lab.sym, n=n, exit_codes=frozenset({exit_code})
     )
-    return [*lab.predicate_symbols(), *runner.predicates()], itertools.chain(
-        lab.clauses, runner.clauses(), runner.queries()
-    )
+    return runner.predicates(), itertools.chain(runner.clauses(), runner.queries())
 
 
 def memory_system(
-    function: ir.Function, lab: LabCHC, m: int, n: int, exit_code: ExitCodeKind, pre_ctx: SDTAContext | None
+    function: ir.Function,
+    lab: LabCHC,
+    m: int,
+    n: int,
+    exit_code: ExitCodeKind,
+    pre_ctx: SDTAContext | None,
+    flags: FeatureFlags,
 ) -> CHCSystem:
-    return to_system(*memory_clauses(function, lab, m, n, exit_code, pre_ctx), lab.flags.clean_clause)
+    return to_system(*memory_clauses(function, lab, m, n, exit_code, pre_ctx), flags.clean_clause)
 
 
 def dump_system(
@@ -133,17 +127,18 @@ def dump_system(
     pre_ctx: SDTAContext | None,
     smt2: bool,
     print_chc: bool,
+    flags: FeatureFlags,
 ) -> Path | None:
     """Streams the system to `<function>_<check>.smt2` and/or stdout without building a `CHCSystem`."""
     _, clauses = memory_clauses(function, lab, m, n, exit_code, pre_ctx)
     if not smt2:
         sys.stdout.write(f"; CHC system for {exit_code.name}\n")
-        write_smt2(clauses, sys.stdout, lab.flags.clean_clause)
+        write_smt2(clauses, sys.stdout, flags.clean_clause)
         sys.stdout.flush()
         return None
     file_path = Path(f"{function.name}_{exit_code.name}.smt2")
     with file_path.open("w") as f:
-        write_smt2(clauses, f, lab.flags.clean_clause)
+        write_smt2(clauses, f, flags.clean_clause)
     if print_chc:
         sys.stdout.write(f"; CHC system for {exit_code.name}\n")
         with file_path.open() as f:
@@ -152,10 +147,17 @@ def dump_system(
     return file_path
 
 
-def make_solver(z3: bool, eldarica: bool, solvers_dir: Path | None) -> CHCSolver:
-    if eldarica and not z3:
-        return EldaricaSolver(solvers_dir)
-    return Z3Solver(solvers_dir)
+SOLVERS: dict[str, Callable[[Path | None], CHCSolver]] = {
+    "z3": Z3Solver,
+    "eldarica": EldaricaSolver,
+    "golem": GolemSolver,
+    "portfolio": PortfolioSolver,
+}
+
+
+def make_solver(solvers: list[str], solvers_dir: Path | None) -> CHCSolver:
+    """The first of the chosen solvers, z3 when none is chosen."""
+    return SOLVERS[solvers[0] if solvers else "z3"](solvers_dir)
 
 
 def check_sat(solver: CHCSolver, system: CHCSystem, timeout: int | None) -> Status:
@@ -175,8 +177,7 @@ def display_option_messages(
     partial_correctness: bool,
     check_sat: bool,
     interactive_check_sat: bool,
-    z3: bool,
-    eldarica: bool,
+    solvers: list[str],
     parent: str | None,
     dependency_graphs: bool,
 ) -> None:
@@ -190,12 +191,12 @@ def display_option_messages(
         info(f"No value specified for m, using default value of {DEFAULT_M}.")
     if c is not None or partial_correctness:
         critical("-c and --partial-correctness are not supported by the current encoding, they are ignored.")
-    if check_sat and not any((z3, eldarica)):
+    if check_sat and not solvers:
         info("Using z3 by default.")
     if interactive_check_sat:
         critical("--interactive-check-sat not supported, it is ignored.")
-    if z3 and eldarica:
-        warning("Multiple solvers specified, using z3.")
+    if len(solvers) > 1:
+        warning(f"Multiple solvers specified, using {solvers[0]}.")
     if parent is not None:
         critical("--parent not supported: the parser does not accept parent pointers, it is ignored.")
     if dependency_graphs:
@@ -254,15 +255,13 @@ def verify(
     k = function.node.k
     stats = Stats()
 
-    lab, stats.generation_elapsed_time = progress("Generating labels", lambda: build_lab(function, k, m, n, flags))
-    final_labels, _ = lab.engine.finals()
-    stats.labels_count = len(final_labels)
-    stats.largest_label_length = max((len(label) for label in final_labels), default=0)
-    stats.lab_predicates = len(lab.predicates)
+    lab, stats.generation_elapsed_time = progress("Generating labels", lambda: build_lab(function, k, m, n))
+    stats.labels_count = len(lab.labels)
+    stats.largest_label_length = max((len(label) for label in lab.labels), default=0)
     console.print(f"Label generation completed in {format_timespan(stats.generation_elapsed_time)}.")
     console.print(f"Generated {stats.labels_count} labels.\nLargest label length: {stats.largest_label_length}.")
 
-    reached = set[ExitCodeKind]().union(*(label_exit(label, n) for label in lab.predicates))
+    reached = set[ExitCodeKind]().union(*(label_exit(label, n) for label in lab.labels))
     for exit_code in EXIT_CODES:
         stats.trivially_safe[exit_code.name] = exit_code not in reached
         if exit_code in reached:
@@ -283,7 +282,7 @@ def verify(
         if smt2 or print_chc:
             file_path, elapsed = progress(
                 f"Writing the CHC system for {check}",
-                lambda code=code: dump_system(function, lab, m, n, code, pre_ctx, smt2, print_chc),
+                lambda code=code: dump_system(function, lab, m, n, code, pre_ctx, smt2, print_chc, flags),
             )
             stats.smt2_dumping_elapsed_time[check] = elapsed
             where = f": {file_path}" if file_path else " on stdout"
@@ -292,7 +291,7 @@ def verify(
         if solver is not None:
             system, elapsed = progress(
                 f"Creating the CHC system for {check}",
-                lambda code=code: memory_system(function, lab, m, n, code, pre_ctx),
+                lambda code=code: memory_system(function, lab, m, n, code, pre_ctx, flags),
             )
             stats.system_creation_elapsed_time[check] = elapsed
             console.print(f"CHC system for {check} created in {format_timespan(elapsed)}.")
@@ -330,6 +329,10 @@ def verify_cmd(
     interactive_check_sat: Annotated[bool, typer.Option("--interactive-check-sat", help="not supported")] = False,
     z3: Annotated[bool, typer.Option("--z3")] = False,
     eldarica: Annotated[bool, typer.Option("--eldarica")] = False,
+    golem: Annotated[bool, typer.Option("--golem")] = False,
+    portfolio: Annotated[
+        bool, typer.Option("--portfolio", help="run golem, z3 and eldarica at the same time, the first answer wins")
+    ] = False,
     solvers_dir: Annotated[
         Path | None, typer.Option("--solvers-dir", help="directory of the solver binaries, PATH by default")
     ] = None,
@@ -352,21 +355,9 @@ def verify_cmd(
     clean_clause: Annotated[
         bool, typer.Option("--clean-clause", help="merge the variables equated in a clause body")
     ] = False,
-    lab_internal_constraints: Annotated[
-        bool,
-        typer.Option(
-            "--lab-internal-constraints",
-            help="repeat the constraints of every internal step of a label in each Lab clause",
-        ),
-    ] = False,
-    pre_internal_constraints: Annotated[
-        bool,
-        typer.Option(
-            "--pre-internal-constraints",
-            help="repeat the constraints of every internal step of a label in each precondition clause",
-        ),
-    ] = False,
 ) -> None:
+    solver_flags = {"z3": z3, "eldarica": eldarica, "golem": golem, "portfolio": portfolio}
+    solvers = [name for name, chosen in solver_flags.items() if chosen]
     display_option_messages(
         function_name,
         root_name,
@@ -376,8 +367,7 @@ def verify_cmd(
         partial_correctness,
         check_sat_flag,
         interactive_check_sat,
-        z3,
-        eldarica,
+        solvers,
         parent,
         full_dep_graph or compressed_dep_graph or internal_dependency_graph,
     )
@@ -397,7 +387,7 @@ def verify_cmd(
         info(f"Pointer fields nil in every input node: {', '.join(nil_fields)}.")
 
     try:
-        solver = make_solver(z3, eldarica, solvers_dir) if check_sat_flag else None
+        solver = make_solver(solvers, solvers_dir) if check_sat_flag else None
     except SolverError as e:
         error(str(e))
         raise typer.Exit(1) from e
@@ -410,7 +400,7 @@ def verify_cmd(
         print_chc,
         solver,
         timeout,
-        FeatureFlags(clean_clause, lab_internal_constraints, pre_internal_constraints),
+        FeatureFlags(clean_clause),
     )
     dump_stats(function, stats, produce_csv, produce_json)
 

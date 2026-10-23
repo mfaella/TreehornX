@@ -10,29 +10,39 @@ import shutil
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Literal, TypeAlias
+from typing import Callable, Literal, TypeAlias
 
 import pytest
 from _pytest.mark import ParameterSet
 
-from treehornx.chc import Lab, pre
+from treehornx.chc import pre
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.smt.sexpr import CHCSystem
-from treehornx.chc.solvers import CHCSolver, EldaricaSolver, Status, Z3Solver
+from treehornx.chc.solvers import CHCSolver, EldaricaSolver, GolemSolver, PortfolioSolver, Status, Z3Solver
 from treehornx.feature_flags import FeatureFlags
-from treehornx.main import DEFAULT_N, PRE, PreType, label_exit, with_nil_fields
+from treehornx.main import DEFAULT_N, PRE, PreType, with_nil_fields
 from treehornx.parser import parse_file
 
 
 C_FILES = Path(__file__).parent / "c_files"
 SOLVERS_DIR = Path(__file__).parent / "solvers"
 
-SolverName: TypeAlias = Literal["z3", "eldarica"]
+SolverName: TypeAlias = Literal["z3", "eldarica", "golem", "portfolio"]
 
-SOLVERS: dict[SolverName, type[Z3Solver | EldaricaSolver]] = {
+SOLVERS: dict[SolverName, Callable[[Path | None], CHCSolver]] = {
     "z3": Z3Solver,
     "eldarica": EldaricaSolver,
+    "golem": GolemSolver,
+    "portfolio": PortfolioSolver,
 }
+
+BINARIES: dict[SolverName, tuple[str, ...]] = {
+    "z3": (Z3Solver.NAME,),
+    "eldarica": (EldaricaSolver.NAME,),
+    "golem": (GolemSolver.NAME,),
+    "portfolio": (GolemSolver.NAME, Z3Solver.NAME, EldaricaSolver.NAME),
+}
+"""The executables a solver runs."""
 
 
 @dataclass(frozen=True)
@@ -64,12 +74,18 @@ class TestConfig:
 
 
 def solver_dir(name: SolverName) -> Path | None:
-    """The directory shipping the solver binary, None to look it up on PATH."""
-    return SOLVERS_DIR if shutil.which(SOLVERS[name].NAME, path=str(SOLVERS_DIR)) else None
+    """The directory shipping some binary of the solver, None to look them up on PATH (a binary missing from the
+    directory is looked up on PATH anyway)."""
+    return SOLVERS_DIR if any(shutil.which(b, path=str(SOLVERS_DIR)) for b in BINARIES[name]) else None
+
+
+def missing_binaries(name: SolverName) -> list[str]:
+    """The binaries of the solver found neither in `SOLVERS_DIR` nor on PATH."""
+    return [b for b in BINARIES[name] if not shutil.which(b, path=str(SOLVERS_DIR)) and not shutil.which(b)]
 
 
 def solver_available(name: SolverName) -> bool:
-    return solver_dir(name) is not None or shutil.which(SOLVERS[name].NAME) is not None
+    return not missing_binaries(name)
 
 
 def params(*configs: TestConfig) -> list[ParameterSet]:
@@ -78,7 +94,7 @@ def params(*configs: TestConfig) -> list[ParameterSet]:
     for config in configs:
         marks = list(config.marks)
         if not solver_available(config.solver):
-            marks.append(pytest.mark.skip(reason=f"{SOLVERS[config.solver].NAME} executable not found"))
+            marks.append(pytest.mark.skip(reason=f"{', '.join(missing_binaries(config.solver))} not found"))
         result.append(pytest.param(config, id=config.test_id, marks=marks))
     return result
 
@@ -90,13 +106,8 @@ def make_system(config: TestConfig) -> CHCSystem:
         assert restricted is not None, f"{config.program} has no pointer field among {config.nil_fields}"
         function = restricted
     k = function.node.k
-    if config.pre is None:
-        return Lab.make_system(
-            function, k, config.m, config.n, lambda label: config.exit_code in label_exit(label, config.n), config.flags
-        )
-    return pre.make_system(
-        function, k, config.m, config.n, PRE[config.pre](), config.flags, frozenset({config.exit_code})
-    )
+    ctx = PRE[config.pre]() if config.pre is not None else None
+    return pre.make_system(function, k, config.m, config.n, ctx, config.flags, frozenset({config.exit_code}))
 
 
 def _solve(config: TestConfig) -> Status:

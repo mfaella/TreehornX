@@ -7,16 +7,16 @@ from treehornx.chc.Lab import (
     LabCHC,
     build_lab,
     initial_constraints,
-    internal_constraints,
+    label_constraints,
     psi_internal,
     to_system,
 )
-from treehornx.chc.Lab.clauses import SIGMA_PREFIX
+from treehornx.chc.pre import PreRunner
+from treehornx.chc.sdta.SDTAContext import true_ctx
 from treehornx.chc.smt import sexpr as sx
 from treehornx.enum_models.core.Dir import Internal
 from treehornx.enum_models.Lab import Lab
 from treehornx.enum_models.Lab.initial import is_initial
-from treehornx.feature_flags import FeatureFlags
 from treehornx.parser import parse_file
 
 
@@ -26,43 +26,65 @@ N = 24
 
 @pytest.fixture(scope="module")
 def lab() -> Iterator[LabCHC]:
-    """The system is built once for the module."""
+    """The labels are enumerated once for the module."""
     function = parse_file(str(C_FILES / "sll_safe_length.c"))
-    yield build_lab(function, function.node.k, 0, N, FeatureFlags(clean_clause=True))
+    yield build_lab(function, function.node.k, 0, N)
 
 
 def is_internal(label: Lab) -> bool:
     return label.frame.prev == Internal()
 
 
-def test_one_block_per_internal_frame(lab: LabCHC) -> None:
-    for label in lab.predicates:
+def prefixes(lab: LabCHC) -> set[Lab]:
+    return {label.cut(i) for label in lab.labels for i in range(1, len(label) + 1)}
+
+
+def fields_below(lab: LabCHC, label: Lab) -> list[sx.SExpr]:
+    b = len(label)
+    return [
+        sx.OpExpr(sx.Operator.EQ, f_b, f_below)
+        for f_b, f_below in zip(lab.sym.field_symbols(b), lab.sym.field_symbols(b - 1))
+    ]
+
+
+def test_one_block_per_frame(lab: LabCHC) -> None:
+    for label in prefixes(lab):
         expected: list[sx.SExpr] = []
         for i in range(2, len(label) + 1):
             prefix = label.cut(i)
             if not is_internal(prefix):
-                continue
-            if i == 2 and is_initial(prefix):
+                expected += fields_below(lab, prefix)
+            elif i == 2 and is_initial(prefix):
                 expected += initial_constraints(lab.sym)
             else:
                 expected += psi_internal(lab.sym, prefix)
-        assert internal_constraints(lab.sym, label) == expected
+        assert label_constraints(lab.sym, label) == expected
 
 
 def test_initial_frame_copies_the_fields(lab: LabCHC) -> None:
-    initial = [label for label in lab.predicates if len(label) == 2 and is_initial(label)]
+    initial = [label for label in prefixes(lab) if len(label) == 2 and is_initial(label)]
     assert initial
     for label in initial:
-        assert internal_constraints(lab.sym, label) == initial_constraints(lab.sym)
+        assert label_constraints(lab.sym, label) == initial_constraints(lab.sym)
+
+
+def test_external_top_frame_copies_the_fields(lab: LabCHC) -> None:
+    """A frame reached from another node keeps the data fields of the frame below in the same node."""
+    external = [label for label in prefixes(lab) if label.prefix is not None and not is_internal(label)]
+    assert external
+    for label in external:
+        assert label.prefix is not None
+        expected = label_constraints(lab.sym, label.prefix) + fields_below(lab, label)
+        assert label_constraints(lab.sym, label) == expected
 
 
 def test_dropped_frames_are_constrained(lab: LabCHC) -> None:
     """The frames dropped from a predicate only occur in the constraints, so they are quantified variables."""
-    dropped = [label for label in lab.predicates if len(lab.sym.kept_frames(label)) < len(label)]
+    dropped = [label for label in prefixes(lab) if len(lab.sym.kept_frames(label)) < len(label)]
     assert dropped, "the program has no internal chain long enough to drop a frame"
     for label in dropped:
         arguments = set(lab.sym.label_symbols(label))
-        constrained = {s for c in internal_constraints(lab.sym, label) for s in c.free_variables()}
+        constrained = {s for c in label_constraints(lab.sym, label) for s in c.free_variables()}
         for i in range(1, len(label) + 1):
             if i in lab.sym.kept_frames(label):
                 continue
@@ -70,14 +92,6 @@ def test_dropped_frames_are_constrained(lab: LabCHC) -> None:
             frame = set(lab.sym.frame_symbols(i))
             assert not frame & arguments
             assert frame & constrained, f"frame {i} of a label of length {len(label)} is not constrained"
-
-
-def test_external_top_frame_adds_no_constraint(lab: LabCHC) -> None:
-    for label in lab.predicates:
-        if label.prefix is not None and not is_internal(label):
-            assert internal_constraints(lab.sym, label, SIGMA_PREFIX) == internal_constraints(
-                lab.sym, label.prefix, SIGMA_PREFIX
-            )
 
 
 def variable_equalities(clause: sx.Clause) -> list[sx.SExpr]:
@@ -89,7 +103,9 @@ def variable_equalities(clause: sx.Clause) -> list[sx.SExpr]:
 
 
 def test_clauses_are_cleaned_only_when_printed(lab: LabCHC) -> None:
-    system = to_system(lab.predicate_symbols(), lab.clauses, lab.flags.clean_clause)
+    function = lab.sym.function
+    runner = PreRunner(function, lab.pairs, true_ctx(), function.node.k, 0, sym=lab.sym, n=N)
+    system = to_system(runner.predicates(), [*runner.clauses(), *runner.queries()], clean=True)
     assert any(variable_equalities(clause) for clause in system.clauses), "the built clauses are not cleaned"
     for clause in system.printed_clauses():
         assert not variable_equalities(clause), clause

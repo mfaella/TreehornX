@@ -5,12 +5,25 @@ from dataclasses import dataclass, field
 from typing_extensions import override
 
 from treehornx.chc.core import ExitCodeKind
-from treehornx.chc.Lab.clauses import consistency_constraint, internal_constraints
+from treehornx.chc.Lab.clauses import consistency_constraint, label_constraints
 from treehornx.chc.Lab.symbols import ChcLabUtils
 from treehornx.chc.pre.runner import BotUpAutomataRunner
 from treehornx.chc.smt import sexpr as sx
 from treehornx.enum_models.Lab import ERR, OOM, Frame, Lab
 from treehornx.enum_models.Lab.initial import is_initial
+
+
+def label_exit(label: Lab, n: int) -> set[ExitCodeKind]:
+    """Exit statuses of the frames of the label (label_exit, CAV25 C.3)."""
+    statuses: set[ExitCodeKind] = set()
+    for f in label[2:]:
+        if isinstance(f.event, ERR):
+            statuses.add(ExitCodeKind.ERR)
+        if isinstance(f.event, OOM):
+            statuses.add(ExitCodeKind.OOM)
+    if len(label) == n + 1:
+        statuses.add(ExitCodeKind.LABEL_OVERFLOW)
+    return statuses
 
 
 @dataclass
@@ -32,10 +45,6 @@ class PreRunner(BotUpAutomataRunner[Frame]):
         return self.sym.field_symbol(field_id, index, prefix)
 
     @override
-    def node_apply(self, label: Lab, prefix: str) -> sx.Application:
-        return self.sym.apply(label, prefix)
-
-    @override
     def node_consistency(
         self, parent: Lab, child: Lab, j: int, parent_prefix: str, child_prefix: str
     ) -> list[sx.SExpr]:
@@ -43,23 +52,11 @@ class PreRunner(BotUpAutomataRunner[Frame]):
 
     @override
     def node_local_constraints(self, label: Lab, prefix: str) -> list[sx.SExpr]:
-        return internal_constraints(self.sym, label, prefix) if self.flags.pre_internal_constraints else []
-
-    def label_exit(self, label: Lab) -> set[ExitCodeKind]:
-        """Exit statuses of the frames of the label (label_exit, CAV25 C.3)."""
-        statuses: set[ExitCodeKind] = set()
-        for f in label[2:]:
-            if isinstance(f.event, ERR):
-                statuses.add(ExitCodeKind.ERR)
-            if isinstance(f.event, OOM):
-                statuses.add(ExitCodeKind.OOM)
-        if len(label) == self.n + 1:
-            statuses.add(ExitCodeKind.LABEL_OVERFLOW)
-        return statuses
+        return label_constraints(self.sym, label, prefix)
 
     @override
     def is_error(self, label: Lab) -> sx.SExpr:
-        return sx.Constant(bool(self.label_exit(label) & self.exit_codes))
+        return sx.Constant(bool(label_exit(label, self.n) & self.exit_codes))
 
     @override
     def is_input_node(self, label: Lab) -> bool:

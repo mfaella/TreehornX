@@ -15,7 +15,8 @@ read from /proc (VmHWM) and from GNU time (`/usr/bin/time`) for the solver, not 
 maxrss carries the peak of a process over exec, so a process forked from the interpreter and running the
 solver would be charged with the interpreter's memory. Without GNU time the solver peak is left empty.
 
-Usage: uv run python scripts/bench.py [--only SUBSTRING] [--skip-slow] [--timeout SECONDS] [--out FILE.csv]
+Usage: uv run python scripts/bench.py [--only SUBSTRING] [--skip-slow] [--timeout SECONDS] [--solver NAME]
+       [--out FILE.csv]
 """
 
 import argparse
@@ -37,8 +38,17 @@ ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(ROOT))
 
 from tests.integration import test_lab_chc, test_pre_chc  # noqa: E402
-from tests.integration.config import SOLVERS, TestConfig, make_system, solver_available, solver_dir  # noqa: E402
-from treehornx.chc.solvers.base import KILL_GRACE, resolve_binary  # noqa: E402
+from tests.integration.config import (  # noqa: E402
+    SOLVERS,
+    SolverName,
+    TestConfig,
+    make_system,
+    missing_binaries,
+    solver_available,
+    solver_dir,
+)
+from treehornx.chc.solvers import PortfolioSolver, ProcessSolver, SolverError, Status  # noqa: E402
+from treehornx.chc.solvers.base import parse_status, race_on_file  # noqa: E402
 
 
 SUITES = [
@@ -46,9 +56,6 @@ SUITES = [
     ("test_pre_chc::test_memory_safety_under_precondition", test_pre_chc.CASES),
     ("test_pre_chc::test_unsafe_without_precondition", test_pre_chc.WITHOUT_PRECONDITION),
 ]
-
-# the timeout option of every solver, applied to its timeout in seconds
-TIMEOUT_OPTION = {"z3": "-T:{}", "eldarica": "-t:{}"}
 
 
 @dataclass
@@ -83,9 +90,22 @@ GNU_TIME = shutil.which("time")
 
 
 def solve_file(config: TestConfig, path: Path, peak_file: Path) -> tuple[str, float | None]:
-    """Runs the solver of `config` on the script at `path`: the status it prints and its memory peak in MiB."""
-    binary = resolve_binary(SOLVERS[config.solver].NAME, solver_dir(config.solver))
-    cmd = [str(binary), str(path), TIMEOUT_OPTION[config.solver].format(config.timeout)]
+    """Runs the solver of `config` on the script at `path`: the status it prints and its memory peak in MiB.
+
+    The portfolio races its solvers as `PortfolioSolver.solve` does, its memory peak is not measured."""
+    solver = SOLVERS[config.solver](solver_dir(config.solver))
+    if isinstance(solver, PortfolioSolver):
+        try:
+            return race_on_file(solver.solvers, path, config.timeout).value, None
+        except SolverError as e:
+            print(f"  {e}"[:500])
+            return "unknown", None
+    assert isinstance(solver, ProcessSolver)
+    return solve_process(solver, config.timeout, path, peak_file)
+
+
+def solve_process(solver: ProcessSolver, timeout: int, path: Path, peak_file: Path) -> tuple[str, float | None]:
+    cmd = solver.file_command(path, timeout)
     if GNU_TIME is not None:
         cmd = [GNU_TIME, "-f", "%M", "-o", str(peak_file), *cmd]
     # a session of its own, so that a timeout kills the solver and not only GNU time
@@ -93,19 +113,18 @@ def solve_file(config: TestConfig, path: Path, peak_file: Path) -> tuple[str, fl
         cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, start_new_session=True
     ) as proc:
         try:
-            stdout, stderr = proc.communicate(timeout=config.timeout + KILL_GRACE)
+            stdout, stderr = proc.communicate(timeout=solver.kill_timeout(timeout))
         except subprocess.TimeoutExpired:
             os.killpg(proc.pid, signal.SIGKILL)
             proc.communicate()
             return "unknown", None
-    peak = int(peak_file.read_text().split()[-1]) / 1024 if GNU_TIME is not None else None
-    for line in map(str.strip, stdout.splitlines()):
-        if line in ("sat", "unsat", "unknown"):
-            return line, peak
-        if line == "timeout":  # printed by eldarica
-            return "unknown", peak
-    print(f"  {binary.name} exited with code {proc.returncode}: {(stdout + stderr).strip()[:500]}")
-    return "unknown", peak
+    # GNU time does not write the peak of a process killed by a signal
+    peak = int(peak_file.read_text().split()[-1]) / 1024 if GNU_TIME is not None and peak_file.exists() else None
+    try:
+        return parse_status(solver.file_command(path, timeout), proc.returncode, stdout, stderr).value, peak
+    except SolverError as e:
+        print(f"  {str(e)[:500]}")
+        return Status.UNKNOWN.value, peak
 
 
 def run_case(test: str, config: TestConfig) -> Result:
@@ -147,7 +166,9 @@ def isolated(test: str, config: TestConfig) -> Result:
         return executor.submit(run_case, test, config).result()
 
 
-def cases(only: str | None, skip_slow: bool, timeout: int | None) -> list[tuple[str, TestConfig]]:
+def cases(
+    only: str | None, skip_slow: bool, timeout: int | None, solver: SolverName | None
+) -> list[tuple[str, TestConfig]]:
     selected: list[tuple[str, TestConfig]] = []
     for test, params in SUITES:
         for param in params:
@@ -157,15 +178,17 @@ def cases(only: str | None, skip_slow: bool, timeout: int | None) -> list[tuple[
                 continue
             if skip_slow and any(mark.name == "slow" for mark in config.marks):
                 continue
+            if solver is not None:
+                config = replace(config, solver=solver)
             if not solver_available(config.solver):
-                print(f"skipping {config.test_id}: {SOLVERS[config.solver].NAME} not found")
+                print(f"skipping {config.test_id}: {', '.join(missing_binaries(config.solver))} not found")
                 continue
             selected.append((test, config if timeout is None else replace(config, timeout=timeout)))
     return selected
 
 
 COLUMNS = [
-    ("solver", "{:<8}"),
+    ("solver", "{:<9}"),
     ("status", "{:<7}"),
     ("ok", "{!s:<5}"),
     ("gen_s", "{:>9.2f}"),
@@ -195,10 +218,13 @@ def main() -> None:
     parser.add_argument("--only", default=None, help="run only the cases whose test or id contains this text")
     parser.add_argument("--skip-slow", action="store_true", help="skip the cases marked slow in the tests")
     parser.add_argument("--timeout", type=int, default=None, help="solver timeout in seconds, instead of the test's")
+    parser.add_argument(
+        "--solver", choices=list(SOLVERS), default=None, help="solver of every case, instead of the test's"
+    )
     parser.add_argument("--out", type=Path, default=None, help="also write the results to this CSV file")
     args = parser.parse_args()
 
-    selected = cases(args.only, args.skip_slow, args.timeout)
+    selected = cases(args.only, args.skip_slow, args.timeout, args.solver)
     results: list[Result] = []
     case_width = max((len(config.test_id) for _, config in selected), default=4)
     print(header(case_width), flush=True)

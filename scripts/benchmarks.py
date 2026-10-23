@@ -17,16 +17,10 @@ from collections import Counter, defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Iterator
-
-from pychc.chc_system import CHCSystem
-from pychc.environment import reset_env
-from pychc.solvers.golem import GolemSolver
-from pychc.solvers.witness import Status
-from pysmt.fnode import FNode
+from typing import Any, Callable, Iterator, TypeAlias
 
 from treehornx import ir
-from treehornx.chc import Lab, pre
+from treehornx.chc import pre
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.sdta.SDTAContext import (
     SDTAContext,
@@ -34,21 +28,23 @@ from treehornx.chc.sdta.SDTAContext import (
     sll_sorted_ctx,
     sll_sorted_strict_ctx,
 )
+from treehornx.chc.smt.sexpr import Application, CHCSystem, Clause
+from treehornx.chc.solvers import SolverError, Status, Z3Solver
 from treehornx.enum_models.core.SymbolicEngine import SymbolicEngine
-from treehornx.enum_models.Lab import ERR, OOM
-from treehornx.enum_models.Lab import Lab as LabLabel
 from treehornx.enum_models.Lab import LabEngine
+from treehornx.feature_flags import FeatureFlags
 from treehornx.parser import parse_file
+
 
 ROOT = Path(__file__).parent.parent
 C_FILES = ROOT / "tests" / "integration" / "c_files"
-SOLVERS = ROOT / "tests" / "integration" / "solvers"
+SOLVERS = ROOT / "scripts" / "solvers" / "linux" / "x86-64"
 DEFAULT_TIMEOUT = 1800
 N = 128
 
 ERR_ONLY = frozenset({ExitCodeKind.ERR})
 
-type Ctx = Callable[[], SDTAContext]
+Ctx: TypeAlias = Callable[[], SDTAContext]
 
 
 # ---------------------------------------------------------------------------
@@ -134,87 +130,62 @@ def enumeration_timer() -> Iterator[tuple[defaultdict[type, float], dict[int, An
         SymbolicEngine.fix = original
 
 
-def ends_with_error(label: LabLabel) -> bool:
-    return label.next is None and isinstance(label.frame.event, ERR)
-
-
 def build_system(case: Case, function: ir.Function) -> CHCSystem:
     k = function.node.k
     match case.kind:
         case "lab":
-            return Lab.make_system(function, k, case.m, case.n, ends_with_error)
+            return pre.make_system(function, k, case.m, case.n, None, FeatureFlags(), ERR_ONLY)
         case "pre":
             assert case.pre is not None
-            return pre.make_system(function, k, case.m, case.n, case.pre(), case.exit_codes)
+            return pre.make_system(function, k, case.m, case.n, case.pre(), FeatureFlags(), case.exit_codes)
         case _:
             raise ValueError(f"unknown kind {case.kind}")
 
 
-QUERY_TYPES = [
-    "err",
-    "oom",
-    "lof",
-    "pre_root",
-]
+QUERY_TYPES = ["pre_root"]
 
 
 def predicate_family(name: str) -> str:
     return name.rstrip("0123456789")
 
 
-def queried_predicate(clause: FNode) -> str:
+def queried_predicate(clause: Clause) -> str:
     """Name of the predicate in the body of a query `P(...) ∧ φ → false`."""
-    body = clause.arg(0)
-    applications = [
-        node
-        for node in body.get_atoms() | {body}
-        if node.is_function_application() and node.function_name().symbol_type().return_type.is_bool_type()
-    ]
+    applications = [b for b in clause.body if isinstance(b, Application)]
     assert len(applications) == 1, f"a query has {len(applications)} predicates in its body"
-    return applications[0].function_name().symbol_name()
+    return applications[0].predicate.name
 
 
-def query_type(case: Case, name: str, labels: dict[int, Any]) -> str:
-    family = predicate_family(name)
-    if family == "Pre":
+def query_type(name: str) -> str:
+    if predicate_family(name) == "Pre":
         return "pre_root"
-    label = labels[int(name[len(family) :])]
-    if family == "Lab":
-        events = [f.event for f in label[2:]]
-        if any(isinstance(e, ERR) for e in events):
-            return "err"
-        if any(isinstance(e, OOM) for e in events):
-            return "oom"
-        if len(label) == case.n + 1:
-            return "lof"
     raise ValueError(f"unexpected query on {name}")
 
 
 def run_case(case: Case, timeout: int) -> dict[str, Any]:
-    reset_env()
     function = parse_file(str(C_FILES / f"{case.program}.c"))
 
     start = time.perf_counter()
-    with enumeration_timer() as (enumeration, labels):
+    with enumeration_timer() as (enumeration, _):
         system = build_system(case, function)
     build = time.perf_counter() - start
     enum_lab = enumeration[LabEngine]
 
-    families = Counter(predicate_family(p.symbol_name()) for p in system.get_predicates())
-    clauses = [c.arg(0) if c.is_forall() else c for c in system.get_clauses()]
-    queries = [c for c in clauses if c.is_implies() and c.arg(1).is_false()]
-    query_types = Counter(query_type(case, queried_predicate(q), labels) for q in queries)
+    families = Counter(predicate_family(p.name) for p in system.predicates)
+    clauses = system.clauses
+    queries = [c for c in clauses if c.head is False]
+    query_types = Counter(query_type(queried_predicate(q)) for q in queries)
 
-    solver = GolemSolver(binary_path=SOLVERS)
+    solver = Z3Solver(SOLVERS)
     start = time.perf_counter()
-    solver.load_system(system)
-    input_file = solver.get_input_file()
+    system.to_smt()
     serialize = time.perf_counter() - start
 
+    # the solver time includes writing the system on the solver's input
     start = time.perf_counter()
     try:
-        status = solver.run(input_file, timeout=timeout)
-    except Exception as e:  # the solver gives up without a result
+        status = solver.solve(system, timeout)
+    except SolverError as e:  # the solver gives up without a result
         print(f"  solver error: {e}")
         status = Status.UNKNOWN
     solve = time.perf_counter() - start
@@ -235,7 +206,6 @@ def run_case(case: Case, timeout: int) -> dict[str, Any]:
         "chc_build_s": build - enum_lab,
         "serialize_s": serialize,
         "solver_s": solve,
-        "lab_predicates": families["Lab"],
         "pre_predicates": families["Pre"],
         "predicates": sum(families.values()),
         "clauses": len(clauses),
@@ -261,7 +231,7 @@ def main() -> None:
             row = run_case(case, args.timeout)
             print(
                 f"  {row['status']} (expected {row['expected']}) enum {row['enum_total_s']:.2f}s "
-                f"solver {row['solver_s']:.2f}s, {row['lab_predicates']} Lab predicates, {row['queries']} queries",
+                f"solver {row['solver_s']:.2f}s, {row['pre_predicates']} Pre predicates, {row['queries']} queries",
                 flush=True,
             )
             if writer is None:

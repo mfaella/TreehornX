@@ -1,9 +1,11 @@
 """Bottom-up run of a symbolic data tree automaton (SDTA) over the backbone of the knitted-trees.
 
-A companion predicate `<name><ID>` is attached to every label (POPL, Sec. 5, Fig. 4). Its arguments are
-the data symbols of the Lab predicate, the automaton state of the node and the flag `e`, true when some
-node of the subtree is an error according to `is_error`. Symbols of the parent are prefixed with `p`,
-those of the j-th child with `c<j>` (children indexed from 0): data symbols as `p_v0_1`, `c0_f0_1`,
+A predicate `<name><ID>` is attached to every label (POPL, Sec. 5, Fig. 4). Its arguments are the data
+symbols of the label, the automaton state of the node and the flag `e`, true when some node of the subtree
+is an error according to `is_error`. Its clauses carry every data constraint of the node and of the links
+to its children, so they are the whole system: the steps of the lace have no clauses of their own.
+Symbols of the parent are prefixed with `p`, those of the j-th child with `c<j>` (children indexed from 0):
+data symbols as `p_v0_1`, `c0_f0_1`,
 states as `pre_p_<STATE>`, `pre_c<j>_<STATE>`, and the flag as `pre_p_e`, `pre_c<j>_e`.
 """
 
@@ -20,7 +22,6 @@ from treehornx.chc.smt import sexpr as sx
 from treehornx.enum_models.core.InternedPool import InternedPool
 from treehornx.enum_models.core.Label import Label
 from treehornx.enum_models.core.Pair import Pair
-from treehornx.feature_flags import FeatureFlags
 
 
 F = TypeVar("F")
@@ -47,7 +48,6 @@ class BotUpAutomataRunner(ABC, Generic[F]):
     name: str = "Pre"
     accept_empty: bool = True
     """ψ_F on the nil state, checked when the root is not an input node (empty input tree)."""
-    flags: FeatureFlags = field(kw_only=True)
     _label_ids: InternedPool[Label[F]] = field(default_factory=InternedPool[Label[F]], init=False)
 
     def __post_init__(self) -> None:
@@ -82,8 +82,8 @@ class BotUpAutomataRunner(ABC, Generic[F]):
     def error_symbol(self, role: str) -> sx.Var:
         return sx.Var(f"pre_{role}_{ERROR_FLAG}", sx.Type.Bool)
 
-    # The node predicate the automaton runs alongside, its data and the consistency between a parent and
-    # its j-th child: implemented by the runner attached to each kind of label.
+    # The data of a node, the constraints between them and the consistency between a parent and its j-th
+    # child: implemented by the runner attached to each kind of label.
 
     @abstractmethod
     def node_data_symbols(self, label: Label[F], prefix: str) -> list[sx.Var]: ...
@@ -96,16 +96,13 @@ class BotUpAutomataRunner(ABC, Generic[F]):
         """The data field `field_id` of the node at the frame `index`."""
 
     @abstractmethod
-    def node_apply(self, label: Label[F], prefix: str) -> sx.Application: ...
-
-    @abstractmethod
     def node_consistency(
         self, parent: Label[F], child: Label[F], j: int, parent_prefix: str, child_prefix: str
     ) -> list[sx.SExpr]: ...
 
     @abstractmethod
     def node_local_constraints(self, label: Label[F], prefix: str) -> list[sx.SExpr]:
-        """Constraints between the frames of `label` that the node predicate does not take as arguments."""
+        """Constraints between the frames of `label`, including those dropped from its arguments."""
 
     def _label_id(self, label: Label[F]) -> int:
         return self._label_ids.get_id(label)
@@ -149,11 +146,7 @@ class BotUpAutomataRunner(ABC, Generic[F]):
     def leaf_clause(self, label: Label[F]) -> sx.Clause:
         """Pre1: an auxiliary leaf has the nil state."""
         error = sx.OpExpr(sx.Operator.EQ, self.error_symbol(PARENT), self.is_error(label))
-        body: list[sx.SExpr | sx.Application] = [
-            self.node_apply(label, data_prefix(PARENT)),
-            *self.node_local_constraints(label, data_prefix(PARENT)),
-            error,
-        ]
+        body: list[sx.SExpr | sx.Application] = [*self.node_local_constraints(label, data_prefix(PARENT)), error]
         return sx.Clause(self.apply(label, PARENT), *body)
 
     def _psi(self, parent: Label[F], children: tuple[Label[F], ...]) -> sx.SExpr:
@@ -168,18 +161,21 @@ class BotUpAutomataRunner(ABC, Generic[F]):
 
     def node_clause(self, parent: Label[F], children: tuple[Label[F], ...]) -> sx.Clause:
         """Pre2: the state of an input node follows from the states of its children through ψ."""
-        body: list[sx.SExpr | sx.Application] = [
-            self.node_apply(parent, data_prefix(PARENT)),
-            *self.node_local_constraints(parent, data_prefix(PARENT)),
-        ]
+        body: list[sx.SExpr | sx.Application] = [*self.node_local_constraints(parent, data_prefix(PARENT))]
         for j, child in enumerate(children):
             body.append(self.apply(child, child_role(j)))
             body.extend(self.node_local_constraints(child, data_prefix(child_role(j))))
             body.extend(self.node_consistency(parent, child, j, data_prefix(PARENT), data_prefix(child_role(j))))
         if self.is_input_node(parent):
             body.append(self._psi(parent, children))
-        errors = [*(self.error_symbol(child_role(j)) for j in range(len(children))), self.is_error(parent)]
-        some_error = errors[0] if len(errors) == 1 else sx.OpExpr(sx.Operator.OR, *errors)
+        # is_error is a constant: true makes the flag true, false is left out of the disjunction
+        error = self.is_error(parent)
+        errors = [*(self.error_symbol(child_role(j)) for j in range(len(children))), error]
+        errors = [e for e in errors if e != sx.FALSE]
+        if error == sx.TRUE:
+            some_error: sx.SExpr = sx.TRUE
+        else:
+            some_error = errors[0] if len(errors) == 1 else sx.OpExpr(sx.Operator.OR, *errors)
         body.append(sx.OpExpr(sx.Operator.EQ, self.error_symbol(PARENT), some_error))
         return sx.Clause(self.apply(parent, PARENT), *body)
 

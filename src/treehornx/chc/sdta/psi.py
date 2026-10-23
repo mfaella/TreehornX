@@ -556,6 +556,15 @@ def psi_rb(
 #     return sx.OpExpr(sx.Operator.AND, *conditions)
 
 
+def psi_true(
+    children_states: Mapping[str, Mapping[str, sx.SExpr] | None],
+    fields: Mapping[str, sx.SExpr],
+    states: Mapping[str, sx.SExpr],
+) -> sx.SExpr:
+    """ψ of the automaton accepting every tree: it has no state to compute."""
+    return sx.TRUE
+
+
 def psiF_empty(states: Mapping[str, sx.SExpr]) -> sx.SExpr:  # noqa: N802
     return sx.TRUE
 

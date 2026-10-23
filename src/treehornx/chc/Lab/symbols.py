@@ -23,8 +23,8 @@ class ChcLabUtils:
     engine: LabEngine
     # every prefix of a label is a predicate, but the engine only interns the ends of internal chains
     _predicate_ids: InternedPool[Lab] = field(default_factory=InternedPool[Lab], init=False)
-    # internal_constraints of every (label, symbol prefix), built on the entry of the label's prefix
-    internal_constraints_cache: dict[tuple[Lab, str], tuple[sx.SExpr, ...]] = field(
+    # label_constraints of every (label, symbol prefix), built on the entry of the label's prefix
+    label_constraints_cache: dict[tuple[Lab, str], tuple[sx.SExpr, ...]] = field(
         default_factory=dict[tuple[Lab, str], tuple[sx.SExpr, ...]], init=False
     )
 
