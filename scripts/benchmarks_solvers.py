@@ -1,9 +1,10 @@
-"""Compares golem and eldarica on the Lab and precondition test cases.
+"""Compares z3, eldarica and the portfolio on the Lab and precondition test cases.
 
-The CHC system of every case of `test_lab_chc.py` and `test_pre_chc.py` is built once and solved by both
-solvers (`golem` and `eld` in tests/integration/solvers). For every case it records the build time, the
-number of predicates and clauses, and the time and status of each solver; a solver that crashes is reported
-as ERROR(...).
+The CHC system of every case of `test_lab_chc.py` and `test_pre_chc.py` is built once and solved by every
+solver (`z3` and `golem` in scripts/solvers, `eld` in tests/integration/solvers, PATH otherwise). For every case it
+records the build time, the number of predicates and clauses, and the time and status of each solver; a solver
+that crashes is reported as ERROR(...). For the portfolio it also records the racer deciding (`golem-<engine>` for
+golem) and the command it ran.
 
 Usage: uv run python scripts/benchmarks_solvers.py [--out FILE.json]
 """
@@ -14,39 +15,50 @@ import sys
 import time
 from pathlib import Path
 
+
 ROOT = Path(__file__).parent.parent
-sys.path.insert(0, str(ROOT / "tests" / "integration"))
+sys.path.insert(0, str(ROOT / "tests"))
 
-from pychc.environment import reset_env  # noqa: E402
-from pychc.exceptions import PyCHCSolverException  # noqa: E402
-from pychc.solvers.eldarica import EldaricaSolver  # noqa: E402
-from pychc.solvers.golem import GolemSolver  # noqa: E402
-
-import test_lab_chc as lab_tests  # noqa: E402
-import test_pre_chc as pre_tests  # noqa: E402
-from treehornx.chc import Lab, pre  # noqa: E402
-from treehornx.parser import parse_file  # noqa: E402
-
-SOLVERS = ROOT / "tests" / "integration" / "solvers"
-C_FILES = ROOT / "tests" / "integration" / "c_files"
-TIMEOUT = lab_tests.TIMEOUT
-N = lab_tests.N
+from integration import test_lab_chc, test_pre_chc  # noqa: E402
+from integration.config import TestConfig, make_system  # noqa: E402
+from treehornx.chc.solvers import (  # noqa: E402
+    CHCSolver,
+    EldaricaSolver,
+    GolemSolver,
+    PortfolioSolver,
+    SolverError,
+    Z3Solver,
+)
 
 
-def values(case):
-    """The arguments of a test case, also when it is wrapped in a pytest.param."""
-    return tuple(case.values) if hasattr(case, "values") else case
+SHIPPED = ROOT / "scripts" / "solvers" / "linux" / "x86-64"
+TEST_SOLVERS = ROOT / "tests" / "integration" / "solvers"
+SOLVERS: dict[str, CHCSolver] = {
+    "z3": Z3Solver(SHIPPED),
+    "eldarica": EldaricaSolver(TEST_SOLVERS),
+    "portfolio": PortfolioSolver(
+        solvers=[
+            GolemSolver(SHIPPED, engine="spacer"),
+            GolemSolver(SHIPPED, engine="pa"),
+            Z3Solver(SHIPPED),
+            EldaricaSolver(TEST_SOLVERS),
+        ]
+    ),
+}
 
 
 def jobs():
-    for program, m, expected in map(values, lab_tests.CASES):
-        yield "lab", program, m, expected, lambda f, m=m: Lab.make_system(f, f.node.k, m, N, lab_tests.ends_with_error)
-    for program, ctx, m, expected in map(values, pre_tests.CASES):
-        yield f"pre:{ctx.__name__}", program, m, expected, lambda f, m=m, ctx=ctx: pre.make_system(f, f.node.k, m, N, ctx())
-    for program in pre_tests.NEEDS_PRECONDITION:
-        yield "lab(no pre)", program, 0, lab_tests.Status.UNSAT, lambda f: Lab.make_system(
-            f, f.node.k, 0, N, pre_tests.ends_with_error
-        )
+    """(suite, config) of every integration test case, the solver of the config is ignored."""
+    suites = (
+        ("lab", test_lab_chc.CASES),
+        ("pre", test_pre_chc.CASES),
+        ("lab(no pre)", test_pre_chc.WITHOUT_PRECONDITION),
+    )
+    for suite, cases in suites:
+        for case in cases:
+            config = case.values[0]
+            assert isinstance(config, TestConfig)
+            yield suite if config.pre is None else f"{suite}:{config.pre}", config
 
 
 def main() -> None:
@@ -56,27 +68,29 @@ def main() -> None:
     out: Path = args.out or Path(f"benchmarks_solvers_{time.strftime('%Y-%m-%d_%H-%M-%S')}.json")
 
     rows = []
-    for suite, program, m, expected, build in jobs():
-        reset_env()
-        function = parse_file(str(C_FILES / f"{program}.c"))
+    for suite, config in jobs():
         start = time.perf_counter()
-        system = build(function)
+        system = make_system(config)
         row = {
             "suite": suite,
-            "program": program,
-            "m": m,
-            "expected": expected.name,
+            "program": config.program,
+            "m": config.m,
+            "expected": config.expected.name,
             "build_s": time.perf_counter() - start,
-            "predicates": len(list(system.get_predicates())),
-            "clauses": len(list(system.get_clauses())),
+            "predicates": len(system.predicates),
+            "clauses": len(system.clauses),
         }
-        for name, cls in (("golem", GolemSolver), ("eldarica", EldaricaSolver)):
-            solver = cls(binary_path=SOLVERS)
-            solver.load_system(system)
+        for name, solver in SOLVERS.items():
             start = time.perf_counter()
             try:
-                status = solver.solve(timeout=TIMEOUT).name
-            except PyCHCSolverException as e:
+                if isinstance(solver, PortfolioSolver):
+                    outcome = solver.race(system, config.timeout)
+                    status = outcome.status.name
+                    row[f"{name}_winner"] = None if outcome.solver is None else outcome.solver.label
+                    row[f"{name}_command"] = None if outcome.command is None else list(outcome.command)
+                else:
+                    status = solver.solve(system, config.timeout).name
+            except SolverError as e:
                 status = f"ERROR({e})"
             row[f"{name}_s"] = time.perf_counter() - start
             row[f"{name}_status"] = status

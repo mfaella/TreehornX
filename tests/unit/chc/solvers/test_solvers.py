@@ -12,6 +12,7 @@ from treehornx.chc.solvers import (
     CHCSolver,
     EldaricaSolver,
     GolemSolver,
+    Outcome,
     PortfolioSolver,
     SolverError,
     Status,
@@ -122,14 +123,35 @@ def test_portfolio_sat_and_unsat() -> None:
 def test_portfolio_first_answer_wins(tmp_path: Path) -> None:
     solver = fake_portfolio(tmp_path, {"golem": "sleep 30", "z3": "echo unknown", "eld": "sleep 1; echo unsat"})
     start = time.perf_counter()
-    assert solver.solve(system(sx.TRUE)) is Status.UNSAT
+    outcome = solver.race(system(sx.TRUE))
     assert time.perf_counter() - start < 10, "the solvers still running are not killed"
+    assert outcome.status is Status.UNSAT
+    assert outcome.solver is not None and outcome.solver.label == "eld"
+    assert outcome.command is not None and outcome.command[0] == str(tmp_path / "eld")
+
+
+def test_portfolio_reports_the_golem_engine(tmp_path: Path) -> None:
+    solver = fake_portfolio(
+        tmp_path, {"golem": '[ "$2" = pa ] && echo sat || sleep 30', "z3": "sleep 30", "eld": "sleep 30"}
+    )
+    outcome = solver.race(system(sx.TRUE))
+    assert outcome.status is Status.SAT
+    assert outcome.solver is not None and outcome.solver.label == "golem-pa"
+    assert outcome.command is not None and outcome.command[1:3] == ("-e", "pa")
+
+
+def test_golem_engine(tmp_path: Path) -> None:
+    path = tmp_path / "system.smt2"
+    golem = GolemSolver(fake_solver(tmp_path, "golem", "echo sat"), engine="spacer")
+    assert golem.file_command(path, None) == [str(tmp_path / "golem"), "-e", "spacer", str(path)]
+    assert golem.label == "golem-spacer"
+    assert GolemSolver(tmp_path).label == "golem"
 
 
 def test_portfolio_unknown_when_none_decides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(base, "KILL_GRACE", 0)
     solver = fake_portfolio(tmp_path, {"golem": "sleep 30", "z3": "echo unknown", "eld": "echo boom"})
-    assert solver.solve(system(sx.TRUE), timeout=1) is Status.UNKNOWN
+    assert solver.race(system(sx.TRUE), timeout=1) == Outcome(Status.UNKNOWN)
 
 
 def test_portfolio_every_solver_fails(tmp_path: Path) -> None:

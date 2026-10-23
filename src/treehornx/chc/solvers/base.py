@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import threading
 from abc import ABC, abstractmethod
+from dataclasses import dataclass
 from enum import Enum
 from pathlib import Path
 from typing import IO, ClassVar, Sequence
@@ -48,6 +49,11 @@ class ProcessSolver(CHCSolver):
     def __init__(self, solvers_dir: Path | None = None) -> None:
         self.binary = resolve_binary(self.NAME, solvers_dir)
 
+    @property
+    def label(self) -> str:
+        """The name of the solver in reports, telling apart instances run with different options."""
+        return self.NAME
+
     @abstractmethod
     def file_command(self, path: Path, timeout: int | None) -> list[str]:
         """The command solving the system written in `path`."""
@@ -57,6 +63,15 @@ class ProcessSolver(CHCSolver):
         if timeout is None:
             return None
         return timeout + KILL_GRACE if self.OWN_TIMEOUT else timeout
+
+
+@dataclass(frozen=True)
+class Outcome:
+    """The status of a race, with the solver deciding it and the exact command it ran (None when none decides)."""
+
+    status: Status
+    solver: ProcessSolver | None = None
+    command: tuple[str, ...] | None = None
 
 
 def resolve_binary(name: str, solvers_dir: Path | None) -> Path:
@@ -117,7 +132,7 @@ def parse_status(cmd: list[str], returncode: int, stdout: str, stderr: str) -> S
     raise SolverError(f"{Path(cmd[0]).name} exited with code {returncode} without a status: {output}")
 
 
-def run_on_file(solvers: Sequence[ProcessSolver], system: CHCSystem, timeout: int | None) -> Status:
+def run_on_file(solvers: Sequence[ProcessSolver], system: CHCSystem, timeout: int | None) -> Outcome:
     """Writes the system to a temporary file and runs every solver on it at the same time.
 
     The first sat/unsat wins and the other processes are killed. UNKNOWN when no solver decides, SolverError when
@@ -129,9 +144,9 @@ def run_on_file(solvers: Sequence[ProcessSolver], system: CHCSystem, timeout: in
         return race_on_file(solvers, path, timeout)
 
 
-def race_on_file(solvers: Sequence[ProcessSolver], path: Path, timeout: int | None) -> Status:
+def race_on_file(solvers: Sequence[ProcessSolver], path: Path, timeout: int | None) -> Outcome:
     """Runs every solver on the system written in `path` at the same time, as `run_on_file`."""
-    results: queue.Queue[Status | SolverError] = queue.Queue()
+    results: queue.Queue[tuple[ProcessSolver, list[str], Status | SolverError]] = queue.Queue()
     procs: list[subprocess.Popen[str]] = []
     waiters: list[threading.Thread] = []
     try:
@@ -147,20 +162,20 @@ def race_on_file(solvers: Sequence[ProcessSolver], path: Path, timeout: int | No
             )
             procs.append(proc)
             waiter = threading.Thread(
-                target=_wait, args=(cmd, proc, solver.kill_timeout(timeout), results), daemon=True
+                target=_wait, args=(solver, cmd, proc, solver.kill_timeout(timeout), results), daemon=True
             )
             waiter.start()
             waiters.append(waiter)
         errors: list[SolverError] = []
         for _ in solvers:
-            result = results.get()
+            solver, cmd, result = results.get()
             if isinstance(result, SolverError):
                 errors.append(result)
             elif result is not Status.UNKNOWN:
-                return result
+                return Outcome(result, solver, tuple(cmd))
         if len(errors) == len(solvers):
             raise SolverError("; ".join(map(str, errors)))
-        return Status.UNKNOWN
+        return Outcome(Status.UNKNOWN)
     finally:
         for proc in procs:
             _kill(proc)
@@ -169,19 +184,23 @@ def race_on_file(solvers: Sequence[ProcessSolver], path: Path, timeout: int | No
 
 
 def _wait(
-    cmd: list[str], proc: subprocess.Popen[str], kill_timeout: int | None, results: queue.Queue[Status | SolverError]
+    solver: ProcessSolver,
+    cmd: list[str],
+    proc: subprocess.Popen[str],
+    kill_timeout: int | None,
+    results: queue.Queue[tuple[ProcessSolver, list[str], Status | SolverError]],
 ) -> None:
     try:
         stdout, stderr = proc.communicate(timeout=kill_timeout)
     except subprocess.TimeoutExpired:
         _kill(proc)
         proc.communicate()
-        results.put(Status.UNKNOWN)
+        results.put((solver, cmd, Status.UNKNOWN))
         return
     try:
-        results.put(parse_status(cmd, proc.returncode, stdout, stderr))
+        results.put((solver, cmd, parse_status(cmd, proc.returncode, stdout, stderr)))
     except SolverError as e:
-        results.put(e)
+        results.put((solver, cmd, e))
 
 
 def _kill(proc: subprocess.Popen[str]) -> None:
