@@ -4,8 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 TreehornX is a research prototype that verifies memory safety of C programs manipulating trees and lists. It implements
 the knitted-tree / CHC method of Faella & Parlato, *Verifying Tree-Manipulating Programs via CHCs* (CAV25, extended
-version in `notes/`), and adds **preconditions** expressed as symbolic data-tree automata (SDTAs). Postconditions are
-the next goal but are **not implemented** (an earlier DFS engine and post CHC were removed in `a3e6307`).
+version in `notes/`), and adds **preconditions** expressed as symbolic data-tree automata (SDTAs) and the
+**tree-shape check** of the output heap (tainting, Sec. 6 of the POPL27 draft in `notes/`). Custom postconditions
+(Sec. 7, the S predicate over output states) are **not implemented** yet.
 
 ## Commands
 
@@ -25,6 +26,7 @@ uv run pytest -m "not slow"                                         # skip verif
 
 uv run treehornx verify FILE.c --pre bst -m 1 -n 128 --check-sat         # CLI (Z3 by default, --eldarica, --golem, --portfolio)
 uv run treehornx verify FILE.c --smt2                                   # dump one SMT-LIB2 system per exit status
+uv run treehornx verify FILE.c --tree-shape --pre bst --check-sat       # also check that the output heap is a tree
 uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.csv]
 ```
 
@@ -38,6 +40,11 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
   empties it, after which older terms are no longer equal to new ones.
 - `docs/replicating_benchmarks.md` explains how to reproduce the paper benchmarks (they were produced on the `post`
   branch).
+- Tree-shape tests: `tests/integration/test_tree_shape.py` (`*_shape_*` programs, each also checked memory safe;
+  safe cases also assert that `finals()` has a root, so SAT is not vacuous), `test_tree_shape_pre.py` (`*_pre_shape_*`
+  programs whose verdict depends on the precondition), `test_post_chc.py` (the memory cases through the Post system),
+  `test_cli_tree_shape.py`; unit tests in `tests/unit/enum_models/test_taint.py` (including completeness of
+  `finals()` against per-tree fixpoints) and `test_shape.py`. `TestConfig.layer = "post"` selects `Post.make_system`.
 
 ## Pipeline
 
@@ -77,6 +84,30 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
    script into `z3 -in` (`Z3Solver`) or `eld -in` (`EldaricaSolver`) and returns `Status` SAT/UNSAT/UNKNOWN.
    **sat = safe, unsat = an error is reachable.** One system is built per exit status (ERR, OOM, LABEL_OVERFLOW)
    that the enumeration actually reaches; unreached ones are reported as "trivially" safe without calling a solver.
+6. **Tree shape (`--tree-shape`, check `TREE_SHAPE`)** — runs after the memory checks and assumes they hold (the
+   paper's composition assumption; shape errors are not filtered by exit status). Steps:
+   - `enum_models/Taint/TaintingEngine.py` (a `SymbolicEngine[TaintedLabel]`) lifts the final Lab labels/pairs to
+     `TaintedLabel(taint_node, taint_ptr, lab)` and saturates Rules 1–5 of POPL27 Fig. 5: `step_int` = T5 (a trail
+     ending on the node, via `points_here`, taints it) + T3 (a tainted node seeds a ⊤ trail at the last
+     ⟨pf := p⟩ of each field), `step_down` = T2 (structural child) + T4 down, `step_up` = T4 up; T1 seeds
+     `taint_ptr[(ROOT, last frame)] = ⊤+` on the end-of-lace label at initialisation. Taints are `BoolPlus`
+     (⊥ < ⊤ < ⊤+, merged by join; hashed by value so the systems come out in a fixed order); `TaintPtr` stores only
+     non-⊥ keys `(p, frame)`. A step returns None when nothing changes.
+   - `finals()` (`Taint/finals.py::saturated_finals`) keeps the saturated labels (`is_saturated_l`) and pairs
+     (`is_saturated_p`) that compose a tree: a greatest fixpoint by removal with per-(label, j) support counters
+     (an unvisited input tail is a label paired with itself, so revisits must count as true), then a BFS from the
+     `is_initial` roots. It over-approximates: each child slot is satisfied independently.
+   - `Taint/shape.py` reads the violations off the taints (`ShapeError`, POPL27 Fig. 9): `label_errors` (two trails
+     ending on a node, a trail ending on a freed node, trails merging, a self-loop) and `pair_errors` (a trail
+     landing on a seed, a structural child that is also a trail end or was freed).
+   - `chc/Post/` mirrors `chc/Lab` + `chc/pre`: `post_from_lab`/`build_post` (taints on top of `build_lab`),
+     `TreeShapeRunner` (a `BotUpAutomataRunner[TaintedLabel]`, predicates `Post<id>`, Lab data constraints on
+     `state.lab`, `is_error` = shape errors of the label (+ `exit_codes`, empty by default), `is_pair_error` = shape
+     errors of the pair), `tree_shape_clauses`, `make_system`. The precondition works as in step 4.
+
+   `BotUpAutomataRunner` is generic over the node state `NS` (`PreRunner` is `[Lab]`). Its `is_pair_error(parent,
+   child, j, ...)` hook (false by default) is ORed into the parent's accumulated flag in `collect_clause`, so pair
+   errors reach the root query like node errors; there is no separate per-pair query.
 
 `feature_flags.py::FeatureFlags` (CLI: `--clean-clause`): `clean_clause` (merge variables equated in a clause body,
 `chc/clean.py`; clauses are built uncleaned and cleaned lazily one at a time when printed, via
@@ -130,6 +161,17 @@ everything. The implementation follows the paper's "Efficient Implementation" fu
   (`is_input_node` = `label[1].active`); non-input/auxiliary nodes get the nil state; the query fires when the root's
   state is accepting (`psiF`) and the propagated error flag is true. An empty input tree is accepted by default
   (`accept_empty`).
+- **Tainting** (POPL27 Sec. 6, which defines it as CHCs C_T over a single predicate T) is enumerated like the shape:
+  - Rule 4 does not walk the lace frame by frame: like the CAV25 rewind, the trail of p at (σ, i2) jumps to
+    `i_upd = last_upd(σ, i2, p)` and continues on the frame linked to σ^{i_upd} by its **prev** link
+    (`TaintingEngine.jumps_up`/`jumps_down`), so `taint_ptr` marks only the ends of the jumps.
+  - Rule 5 ends a trail with `points_here`, not the paper's `ptr_here`.
+  - Every step propagates all it can at once; consistency between labels is not checked (`consistent` is True).
+  - TQ2 (a trail walking through another trail's seed) is replaced by the three places where two trails of the same
+    pointer can merge under jumps: two entries leaving a label through the same `last_upd` frame, a jump landing on a
+    seed, the T1 seed on a field seed (rationale in the `shape.py` docstring). TQ4's ⟨pf := here⟩ is never produced.
+  - `free p` sets every pointer variable on the freed node to nil, so a dangling pointer *variable* cannot be
+    expressed; dangling-pointer tests must go through a field.
 
 ## Repository notes
 

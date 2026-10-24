@@ -14,7 +14,7 @@ from .config import TestConfig, params, run
 
 SAT, UNSAT = Status.SAT, Status.UNSAT
 
-CASES = params(
+CONFIGS = (
     TestConfig("sll_safe_find", SAT),
     TestConfig("sll_unsafe_find", UNSAT),
     TestConfig("sll_safe_insert_sorted", SAT, m=1),
@@ -39,6 +39,7 @@ CASES = params(
     # the parent and leaves to it
     TestConfig("bst_unsafe_linked_new", UNSAT, m=1),
 )
+CASES = params(*CONFIGS)
 
 
 @pytest.mark.parametrize("config", CASES)

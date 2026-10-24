@@ -15,7 +15,7 @@ from typing import Callable, Literal, TypeAlias
 import pytest
 from _pytest.mark import ParameterSet
 
-from treehornx.chc import pre
+from treehornx.chc import Post, pre
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.smt.sexpr import CHCSystem
 from treehornx.chc.solvers import CHCSolver, EldaricaSolver, GolemSolver, PortfolioSolver, Status, Z3Solver
@@ -62,6 +62,8 @@ class TestConfig:
     solver: SolverName = "z3"
     timeout: int = 120
     exit_code: ExitCodeKind = ExitCodeKind.ERR
+    layer: Literal["pre", "post"] = "pre"
+    """The system builder: `pre.make_system` over the Lab labels or `Post.make_system` over the tainted ones."""
     id: str | None = None
     """Test id, the program name followed by the precondition by default."""
     marks: tuple[pytest.MarkDecorator, ...] = field(default=(), compare=False)
@@ -107,7 +109,8 @@ def make_system(config: TestConfig) -> CHCSystem:
         function = restricted
     k = function.node.k
     ctx = PRE[config.pre]() if config.pre is not None else None
-    return pre.make_system(function, k, config.m, config.n, ctx, config.flags, frozenset({config.exit_code}))
+    make = pre.make_system if config.layer == "pre" else Post.make_system
+    return make(function, k, config.m, config.n, ctx, config.flags, frozenset({config.exit_code}))
 
 
 def _solve(config: TestConfig) -> Status:

@@ -15,6 +15,7 @@ from humanfriendly import format_timespan
 from treehornx import ir
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.Lab.system import LabCHC, build_lab, to_system, write_smt2
+from treehornx.chc.Post import post_from_lab, tree_shape_clauses
 from treehornx.chc.pre import PreRunner, label_exit
 from treehornx.chc.sdta.SDTAContext import (
     SDTAContext,
@@ -65,12 +66,15 @@ PRE: dict[str, Callable[[], SDTAContext]] = {
 }
 
 EXIT_CODES = (ExitCodeKind.ERR, ExitCodeKind.OOM, ExitCodeKind.LABEL_OVERFLOW)
+TREE_SHAPE = "TREE_SHAPE"
 
 
 @dataclass
 class Stats:
     generation_elapsed_time: float = 0.0
     labels_count: int = 0
+    taints_generation_elapsed_time: float = 0.0
+    tainted_labels_count: int = 0
     largest_label_length: int = 0
     trivially_safe: dict[str, bool] = field(default_factory=dict[str, bool])
     system_creation_elapsed_time: dict[str, float] = field(default_factory=dict[str, float])
@@ -106,41 +110,25 @@ def memory_clauses(
     return runner.predicates(), itertools.chain(runner.clauses(), runner.queries())
 
 
-def memory_system(
-    function: ir.Function,
-    lab: LabCHC,
-    m: int,
-    n: int,
-    exit_code: ExitCodeKind,
-    pre_ctx: SDTAContext | None,
-    flags: FeatureFlags,
-) -> CHCSystem:
-    return to_system(*memory_clauses(function, lab, m, n, exit_code, pre_ctx), flags.clean_clause)
+Clauses: TypeAlias = Callable[[], tuple[list[Predicate], Iterable[Clause]]]
+"""Builds the predicates and the (lazily generated) clauses of a check's system."""
 
 
 def dump_system(
-    function: ir.Function,
-    lab: LabCHC,
-    m: int,
-    n: int,
-    exit_code: ExitCodeKind,
-    pre_ctx: SDTAContext | None,
-    smt2: bool,
-    print_chc: bool,
-    flags: FeatureFlags,
+    function: ir.Function, check: str, clauses: Clauses, smt2: bool, print_chc: bool, flags: FeatureFlags
 ) -> Path | None:
     """Streams the system to `<function>_<check>.smt2` and/or stdout without building a `CHCSystem`."""
-    _, clauses = memory_clauses(function, lab, m, n, exit_code, pre_ctx)
+    _, body = clauses()
     if not smt2:
-        sys.stdout.write(f"; CHC system for {exit_code.name}\n")
-        write_smt2(clauses, sys.stdout, flags.clean_clause)
+        sys.stdout.write(f"; CHC system for {check}\n")
+        write_smt2(body, sys.stdout, flags.clean_clause)
         sys.stdout.flush()
         return None
-    file_path = Path(f"{function.name}_{exit_code.name}.smt2")
+    file_path = Path(f"{function.name}_{check}.smt2")
     with file_path.open("w") as f:
-        write_smt2(clauses, f, flags.clean_clause)
+        write_smt2(body, f, flags.clean_clause)
     if print_chc:
-        sys.stdout.write(f"; CHC system for {exit_code.name}\n")
+        sys.stdout.write(f"; CHC system for {check}\n")
         with file_path.open() as f:
             shutil.copyfileobj(f, sys.stdout)
         sys.stdout.flush()
@@ -239,6 +227,40 @@ def display_outcome(check: str, status: Status) -> None:
             warning(f"Unknown result for {check}.")
 
 
+def run_check(
+    function: ir.Function,
+    check: str,
+    clauses: Clauses,
+    smt2: bool,
+    print_chc: bool,
+    solver: CHCSolver | None,
+    timeout: int | None,
+    flags: FeatureFlags,
+    stats: Stats,
+) -> None:
+    """Dumps, prints and solves the system of `check`."""
+    if smt2 or print_chc:
+        file_path, elapsed = progress(
+            f"Writing the CHC system for {check}",
+            lambda: dump_system(function, check, clauses, smt2, print_chc, flags),
+        )
+        stats.smt2_dumping_elapsed_time[check] = elapsed
+        where = f": {file_path}" if file_path else " on stdout"
+        console.print(f"CHC system for {check} written in {format_timespan(elapsed)}{where}.")
+
+    if solver is not None:
+        system, elapsed = progress(
+            f"Creating the CHC system for {check}", lambda: to_system(*clauses(), flags.clean_clause)
+        )
+        stats.system_creation_elapsed_time[check] = elapsed
+        console.print(f"CHC system for {check} created in {format_timespan(elapsed)}.")
+        status, elapsed = progress(f"Solving {check}", lambda: check_sat(solver, system, timeout))
+        stats.check_sat_elapsed_time[check] = elapsed
+        stats.outcome[check] = status.value
+        console.print(f"{check} solved in {format_timespan(elapsed)}: {status.value}.")
+        display_outcome(check, status)
+
+
 def verify(
     function: ir.Function,
     n: int,
@@ -249,9 +271,11 @@ def verify(
     solver: CHCSolver | None,
     timeout: int | None,
     flags: FeatureFlags,
+    tree_shape: bool = False,
 ) -> Stats:
     """Enumerates the labels, reports the exit statuses that are trivially unreachable and builds, dumps, prints
-    and solves the CHC systems of the others."""
+    and solves the CHC systems of the others. With `tree_shape`, also the system checking that the output heap
+    is a tree (on the inputs accepted by the precondition, as the others)."""
     k = function.node.k
     stats = Stats()
 
@@ -278,28 +302,37 @@ def verify(
         return stats
 
     for code in (code for code in EXIT_CODES if code in reached):
-        check = code.name
-        if smt2 or print_chc:
-            file_path, elapsed = progress(
-                f"Writing the CHC system for {check}",
-                lambda code=code: dump_system(function, lab, m, n, code, pre_ctx, smt2, print_chc, flags),
-            )
-            stats.smt2_dumping_elapsed_time[check] = elapsed
-            where = f": {file_path}" if file_path else " on stdout"
-            console.print(f"CHC system for {check} written in {format_timespan(elapsed)}{where}.")
+        run_check(
+            function,
+            code.name,
+            lambda code=code: memory_clauses(function, lab, m, n, code, pre_ctx),
+            smt2,
+            print_chc,
+            solver,
+            timeout,
+            flags,
+            stats,
+        )
 
-        if solver is not None:
-            system, elapsed = progress(
-                f"Creating the CHC system for {check}",
-                lambda code=code: memory_system(function, lab, m, n, code, pre_ctx, flags),
-            )
-            stats.system_creation_elapsed_time[check] = elapsed
-            console.print(f"CHC system for {check} created in {format_timespan(elapsed)}.")
-            status, elapsed = progress(f"Solving {check}", lambda: check_sat(solver, system, timeout))
-            stats.check_sat_elapsed_time[check] = elapsed
-            stats.outcome[check] = status.value
-            console.print(f"{check} solved in {format_timespan(elapsed)}: {status.value}.")
-            display_outcome(check, status)
+    if tree_shape:
+        info("The tree-shape check assumes that the function is memory safe (ERR, OOM and LABEL_OVERFLOW).")
+        post, stats.taints_generation_elapsed_time = progress("Generating taints", lambda: post_from_lab(lab))
+        stats.tainted_labels_count = len(post.labels)
+        console.print(
+            f"Taint generation completed in {format_timespan(stats.taints_generation_elapsed_time)}: "
+            f"{stats.tainted_labels_count} tainted labels."
+        )
+        run_check(
+            function,
+            TREE_SHAPE,
+            lambda: tree_shape_clauses(function, post, m, n, pre_ctx),
+            smt2,
+            print_chc,
+            solver,
+            timeout,
+            flags,
+            stats,
+        )
 
     return stats
 
@@ -355,6 +388,10 @@ def verify_cmd(
     clean_clause: Annotated[
         bool, typer.Option("--clean-clause", help="merge the variables equated in a clause body")
     ] = False,
+    tree_shape: Annotated[
+        bool,
+        typer.Option("--tree-shape", help="also check that the output heap is a tree (under --pre, if given)"),
+    ] = False,
 ) -> None:
     solver_flags = {"z3": z3, "eldarica": eldarica, "golem": golem, "portfolio": portfolio}
     solvers = [name for name, chosen in solver_flags.items() if chosen]
@@ -401,6 +438,7 @@ def verify_cmd(
         solver,
         timeout,
         FeatureFlags(clean_clause),
+        tree_shape,
     )
     dump_stats(function, stats, produce_csv, produce_json)
 

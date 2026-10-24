@@ -9,7 +9,7 @@ from treehornx.chc.Lab.clauses import consistency_constraint, label_constraints
 from treehornx.chc.Lab.symbols import ChcLabUtils
 from treehornx.chc.pre.runner import BotUpAutomataRunner
 from treehornx.chc.smt import sexpr as sx
-from treehornx.enum_models.Lab import ERR, OOM, Frame, Lab
+from treehornx.enum_models.Lab import ERR, OOM, Lab
 from treehornx.enum_models.Lab.initial import is_initial
 
 
@@ -27,7 +27,7 @@ def label_exit(label: Lab, n: int) -> set[ExitCodeKind]:
 
 
 @dataclass
-class PreRunner(BotUpAutomataRunner[Frame]):
+class PreRunner(BotUpAutomataRunner[Lab]):
     sym: ChcLabUtils = field(kw_only=True)
     n: int = field(kw_only=True)
     exit_codes: frozenset[ExitCodeKind] = field(default=frozenset({ExitCodeKind.ERR}), kw_only=True)
