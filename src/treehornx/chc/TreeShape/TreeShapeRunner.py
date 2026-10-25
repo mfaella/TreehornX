@@ -28,7 +28,7 @@ class TreeShapeRunner(BotUpAutomataRunner[TaintedLabel]):
     n: int = field(kw_only=True)
     engine: TaintingEngine = field(kw_only=True)
     exit_codes: frozenset[ExitCodeKind] = field(default=frozenset(), kw_only=True)
-    name: str = "Post"
+    name: str = "TreeShape"
 
     @override
     def node_data_symbols(self, label: TaintedLabel, prefix: str) -> list[sx.Var]:

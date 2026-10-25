@@ -54,7 +54,7 @@ def _id(program: str, pre: PreType | None, check: str) -> str:
 
 CASES = params(
     *(
-        TestConfig(program, expected, m=m, pre=pre, layer="post", id=_id(program, pre, "shape"))
+        TestConfig(program, expected, m=m, pre=pre, layer="tree_shape", id=_id(program, pre, "shape"))
         for program, m, verdicts in EXPECTED
         for pre, expected in verdicts.items()
     )

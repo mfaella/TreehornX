@@ -15,7 +15,6 @@ from humanfriendly import format_timespan
 from treehornx import ir
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.Lab.system import LabCHC, build_lab, to_system, write_smt2
-from treehornx.chc.Post import post_from_lab, tree_shape_clauses
 from treehornx.chc.pre import PreRunner, label_exit
 from treehornx.chc.sdta.SDTAContext import (
     SDTAContext,
@@ -37,6 +36,7 @@ from treehornx.chc.solvers import (
     Status,
     Z3Solver,
 )
+from treehornx.chc.TreeShape import tree_shape_clauses, tree_shape_from_lab
 from treehornx.feature_flags import FeatureFlags
 from treehornx.parser import SubsetError, parse_file
 from treehornx.tui import console, critical, error, fail, info, progress, success, warning
@@ -316,8 +316,8 @@ def verify(
 
     if tree_shape:
         info("The tree-shape check assumes that the function is memory safe (ERR, OOM and LABEL_OVERFLOW).")
-        post, stats.taints_generation_elapsed_time = progress("Generating taints", lambda: post_from_lab(lab))
-        stats.tainted_labels_count = len(post.labels)
+        shape, stats.taints_generation_elapsed_time = progress("Generating taints", lambda: tree_shape_from_lab(lab))
+        stats.tainted_labels_count = len(shape.labels)
         console.print(
             f"Taint generation completed in {format_timespan(stats.taints_generation_elapsed_time)}: "
             f"{stats.tainted_labels_count} tainted labels."
@@ -325,7 +325,7 @@ def verify(
         run_check(
             function,
             TREE_SHAPE,
-            lambda: tree_shape_clauses(function, post, m, n, pre_ctx),
+            lambda: tree_shape_clauses(function, shape, m, n, pre_ctx),
             smt2,
             print_chc,
             solver,

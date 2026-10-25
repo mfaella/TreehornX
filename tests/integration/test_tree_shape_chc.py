@@ -9,9 +9,9 @@ from .config import TestConfig, params, run
 from .test_lab_chc import CONFIGS as LAB_CONFIGS
 
 
-CASES = params(*(replace(config, layer="post") for config in LAB_CONFIGS))
+CASES = params(*(replace(config, layer="tree_shape") for config in LAB_CONFIGS))
 
 
 @pytest.mark.parametrize("config", CASES)
-def test_post_memory_safety(config: TestConfig) -> None:
+def test_tree_shape_memory_safety(config: TestConfig) -> None:
     assert run(config) == config.expected

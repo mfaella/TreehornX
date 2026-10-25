@@ -42,9 +42,9 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
   branch).
 - Tree-shape tests: `tests/integration/test_tree_shape.py` (`*_shape_*` programs, each also checked memory safe;
   safe cases also assert that `finals()` has a root, so SAT is not vacuous), `test_tree_shape_pre.py` (`*_pre_shape_*`
-  programs whose verdict depends on the precondition), `test_post_chc.py` (the memory cases through the Post system),
+  programs whose verdict depends on the precondition), `test_tree_shape_chc.py` (the memory cases through the TreeShape system),
   `test_cli_tree_shape.py`; unit tests in `tests/unit/enum_models/test_taint.py` (including completeness of
-  `finals()` against per-tree fixpoints) and `test_shape.py`. `TestConfig.layer = "post"` selects `Post.make_system`.
+  `finals()` against per-tree fixpoints) and `test_shape.py`. `TestConfig.layer = "tree_shape"` selects `TreeShape.make_system`.
 
 ## Pipeline
 
@@ -100,8 +100,8 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
    - `Taint/shape.py` reads the violations off the taints (`ShapeError`, POPL27 Fig. 9): `label_errors` (two trails
      ending on a node, a trail ending on a freed node, trails merging, a self-loop) and `pair_errors` (a trail
      landing on a seed, a structural child that is also a trail end or was freed).
-   - `chc/Post/` mirrors `chc/Lab` + `chc/pre`: `post_from_lab`/`build_post` (taints on top of `build_lab`),
-     `TreeShapeRunner` (a `BotUpAutomataRunner[TaintedLabel]`, predicates `Post<id>`, Lab data constraints on
+   - `chc/TreeShape/` mirrors `chc/Lab` + `chc/pre`: `tree_shape_from_lab`/`build_tree_shape` (taints on top of `build_lab`),
+     `TreeShapeRunner` (a `BotUpAutomataRunner[TaintedLabel]`, predicates `TreeShape<id>`, Lab data constraints on
      `state.lab`, `is_error` = shape errors of the label (+ `exit_codes`, empty by default), `is_pair_error` = shape
      errors of the pair), `tree_shape_clauses`, `make_system`. The precondition works as in step 4.
 

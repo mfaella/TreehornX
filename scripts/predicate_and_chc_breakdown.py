@@ -236,18 +236,18 @@ PRE_POST_CASES: list[VerificationCase] = [
 
 # --- test_post_is_a_tree.py ------------------------------------------------
 
-POST_IS_TREE_CASES: list[VerificationCase] = [
-    VerificationCase("test_bst_safe_find", "post_is_tree", "bst_safe_find.c", Status.SAT, post_ctx=True),
-    VerificationCase("test_sll_safe_find", "post_is_tree", "sll_safe_find.c", Status.SAT, post_ctx=True),
-    VerificationCase("test_sll_unsafe_circular", "post_is_tree", "sll_unsafe_circular.c", Status.UNSAT, post_ctx=True),
-    VerificationCase("test_bst_unsafe_post_1", "post_is_tree", "bst_unsafe_post_1.c", Status.UNSAT, post_ctx=True),
-    VerificationCase("test_bst_unsafe_post_2", "post_is_tree", "bst_unsafe_post_2.c", Status.UNSAT, post_ctx=True),
-    VerificationCase("test_sll_safe_reverse", "post_is_tree", "sll_safe_reverse.c", Status.SAT, post_ctx=True),
-    VerificationCase("test_bst_safe_remove_root", "post_is_tree", "bst_safe_remove_root.c", Status.SAT, post_ctx=True),
-    VerificationCase("test_bst_safe_insert", "post_is_tree", "bst_safe_insert.c", Status.SAT, m=1, post_ctx=True),
+TREE_SHAPE_CASES: list[VerificationCase] = [
+    VerificationCase("test_bst_safe_find", "tree_shape", "bst_safe_find.c", Status.SAT, post_ctx=True),
+    VerificationCase("test_sll_safe_find", "tree_shape", "sll_safe_find.c", Status.SAT, post_ctx=True),
+    VerificationCase("test_sll_unsafe_circular", "tree_shape", "sll_unsafe_circular.c", Status.UNSAT, post_ctx=True),
+    VerificationCase("test_bst_unsafe_shape_share_children", "tree_shape", "bst_unsafe_shape_share_children.c", Status.UNSAT, post_ctx=True),
+    VerificationCase("test_bst_unsafe_shape_leftmost_to_root", "tree_shape", "bst_unsafe_shape_leftmost_to_root.c", Status.UNSAT, post_ctx=True),
+    VerificationCase("test_sll_safe_reverse", "tree_shape", "sll_safe_reverse.c", Status.SAT, post_ctx=True),
+    VerificationCase("test_bst_safe_remove_root", "tree_shape", "bst_safe_remove_root.c", Status.SAT, post_ctx=True),
+    VerificationCase("test_bst_safe_insert", "tree_shape", "bst_safe_insert.c", Status.SAT, m=1, post_ctx=True),
 ]
 
-ALL_CASES: list[VerificationCase] = [*PRE_CASES, *POST_CASES, *PRE_POST_CASES, *POST_IS_TREE_CASES]
+ALL_CASES: list[VerificationCase] = [*PRE_CASES, *POST_CASES, *PRE_POST_CASES, *TREE_SHAPE_CASES]
 
 
 def ctx_name(ctx: SDTAContext | bool | None) -> str:
@@ -389,7 +389,7 @@ def main():
     arg_parser.add_argument(
         "--only",
         default=None,
-        help="run only the cases whose category matches this value (pre, post, pre_post, post_is_tree)",
+        help="run only the cases whose category matches this value (pre, post, pre_post, tree_shape)",
     )
     args = arg_parser.parse_args()
 

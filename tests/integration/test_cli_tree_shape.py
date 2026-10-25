@@ -41,7 +41,7 @@ def test_cli_dumps_the_tree_shape_system(tmp_path: Path, monkeypatch: pytest.Mon
     dumped = tmp_path / f"{PROGRAM.stem}_{TREE_SHAPE}.smt2"
     text = dumped.read_text()
     assert "(set-logic HORN)" in text and "(check-sat)" in text
-    assert "(declare-fun Post" in text
+    assert "(declare-fun TreeShape" in text
     # the states of the bst automaton: the precondition is part of the system
     assert "pre_p_min" in text and "pre_p_max" in text
 

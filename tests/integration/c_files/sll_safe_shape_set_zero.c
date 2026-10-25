@@ -3,7 +3,7 @@ struct Node {
     struct Node *next;
 };
 
-void sll_post_set_zero(struct Node *root) {
+void sll_safe_shape_set_zero(struct Node *root) {
     struct Node *curr;
     curr = root;
     while (curr) {

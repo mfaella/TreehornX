@@ -1,4 +1,4 @@
-"""Enumerated part of the tainted knitted-trees the postcondition CHC systems are built on."""
+"""Enumerated part of the tainted knitted-trees the tree-shape CHC systems are built on."""
 
 from dataclasses import dataclass
 
@@ -15,7 +15,7 @@ def enumerate_taints(lab: LabCHC) -> TaintingEngine:
 
 
 @dataclass
-class PostCHC:
+class TreeShapeCHC:
     """The final tainted labels and pairs, on top of the enumerated Lab part (whose symbols they reuse)."""
 
     lab: LabCHC
@@ -24,13 +24,13 @@ class PostCHC:
     pairs: list[Pair[TaintedLabel]]
 
 
-def post_from_lab(lab: LabCHC) -> PostCHC:
+def tree_shape_from_lab(lab: LabCHC) -> TreeShapeCHC:
     """Enumerates the taints of labels already enumerated, keeping only the final tainted labels and pairs."""
     engine = enumerate_taints(lab)
     final_labels, final_pairs = engine.finals()
-    return PostCHC(lab, engine, labels=list(final_labels), pairs=list(final_pairs))
+    return TreeShapeCHC(lab, engine, labels=list(final_labels), pairs=list(final_pairs))
 
 
-def build_post(function: ir.Function, k: int, m: int, n: int) -> PostCHC:
+def build_tree_shape(function: ir.Function, k: int, m: int, n: int) -> TreeShapeCHC:
     """Enumerates the labels and their taints, keeping only the final tainted labels and pairs."""
-    return post_from_lab(build_lab(function, k, m, n))
+    return tree_shape_from_lab(build_lab(function, k, m, n))

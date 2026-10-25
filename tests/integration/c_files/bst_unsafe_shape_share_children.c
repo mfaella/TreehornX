@@ -7,7 +7,7 @@ struct Node {
     struct Node *right;
 };
 
-void bst_unsafe_post_1(struct Node *root) {
+void bst_unsafe_shape_share_children(struct Node *root) {
     struct Node *tmp;
 
     if (!root) {

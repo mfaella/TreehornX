@@ -4,7 +4,7 @@ to an output reachable from the root that is not a tree. Every program here is m
 
 import pytest
 
-from treehornx.chc import Post
+from treehornx.chc import TreeShape
 from treehornx.chc.solvers import Status
 from treehornx.enum_models.Lab.initial import is_initial
 from treehornx.enum_models.Taint import BoolPlus
@@ -16,7 +16,7 @@ from .config import C_FILES, TestConfig, params, run
 SAT, UNSAT = Status.SAT, Status.UNSAT
 
 SAFE = (
-    TestConfig("sll_post_set_zero", SAT),
+    TestConfig("sll_safe_shape_set_zero", SAT),
     TestConfig("sll_safe_reverse", SAT),
     # the output starts at the second node
     TestConfig("sll_safe_shape_drop_head", SAT),
@@ -71,9 +71,9 @@ SAFE = (
 UNSAFE = (
     TestConfig("sll_unsafe_circular", UNSAT),
     # root->left == root->right
-    TestConfig("bst_unsafe_post_1", UNSAT),
+    TestConfig("bst_unsafe_shape_share_children", UNSAT),
     # leftmost->left = root
-    TestConfig("bst_unsafe_post_2", UNSAT),
+    TestConfig("bst_unsafe_shape_leftmost_to_root", UNSAT),
     # the second node points back to the head
     TestConfig("sll_unsafe_shape_back_edge", UNSAT),
     # skips the second node, then frees the third instead of the second
@@ -139,7 +139,7 @@ UNSAFE = (
 )
 
 SHAPES = (*SAFE, *UNSAFE)
-CASES = params(*(TestConfig(c.program, c.expected, m=c.m, layer="post", id=f"{c.program}-shape") for c in SHAPES))
+CASES = params(*(TestConfig(c.program, c.expected, m=c.m, layer="tree_shape", id=f"{c.program}-shape") for c in SHAPES))
 MEMORY_SAFE = params(*(TestConfig(c.program, SAT, m=c.m, id=f"{c.program}-memory") for c in SHAPES))
 
 
@@ -157,9 +157,9 @@ def test_tree_shape(config: TestConfig) -> None:
 def test_safe_outputs_are_reconstructed(config: TestConfig) -> None:
     """A safe verdict is not vacuous: some final root is queried and some output root is tainted ⊤+."""
     function = parse_file(str(C_FILES / f"{config.program}.c"))
-    post = Post.build_post(function, function.node.k, config.m, config.n)
-    assert any(is_initial(label.lab) for label in post.labels)
-    assert any(label.taint_node is BoolPlus.TopPlus for label in post.labels)
+    shape = TreeShape.build_tree_shape(function, function.node.k, config.m, config.n)
+    assert any(is_initial(label.lab) for label in shape.labels)
+    assert any(label.taint_node is BoolPlus.TopPlus for label in shape.labels)
 
 
 def test_case_counts() -> None:

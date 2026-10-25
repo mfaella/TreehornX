@@ -5,7 +5,7 @@ struct Node {
     struct Node *right;
 };
 
-void bst_unsafe_post_2(struct Node *root) {
+void bst_unsafe_shape_leftmost_to_root(struct Node *root) {
     struct Node *current;
     struct Node *leftMost;
     struct Node *rightMost;
