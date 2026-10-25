@@ -210,3 +210,5 @@ __marimo__/
 
 # generated
 src/treehornx/chc/ppcompiler/grammar/
+.notes
+.profile
