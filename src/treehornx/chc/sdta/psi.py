@@ -296,6 +296,9 @@ def _psi_avl_template(
         )
         diff = sx.OpExpr(sx.Operator.SUB, right_state["height"], left_state["height"])
         constraints.append(sx.OpExpr(sx.Operator.EQ, fields["bal"], diff))
+        # the balance of an AVL node is in {-1, 0, 1}
+        constraints.append(sx.OpExpr(sx.Operator.LE, fields["bal"], sx.Constant(1)))
+        constraints.append(sx.OpExpr(sx.Operator.GE, fields["bal"], sx.Constant(-1)))
 
     return sx.OpExpr(sx.Operator.AND, bst, *constraints)
 
@@ -313,67 +316,35 @@ def not_psi_avl(
     fields: Mapping[str, sx.SExpr],
     states: Mapping[str, sx.SExpr],
 ) -> sx.SExpr:
-    conditions: list[sx.SExpr] = []
-    error_conditions: list[sx.SExpr] = []
-
+    """The negation of `psi_avl`: `error` holds iff the subtree is not a strict bst whose `bal` field is
+    height(right) - height(left) in {-1, 0, 1} at every node. The other states are computed for every subtree, so
+    the relation is total."""
     left_state = children_states["left"]
     right_state = children_states["right"]
+    data = fields["data"]
 
-    conditions.append(sx.OpExpr(sx.Operator.EQ, states["height"], fields["height"]))
-    conditions.append(sx.OpExpr(sx.Operator.EQ, states["data"], fields["data"]))
+    left_height = left_state["height"] if left_state is not None else sx.Constant(0)
+    right_height = right_state["height"] if right_state is not None else sx.Constant(0)
+    diff = sx.OpExpr(sx.Operator.SUB, right_height, left_height)
 
-    if left_state is None and right_state is None:
-        error_conditions.append(sx.OpExpr(sx.Operator.NOT, sx.OpExpr(sx.Operator.EQ, states["height"], sx.Constant(1))))
-        conditions.append(sx.OpExpr(sx.Operator.EQ, states["min"], fields["data"]))
-        conditions.append(sx.OpExpr(sx.Operator.EQ, states["max"], fields["data"]))
-
-    elif left_state is None or right_state is None:
-        if left_state is None:
-            assert right_state is not None
-            error_conditions.append(
-                sx.OpExpr(sx.Operator.NOT, sx.OpExpr(sx.Operator.EQ, right_state["height"], sx.Constant(1)))
-            )
-            error_conditions.append(
-                sx.OpExpr(sx.Operator.NOT, sx.OpExpr(sx.Operator.EQ, states["height"], sx.Constant(2)))
-            )
-            error_conditions.append(sx.OpExpr(sx.Operator.LE, right_state["min"], states["data"]))
-            conditions.append(sx.OpExpr(sx.Operator.EQ, states["min"], states["data"]))
-            conditions.append(sx.OpExpr(sx.Operator.EQ, states["max"], right_state["max"]))
-
-        if right_state is None:
-            assert left_state is not None
-            error_conditions.append(
-                sx.OpExpr(sx.Operator.NOT, sx.OpExpr(sx.Operator.EQ, left_state["height"], sx.Constant(1)))
-            )
-            error_conditions.append(
-                sx.OpExpr(sx.Operator.NOT, sx.OpExpr(sx.Operator.EQ, states["height"], sx.Constant(2)))
-            )
-            error_conditions.append(sx.OpExpr(sx.Operator.GE, left_state["max"], states["data"]))
-            conditions.append(sx.OpExpr(sx.Operator.EQ, states["max"], states["data"]))
-            conditions.append(sx.OpExpr(sx.Operator.EQ, states["min"], left_state["min"]))
-
-    else:
-        max_height = sx.Max(left_state["height"], right_state["height"])
-        error_conditions.append(
-            sx.OpExpr(
-                sx.Operator.NOT,
-                sx.OpExpr(sx.Operator.EQ, sx.OpExpr(sx.Operator.ADD, max_height, sx.Constant(1)), states["height"]),
-            )
-        )
-        diff_height = sx.OpExpr(sx.Operator.SUB, left_state["height"], right_state["height"])
-        error_conditions.append(sx.OpExpr(sx.Operator.GT, diff_height, sx.Constant(1)))
-        error_conditions.append(sx.OpExpr(sx.Operator.LT, diff_height, sx.Constant(-1)))
-        error_conditions.append(sx.OpExpr(sx.Operator.GE, left_state["max"], states["data"]))
-        error_conditions.append(sx.OpExpr(sx.Operator.LE, right_state["min"], states["data"]))
+    conditions: list[sx.SExpr] = [
+        sx.OpExpr(sx.Operator.EQ, states["data"], data),
+        sx.OpExpr(sx.Operator.EQ, states["min"], left_state["min"] if left_state is not None else data),
+        sx.OpExpr(sx.Operator.EQ, states["max"], right_state["max"] if right_state is not None else data),
+        sx.OpExpr(sx.Operator.EQ, states["height"], sx.OpExpr(sx.Operator.ADD, sx.Max(left_height, right_height), 1)),
+    ]
+    error_conditions: list[sx.SExpr] = [
+        sx.OpExpr(sx.Operator.NOT, sx.OpExpr(sx.Operator.EQ, fields["bal"], diff)),
+        sx.OpExpr(sx.Operator.GT, fields["bal"], sx.Constant(1)),
+        sx.OpExpr(sx.Operator.LT, fields["bal"], sx.Constant(-1)),
+    ]
+    if left_state is not None:
+        error_conditions.append(sx.OpExpr(sx.Operator.GE, left_state["max"], data))
         error_conditions.append(left_state["error"])
+    if right_state is not None:
+        error_conditions.append(sx.OpExpr(sx.Operator.LE, right_state["min"], data))
         error_conditions.append(right_state["error"])
-        conditions.append(sx.OpExpr(sx.Operator.EQ, states["min"], left_state["min"]))
-        conditions.append(sx.OpExpr(sx.Operator.EQ, states["max"], right_state["max"]))
-
-    # a leaf has a single error condition
-    some_error = error_conditions[0] if len(error_conditions) == 1 else sx.OpExpr(sx.Operator.OR, *error_conditions)
-    conditions.append(sx.OpExpr(sx.Operator.EQ, states["error"], some_error))
-
+    conditions.append(sx.OpExpr(sx.Operator.EQ, states["error"], sx.OpExpr(sx.Operator.OR, *error_conditions)))
     return sx.OpExpr(sx.Operator.AND, *conditions)
 
 

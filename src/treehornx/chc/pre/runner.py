@@ -44,7 +44,7 @@ def data_prefix(role: str) -> str:
     return f"{role}_"
 
 
-def _or(*args: sx.SExpr) -> sx.SExpr:
+def disjunction(*args: sx.SExpr) -> sx.SExpr:
     """The disjunction of `args`, simplified when one of them is a constant."""
     if sx.TRUE in args:
         return sx.TRUE
@@ -75,8 +75,8 @@ class BotUpAutomataRunner(ABC, Generic[NS]):
             self._label_ids.intern(pair.child)
 
     @abstractmethod
-    def is_error(self, label: NS) -> sx.SExpr:
-        """Whether the enumerated part of `label` is an error."""
+    def is_error(self, label: NS, prefix: str) -> sx.SExpr:
+        """Whether `label` is an error. It may read the data symbols of the node, prefixed by `prefix`."""
 
     @abstractmethod
     def is_input_node(self, label: NS) -> bool:
@@ -189,7 +189,7 @@ class BotUpAutomataRunner(ABC, Generic[NS]):
 
     def leaf_clause(self, label: NS) -> sx.Clause:
         """Pre1: an auxiliary leaf has the nil state."""
-        error = sx.OpExpr(sx.Operator.EQ, self.error_symbol(PARENT), self.is_error(label))
+        error = sx.OpExpr(sx.Operator.EQ, self.error_symbol(PARENT), self.is_error(label, data_prefix(PARENT)))
         body: list[sx.SExpr | sx.Application] = [*self.node_local_constraints(label, data_prefix(PARENT)), error]
         return sx.Clause(self.apply(label, PARENT), *body)
 
@@ -205,7 +205,7 @@ class BotUpAutomataRunner(ABC, Generic[NS]):
 
     def init_clause(self, parent: NS) -> sx.Clause:
         """PreInit: no child collected yet, the flag is the error of the parent."""
-        error = sx.OpExpr(sx.Operator.EQ, self.chain_error_symbol(0), self.is_error(parent))
+        error = sx.OpExpr(sx.Operator.EQ, self.chain_error_symbol(0), self.is_error(parent, data_prefix(PARENT)))
         body: list[sx.SExpr | sx.Application] = [*self.node_local_constraints(parent, data_prefix(PARENT)), error]
         return sx.Clause(self.chain_apply(parent, 0), *body)
 
@@ -215,7 +215,7 @@ class BotUpAutomataRunner(ABC, Generic[NS]):
         assert self.is_input_node(child) == self.is_input_child(parent, j)
         role = child_role(j)
         parent_prefix, child_prefix = data_prefix(PARENT), data_prefix(role)
-        error = _or(
+        error = disjunction(
             self.chain_error_symbol(j),
             self.error_symbol(role),
             self.is_pair_error(parent, child, j, parent_prefix, child_prefix),

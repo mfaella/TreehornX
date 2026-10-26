@@ -86,8 +86,9 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
             return None
         return [new_label]
 
-    def jumps_up(self, pair: Pair[TaintedLabel]) -> Iterator[tuple[Key, BoolPlus]]:
-        """The trails of the j-th child continuing on the parent: the key they reach there and their value."""
+    def links_up(self, pair: Pair[TaintedLabel]) -> Iterator[tuple[Key, Key, BoolPlus]]:
+        """The trails of the j-th child continuing on the parent: the key in the child, the key they reach in the
+        parent and their value."""
         sigma, tau, j = pair.parent.lab, pair.child.lab, pair.j
         for (p, c), v in pair.child.taint_ptr.items():
             origin = trail_origin(tau, c, p)
@@ -95,10 +96,11 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
                 continue
             i1 = next((i for i, c_ in down_links(sigma, tau, j) if c_ == origin[0]), None)
             if i1 is not None:
-                yield (p, i1), v
+                yield (p, c), (p, i1), v
 
-    def jumps_down(self, pair: Pair[TaintedLabel]) -> Iterator[tuple[Key, BoolPlus]]:
-        """The trails of the parent continuing on its j-th child: the key they reach there and their value."""
+    def links_down(self, pair: Pair[TaintedLabel]) -> Iterator[tuple[Key, Key, BoolPlus]]:
+        """The trails of the parent continuing on its j-th child: the key in the parent, the key they reach in the
+        child and their value."""
         sigma, tau, j = pair.parent.lab, pair.child.lab, pair.j
         for (p, i2), v in pair.parent.taint_ptr.items():
             origin = trail_origin(sigma, i2, p)
@@ -106,7 +108,17 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
                 continue
             b = next((c for i, c in up_links(sigma, tau, j) if i == origin[0]), None)
             if b is not None:
-                yield (p, b), v
+                yield (p, i2), (p, b), v
+
+    def jumps_up(self, pair: Pair[TaintedLabel]) -> Iterator[tuple[Key, BoolPlus]]:
+        """The trails of the j-th child continuing on the parent: the key they reach there and their value."""
+        for _, key, v in self.links_up(pair):
+            yield key, v
+
+    def jumps_down(self, pair: Pair[TaintedLabel]) -> Iterator[tuple[Key, BoolPlus]]:
+        """The trails of the parent continuing on its j-th child: the key they reach there and their value."""
+        for _, key, v in self.links_down(pair):
+            yield key, v
 
     def is_structural_child(self, pair: Pair[TaintedLabel]) -> bool:
         """child_is_dflt(σ, j) for a pointer field j: at the end, the j-th field of the parent is still the input

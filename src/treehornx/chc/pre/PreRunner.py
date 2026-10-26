@@ -55,7 +55,7 @@ class PreRunner(BotUpAutomataRunner[Lab]):
         return label_constraints(self.sym, label, prefix)
 
     @override
-    def is_error(self, label: Lab) -> sx.SExpr:
+    def is_error(self, label: Lab, prefix: str) -> sx.SExpr:
         return sx.Constant(bool(label_exit(label, self.n) & self.exit_codes))
 
     @override

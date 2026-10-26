@@ -53,7 +53,7 @@ class TreeShapeRunner(BotUpAutomataRunner[TaintedLabel]):
         return label_constraints(self.sym, label.lab, prefix)
 
     @override
-    def is_error(self, label: TaintedLabel) -> sx.SExpr:
+    def is_error(self, label: TaintedLabel, prefix: str) -> sx.SExpr:
         exit_error = bool(label_exit(label.lab, self.n) & self.exit_codes)
         return sx.Constant(exit_error or bool(label_errors(self.engine, label)))
 

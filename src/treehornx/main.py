@@ -15,12 +15,18 @@ from humanfriendly import format_timespan
 from treehornx import ir
 from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.Lab.system import LabCHC, build_lab, to_system, write_smt2
+from treehornx.chc.Post import post_clauses
 from treehornx.chc.pre import PreRunner, label_exit
 from treehornx.chc.sdta.SDTAContext import (
     SDTAContext,
     avl_ctx,
     bst_ctx,
     bst_strict_ctx,
+    not_avl_ctx,
+    not_bst_ctx,
+    not_bst_strict_ctx,
+    not_sll_sorted_ctx,
+    not_sll_sorted_strict_ctx,
     rb_ctx,
     sll_sorted_ctx,
     sll_sorted_strict_ctx,
@@ -65,8 +71,20 @@ PRE: dict[str, Callable[[], SDTAContext]] = {
     "rb": rb_ctx,
 }
 
+PostType: TypeAlias = Literal["bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl"]
+
+POST: dict[str, Callable[[], SDTAContext]] = {
+    "bst": not_bst_ctx,
+    "bst_strict": not_bst_strict_ctx,
+    "sll_sorted": not_sll_sorted_ctx,
+    "sll_sorted_strict": not_sll_sorted_strict_ctx,
+    "avl": not_avl_ctx,
+}
+"""The negated automaton of each postcondition: it accepts the output trees that violate it."""
+
 EXIT_CODES = (ExitCodeKind.ERR, ExitCodeKind.OOM, ExitCodeKind.LABEL_OVERFLOW)
 TREE_SHAPE = "TREE_SHAPE"
+POST_CHECK = "POST"
 
 
 @dataclass
@@ -272,10 +290,12 @@ def verify(
     timeout: int | None,
     flags: FeatureFlags,
     tree_shape: bool = False,
+    post_ctx: SDTAContext | None = None,
 ) -> Stats:
     """Enumerates the labels, reports the exit statuses that are trivially unreachable and builds, dumps, prints
     and solves the CHC systems of the others. With `tree_shape`, also the system checking that the output heap
-    is a tree (on the inputs accepted by the precondition, as the others)."""
+    is a tree; with `post_ctx` (a negated postcondition), also the system checking that no output tree is accepted
+    by it (on the inputs accepted by the precondition, as the others)."""
     k = function.node.k
     stats = Stats()
 
@@ -314,18 +334,36 @@ def verify(
             stats,
         )
 
+    if not (tree_shape or post_ctx):
+        return stats
+
+    shape, stats.taints_generation_elapsed_time = progress("Generating taints", lambda: tree_shape_from_lab(lab))
+    stats.tainted_labels_count = len(shape.labels)
+    console.print(
+        f"Taint generation completed in {format_timespan(stats.taints_generation_elapsed_time)}: "
+        f"{stats.tainted_labels_count} tainted labels."
+    )
+
     if tree_shape:
         info("The tree-shape check assumes that the function is memory safe (ERR, OOM and LABEL_OVERFLOW).")
-        shape, stats.taints_generation_elapsed_time = progress("Generating taints", lambda: tree_shape_from_lab(lab))
-        stats.tainted_labels_count = len(shape.labels)
-        console.print(
-            f"Taint generation completed in {format_timespan(stats.taints_generation_elapsed_time)}: "
-            f"{stats.tainted_labels_count} tainted labels."
-        )
         run_check(
             function,
             TREE_SHAPE,
             lambda: tree_shape_clauses(function, shape, m, n, pre_ctx),
+            smt2,
+            print_chc,
+            solver,
+            timeout,
+            flags,
+            stats,
+        )
+
+    if post_ctx is not None:
+        info("The postcondition check assumes that the function is memory safe and that the output heap is a tree.")
+        run_check(
+            function,
+            POST_CHECK,
+            lambda: post_clauses(function, shape, m, n, pre_ctx, post_ctx),
             smt2,
             print_chc,
             solver,
@@ -392,6 +430,10 @@ def verify_cmd(
         bool,
         typer.Option("--tree-shape", help="also check that the output heap is a tree (under --pre, if given)"),
     ] = False,
+    post: Annotated[
+        PostType | None,
+        typer.Option("--post", help="also check that the output tree satisfies this postcondition (under --pre)"),
+    ] = None,
 ) -> None:
     solver_flags = {"z3": z3, "eldarica": eldarica, "golem": golem, "portfolio": portfolio}
     solvers = [name for name, chosen in solver_flags.items() if chosen]
@@ -439,6 +481,7 @@ def verify_cmd(
         timeout,
         FeatureFlags(clean_clause),
         tree_shape,
+        POST[post]() if post else None,
     )
     dump_stats(function, stats, produce_csv, produce_json)
 

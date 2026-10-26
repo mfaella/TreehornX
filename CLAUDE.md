@@ -5,8 +5,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 TreehornX is a research prototype that verifies memory safety of C programs manipulating trees and lists. It implements
 the knitted-tree / CHC method of Faella & Parlato, *Verifying Tree-Manipulating Programs via CHCs* (CAV25, extended
 version in `notes/`), and adds **preconditions** expressed as symbolic data-tree automata (SDTAs) and the
-**tree-shape check** of the output heap (tainting, Sec. 6 of the POPL27 draft in `notes/`). Custom postconditions
-(Sec. 7, the S predicate over output states) are **not implemented** yet.
+**tree-shape check** of the output heap (tainting, Sec. 6 of the POPL27 draft in `.notes/`) and the **postcondition
+check** of the output tree (Sec. 7, the S predicate over output states, `--post`).
 
 ## Commands
 
@@ -27,6 +27,7 @@ uv run pytest -m "not slow"                                         # skip verif
 uv run treehornx verify FILE.c --pre bst -m 1 -n 128 --check-sat         # CLI (Z3 by default, --eldarica, --golem, --portfolio)
 uv run treehornx verify FILE.c --smt2                                   # dump one SMT-LIB2 system per exit status
 uv run treehornx verify FILE.c --tree-shape --pre bst --check-sat       # also check that the output heap is a tree
+uv run treehornx verify FILE.c --pre bst --post bst --check-sat         # also check that the output tree is a bst
 uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.csv]
 ```
 
@@ -45,6 +46,9 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
   programs whose verdict depends on the precondition), `test_tree_shape_chc.py` (the memory cases through the TreeShape system),
   `test_cli_tree_shape.py`; unit tests in `tests/unit/enum_models/test_taint.py` (including completeness of
   `finals()` against per-tree fixpoints) and `test_shape.py`. `TestConfig.layer = "tree_shape"` selects `TreeShape.make_system`.
+- Postcondition tests: `tests/integration/test_post.py` (programs that are memory safe and build a tree, with
+  `pre`/`post` pairs), `test_cli_post.py`, `tests/unit/chc/test_post_symbols.py`. `TestConfig.layer = "post"` with
+  `TestConfig.post` selects `Post.make_system`.
 
 ## Pipeline
 
@@ -105,9 +109,21 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
      `state.lab`, `is_error` = shape errors of the label (+ `exit_codes`, empty by default), `is_pair_error` = shape
      errors of the pair), `tree_shape_clauses`, `make_system`. The precondition works as in step 4.
 
-   `BotUpAutomataRunner` is generic over the node state `NS` (`PreRunner` is `[Lab]`). Its `is_pair_error(parent,
-   child, j, ...)` hook (false by default) is ORed into the parent's accumulated flag in `collect_clause`, so pair
-   errors reach the root query like node errors; there is no separate per-pair query.
+   `BotUpAutomataRunner` is generic over the node state `NS` (`PreRunner` is `[Lab]`). Its `is_error(label, prefix)`
+   hook may read the node's symbols; its `is_pair_error(parent, child, j, ...)` hook (false by default) is ORed into
+   the parent's accumulated flag in `collect_clause`, so pair errors reach the root query like node errors; there is
+   no separate per-pair query.
+7. **Postcondition (`--post NAME`, check `POST`)** — runs after the tree-shape check and assumes it holds (no shape
+   errors in this system). `NAME` is the positive property; `main.POST` maps it to the negated automaton A¬post
+   (`not_*_ctx`; rb has none). `chc/Post/PostRunner.py::PostRunner` is a `TreeShapeRunner` whose labels also carry
+   the states of A¬post as data (`chc/Post/symbols.py`): `post_n` for an output node (tainted and active),
+   `post_s<j>` for each structural child (`Taint/helpers.py::child_is_struct`), `post_t<p>_<i>` for each key of
+   `taint_ptr`. Constraints: S1 (a trail ending on the node carries its state) and S4 (ψ of A¬post on the final
+   data fields and the child states: slot, trail of the final ⟨pf := p⟩, or nil) in `node_local_constraints`; S2
+   (the two keys of each trail jump, `TaintingEngine.links_up`/`links_down`) and S3 (slot = child's node state) in
+   `node_consistency`. The error is ψ_F at the output root (the ⊤+ trail of p̂ ends on it, SQ1) or
+   `accept_empty_post` (false) on an empty output (SQ2). The precondition works as in step 4; states flowing between
+   subtrees pass through the symbols of the common ancestor, kept in all its chain predicates.
 
 `feature_flags.py::FeatureFlags` (CLI: `--clean-clause`): `clean_clause` (merge variables equated in a clause body,
 `chc/clean.py`; clauses are built uncleaned and cleaned lazily one at a time when printed, via
