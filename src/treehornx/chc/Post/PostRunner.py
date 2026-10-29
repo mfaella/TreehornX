@@ -19,7 +19,6 @@ from functools import cached_property
 from typing_extensions import override
 
 from treehornx.chc.Post.symbols import PostSymbols, equal_states
-from treehornx.chc.pre.PreRunner import label_exit
 from treehornx.chc.pre.runner import disjunction
 from treehornx.chc.sdta.SDTAContext import SDTAContext
 from treehornx.chc.smt import sexpr as sx
@@ -107,7 +106,6 @@ class PostRunner(TreeShapeRunner):
 
     @override
     def is_error(self, label: TaintedLabel, prefix: str) -> sx.SExpr:
-        exit_error = sx.Constant(bool(label_exit(label.lab, self.n) & self.exit_codes))
         # SQ1: the output tree is accepted by A¬post
         accepted = (
             self.post.psiF(self.post_sym.node(prefix))
@@ -116,7 +114,7 @@ class PostRunner(TreeShapeRunner):
         )
         # SQ2: the output tree is empty and A¬post accepts it
         empty = sx.Constant(self.accept_empty_post and self.is_empty_output(label))
-        return disjunction(exit_error, accepted, empty)
+        return disjunction(accepted, empty)
 
     @override
     def is_pair_error(

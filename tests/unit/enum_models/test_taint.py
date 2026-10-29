@@ -166,9 +166,9 @@ Tree = tuple[Lab, "list[Tree] | None"]
 
 
 def concrete_trees(engine: TaintingEngine, depth: int) -> Iterable[Tree]:
-    """The trees built from the final Lab pairs, up to depth; nodes with no pairs (never reached by the lace or
-    allocated) are leaves."""
-    labels, lab_pairs = engine.lab_engine.finals()
+    """The trees built from the final Lab pairs kept by the engine (no memory errors), up to depth; nodes with no
+    pairs (never reached by the lace or allocated) are leaves."""
+    labels, lab_pairs = engine.lab_finals()
     children: defaultdict[Lab, defaultdict[int, list[Lab]]] = defaultdict(lambda: defaultdict(list))
     for pair in lab_pairs:
         children[pair.parent][pair.j].append(pair.child)

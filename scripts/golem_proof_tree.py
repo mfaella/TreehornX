@@ -36,11 +36,14 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
+
 try:
     import graphviz
 except ImportError:
-    sys.exit("The 'graphviz' Python package is required: pip install graphviz "
-             "(and the system 'dot' binary from the graphviz package).")
+    sys.exit(
+        "The 'graphviz' Python package is required: pip install graphviz "
+        "(and the system 'dot' binary from the graphviz package)."
+    )
 
 
 # A derivation step line looks like:  "3:\t(inv 2) ->  1 2"   or   "0:\ttrue"
@@ -92,8 +95,7 @@ def parse_witness(text: str):
 def run_golem(golem_bin: str, chc_file: str, engine: str) -> str:
     """Invoke Golem and return its combined stdout."""
     if shutil.which(golem_bin) is None and not Path(golem_bin).exists():
-        sys.exit(f"Golem binary not found: '{golem_bin}'. "
-                 f"Pass --golem /path/to/golem or put it on your PATH.")
+        sys.exit(f"Golem binary not found: '{golem_bin}'. Pass --golem /path/to/golem or put it on your PATH.")
     cmd = [golem_bin, "--engine", engine, "--print-witness", chc_file]
     try:
         proc = subprocess.run(cmd, capture_output=True, text=True, check=False)
@@ -113,8 +115,7 @@ def build_graph(steps, title: str | None = None) -> "graphviz.Digraph":
 
     dot = graphviz.Digraph("refutation", format="svg")
     dot.attr(rankdir="TB", splines="true", nodesep="0.35", ranksep="0.55")
-    dot.attr("node", shape="box", style="rounded,filled", fontname="Helvetica",
-             fontsize="11", color="#888888")
+    dot.attr("node", shape="box", style="rounded,filled", fontname="Helvetica", fontsize="11", color="#888888")
     dot.attr("edge", color="#555555", arrowsize="0.7")
     if title:
         dot.attr(label=title, labelloc="t", fontsize="14", fontname="Helvetica")
@@ -125,13 +126,13 @@ def build_graph(steps, title: str | None = None) -> "graphviz.Digraph":
         is_leaf = s.index in leaf_indices
 
         if is_false:
-            fill, border = "#f8d7da", "#c0392b"   # red: the derived contradiction
+            fill, border = "#f8d7da", "#c0392b"  # red: the derived contradiction
         elif is_leaf:
-            fill, border = "#d5f5e3", "#1e8449"   # green: base facts
+            fill, border = "#d5f5e3", "#1e8449"  # green: base facts
         elif is_root:
-            fill, border = "#fdebd0", "#d68910"   # orange: a top conclusion
+            fill, border = "#fdebd0", "#d68910"  # orange: a top conclusion
         else:
-            fill, border = "#d6eaf8", "#2471a3"   # blue: intermediate facts
+            fill, border = "#d6eaf8", "#2471a3"  # blue: intermediate facts
 
         label = f"#{s.index}\\n{s.fact.strip()}"
         dot.node(str(s.index), label=label, fillcolor=fill, color=border)
@@ -146,18 +147,14 @@ def build_graph(steps, title: str | None = None) -> "graphviz.Digraph":
 
 def main(argv=None):
     ap = argparse.ArgumentParser(
-        description="Run Golem (spacer) on a CHC system and render the "
-                    "refutation proof tree as SVG.")
-    ap.add_argument("chc_file", nargs="?",
-                    help="Input CHC system (.smt2). Omit if using --from-output.")
-    ap.add_argument("-o", "--output", help="Output SVG path "
-                    "(default: <chc_file>.svg or proof.svg).")
+        description="Run Golem (spacer) on a CHC system and render the refutation proof tree as SVG."
+    )
+    ap.add_argument("chc_file", nargs="?", help="Input CHC system (.smt2). Omit if using --from-output.")
+    ap.add_argument("-o", "--output", help="Output SVG path (default: <chc_file>.svg or proof.svg).")
     ap.add_argument("--golem", default="golem", help="Golem binary (default: golem).")
     ap.add_argument("--engine", default="spacer", help="Golem engine (default: spacer).")
-    ap.add_argument("--from-output", metavar="FILE",
-                    help="Parse this captured Golem witness instead of running Golem.")
-    ap.add_argument("--keep-dot", action="store_true",
-                    help="Also keep the intermediate Graphviz .dot source.")
+    ap.add_argument("--from-output", metavar="FILE", help="Parse this captured Golem witness instead of running Golem.")
+    ap.add_argument("--keep-dot", action="store_true", help="Also keep the intermediate Graphviz .dot source.")
     args = ap.parse_args(argv)
 
     if args.from_output:
@@ -172,14 +169,18 @@ def main(argv=None):
     answer, steps = parse_witness(text)
 
     if answer == "sat":
-        sys.exit("Golem reports the system is SAT (no refutation exists). "
-                 "A refutation proof tree is only produced for UNSAT systems.")
+        sys.exit(
+            "Golem reports the system is SAT (no refutation exists). "
+            "A refutation proof tree is only produced for UNSAT systems."
+        )
     if answer == "unknown":
         sys.exit("Golem returned 'unknown' \u2013 no refutation proof to draw.")
     if not steps:
-        sys.exit("No derivation steps found in Golem's output. "
-                 "Make sure it was run with --print-witness and the result is unsat.\n"
-                 "--- Golem output was ---\n" + text)
+        sys.exit(
+            "No derivation steps found in Golem's output. "
+            "Make sure it was run with --print-witness and the result is unsat.\n"
+            "--- Golem output was ---\n" + text
+        )
 
     out = Path(args.output) if args.output else Path(base).with_suffix(".svg")
     title = f"Golem refutation proof  ({Path(base).name}, engine={args.engine})"
@@ -192,8 +193,7 @@ def main(argv=None):
         Path(out).with_suffix(".dot").write_text(dot.source)
 
     root = next((s for s in steps if s.fact.strip().lower() == "false"), steps[-1])
-    print(f"Parsed {len(steps)} derivation steps (root: step #{root.index} -> "
-          f"{root.fact.strip()}).")
+    print(f"Parsed {len(steps)} derivation steps (root: step #{root.index} -> {root.fact.strip()}).")
     print(f"Wrote proof tree: {out}")
 
 

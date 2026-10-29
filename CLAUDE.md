@@ -43,8 +43,7 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
   branch).
 - Tree-shape tests: `tests/integration/test_tree_shape.py` (`*_shape_*` programs, each also checked memory safe;
   safe cases also assert that `finals()` has a root, so SAT is not vacuous), `test_tree_shape_pre.py` (`*_pre_shape_*`
-  programs whose verdict depends on the precondition), `test_tree_shape_chc.py` (the memory cases through the TreeShape system),
-  `test_cli_tree_shape.py`; unit tests in `tests/unit/enum_models/test_taint.py` (including completeness of
+  programs whose verdict depends on the precondition), `test_cli_tree_shape.py`; unit tests in `tests/unit/enum_models/test_taint.py` (including completeness of
   `finals()` against per-tree fixpoints) and `test_shape.py`. `TestConfig.layer = "tree_shape"` selects `TreeShape.make_system`.
 - Postcondition tests: `tests/integration/test_post.py` (programs that are memory safe and build a tree, with
   `pre`/`post` pairs), `test_cli_post.py`, `tests/unit/chc/test_post_symbols.py`. `TestConfig.layer = "post"` with
@@ -88,8 +87,10 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
    script into `z3 -in` (`Z3Solver`) or `eld -in` (`EldaricaSolver`) and returns `Status` SAT/UNSAT/UNKNOWN.
    **sat = safe, unsat = an error is reachable.** One system is built per exit status (ERR, OOM, LABEL_OVERFLOW)
    that the enumeration actually reaches; unreached ones are reported as "trivially" safe without calling a solver.
-6. **Tree shape (`--tree-shape`, check `TREE_SHAPE`)** — runs after the memory checks and assumes they hold (the
-   paper's composition assumption; shape errors are not filtered by exit status). Steps:
+6. **Tree shape (`--tree-shape`, check `TREE_SHAPE`)** — assumes memory safety (the paper's composition
+   assumption): with `--tree-shape` or `--post` the CLI does not build the memory systems of step 5, and
+   `TaintingEngine.lab_finals` drops the final Lab labels ending in ERR, OOM or label overflow (and their pairs)
+   before tainting, so these runs are not in the tree-shape and post systems. Steps:
    - `enum_models/Taint/TaintingEngine.py` (a `SymbolicEngine[TaintedLabel]`) lifts the final Lab labels/pairs to
      `TaintedLabel(taint_node, taint_ptr, lab)` and saturates Rules 1–5 of POPL27 Fig. 5: `step_int` = T5 (a trail
      ending on the node, via `points_here`, taints it) + T3 (a tainted node seeds a ⊤ trail at the last
@@ -106,8 +107,7 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
      landing on a seed, a structural child that is also a trail end or was freed).
    - `chc/TreeShape/` mirrors `chc/Lab` + `chc/pre`: `tree_shape_from_lab`/`build_tree_shape` (taints on top of `build_lab`),
      `TreeShapeRunner` (a `BotUpAutomataRunner[TaintedLabel]`, predicates `TreeShape<id>`, Lab data constraints on
-     `state.lab`, `is_error` = shape errors of the label (+ `exit_codes`, empty by default), `is_pair_error` = shape
-     errors of the pair), `tree_shape_clauses`, `make_system`. The precondition works as in step 4.
+     `state.lab`, `is_error` = shape errors of the label, `is_pair_error` = shape errors of the pair), `tree_shape_clauses`, `make_system`. The precondition works as in step 4.
 
    `BotUpAutomataRunner` is generic over the node state `NS` (`PreRunner` is `[Lab]`). Its `is_error(label, prefix)`
    hook may read the node's symbols; its `is_pair_error(parent, child, j, ...)` hook (false by default) is ORed into

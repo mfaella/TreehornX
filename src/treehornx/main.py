@@ -293,9 +293,10 @@ def verify(
     post_ctx: SDTAContext | None = None,
 ) -> Stats:
     """Enumerates the labels, reports the exit statuses that are trivially unreachable and builds, dumps, prints
-    and solves the CHC systems of the others. With `tree_shape`, also the system checking that the output heap
-    is a tree; with `post_ctx` (a negated postcondition), also the system checking that no output tree is accepted
-    by it (on the inputs accepted by the precondition, as the others)."""
+    and solves the CHC systems of the others. With `tree_shape` or `post_ctx`, memory safety is assumed: the memory
+    systems are not built and, instead, `tree_shape` builds the system checking that the output heap is a tree and
+    `post_ctx` (a negated postcondition) the system checking that no output tree is accepted by it (on the inputs
+    accepted by the precondition, as the others)."""
     k = function.node.k
     stats = Stats()
 
@@ -321,21 +322,25 @@ def verify(
     if not (smt2 or print_chc or solver):
         return stats
 
-    for code in (code for code in EXIT_CODES if code in reached):
-        run_check(
-            function,
-            code.name,
-            lambda code=code: memory_clauses(function, lab, m, n, code, pre_ctx),
-            smt2,
-            print_chc,
-            solver,
-            timeout,
-            flags,
-            stats,
-        )
-
     if not (tree_shape or post_ctx):
+        for code in (code for code in EXIT_CODES if code in reached):
+            run_check(
+                function,
+                code.name,
+                lambda code=code: memory_clauses(function, lab, m, n, code, pre_ctx),
+                smt2,
+                print_chc,
+                solver,
+                timeout,
+                flags,
+                stats,
+            )
         return stats
+
+    info(
+        "The tree-shape and postcondition checks assume memory safety: the memory systems are not built and the runs "
+        "ending in ERR, OOM or LABEL_OVERFLOW are dropped."
+    )
 
     shape, stats.taints_generation_elapsed_time = progress("Generating taints", lambda: tree_shape_from_lab(lab))
     stats.tainted_labels_count = len(shape.labels)
@@ -428,11 +433,16 @@ def verify_cmd(
     ] = False,
     tree_shape: Annotated[
         bool,
-        typer.Option("--tree-shape", help="also check that the output heap is a tree (under --pre, if given)"),
+        typer.Option(
+            "--tree-shape", help="check that the output heap is a tree (under --pre, if given), assuming memory safety"
+        ),
     ] = False,
     post: Annotated[
         PostType | None,
-        typer.Option("--post", help="also check that the output tree satisfies this postcondition (under --pre)"),
+        typer.Option(
+            "--post",
+            help="check that the output tree satisfies this postcondition (under --pre), assuming memory safety",
+        ),
     ] = None,
 ) -> None:
     solver_flags = {"z3": z3, "eldarica": eldarica, "golem": golem, "portfolio": portfolio}

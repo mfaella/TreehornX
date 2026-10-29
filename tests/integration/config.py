@@ -115,8 +115,9 @@ def make_system(config: TestConfig) -> CHCSystem:
     if config.layer == "post":
         assert config.post is not None, "the post layer needs a postcondition"
         return Post.make_system(function, k, config.m, config.n, ctx, POST[config.post](), config.flags)
-    make = pre.make_system if config.layer == "pre" else TreeShape.make_system
-    return make(function, k, config.m, config.n, ctx, config.flags, frozenset({config.exit_code}))
+    if config.layer == "tree_shape":
+        return TreeShape.make_system(function, k, config.m, config.n, ctx, config.flags)
+    return pre.make_system(function, k, config.m, config.n, ctx, config.flags, frozenset({config.exit_code}))
 
 
 def _solve(config: TestConfig) -> Status:

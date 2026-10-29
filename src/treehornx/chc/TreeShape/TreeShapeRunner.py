@@ -2,18 +2,17 @@
 not trees (`enum_models/Taint/shape.py`, POPL27 Fig. 9).
 
 The data constraints and the input tree are those of the Lab labels (as in `PreRunner`); the taints split a Lab
-label into several node states. Errors of a node are its shape errors and, if `exit_codes` is not empty, its exit
-statuses among them; errors of a link between a parent and its child raise the flag of the parent.
+label into several node states. Errors of a node are its shape errors; errors of a link between a parent and its
+child raise the flag of the parent. The runs ending in a memory error are not in the system
+(`TaintingEngine.lab_finals`): memory safety is assumed.
 """
 
 from dataclasses import dataclass, field
 
 from typing_extensions import override
 
-from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.Lab.clauses import consistency_constraint, label_constraints
 from treehornx.chc.Lab.symbols import ChcLabUtils
-from treehornx.chc.pre.PreRunner import label_exit
 from treehornx.chc.pre.runner import BotUpAutomataRunner
 from treehornx.chc.smt import sexpr as sx
 from treehornx.enum_models.core.Pair import Pair
@@ -27,7 +26,6 @@ class TreeShapeRunner(BotUpAutomataRunner[TaintedLabel]):
     sym: ChcLabUtils = field(kw_only=True)
     n: int = field(kw_only=True)
     engine: TaintingEngine = field(kw_only=True)
-    exit_codes: frozenset[ExitCodeKind] = field(default=frozenset(), kw_only=True)
     name: str = "TreeShape"
 
     @override
@@ -54,8 +52,7 @@ class TreeShapeRunner(BotUpAutomataRunner[TaintedLabel]):
 
     @override
     def is_error(self, label: TaintedLabel, prefix: str) -> sx.SExpr:
-        exit_error = bool(label_exit(label.lab, self.n) & self.exit_codes)
-        return sx.Constant(exit_error or bool(label_errors(self.engine, label)))
+        return sx.Constant(bool(label_errors(self.engine, label)))
 
     @override
     def is_pair_error(

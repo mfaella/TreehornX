@@ -1,6 +1,8 @@
 import sys
-import z3
+
 import graphviz
+import z3
+
 
 def solve_and_render_chc(smt2_file=None):
     # 1. CRITICAL: Proof generation must be enabled before creating any solver or parsing
@@ -20,8 +22,8 @@ def solve_and_render_chc(smt2_file=None):
     else:
         print("No file provided. Generating a dummy UNSAT CHC system for demonstration...")
         I = z3.IntSort()
-        P = z3.Function('P', I, z3.BoolSort())
-        x = z3.Int('x')
+        P = z3.Function("P", I, z3.BoolSort())
+        x = z3.Int("x")
 
         # Fact: P(5) is True
         solver.add(P(5))
@@ -41,6 +43,7 @@ def solve_and_render_chc(smt2_file=None):
     else:
         print(f"Unknown solver result: {res}")
 
+
 def render_proof(proof_node, output_filename="chc_witness"):
     """
     Traverses the Z3 proof AST safely and applies layout constraints
@@ -50,26 +53,26 @@ def render_proof(proof_node, output_filename="chc_witness"):
     dot = graphviz.Digraph(
         comment="CHC Witness Proof",
         node_attr={
-            'shape': 'box',
-            'fontname': 'Courier',
-            'style': 'filled',
-            'fillcolor': '#f9f9f9',
-            'fontsize': '10',         # Smaller font size
-            'height': '0.1',          # Allows nodes to shrink to content
-            'width': '0.1'
-        }
+            "shape": "box",
+            "fontname": "Courier",
+            "style": "filled",
+            "fillcolor": "#f9f9f9",
+            "fontsize": "10",  # Smaller font size
+            "height": "0.1",  # Allows nodes to shrink to content
+            "width": "0.1",
+        },
     )
 
     # Graph-level attributes to scale down the layout
-    dot.attr(rankdir='LR')            # Left-to-Right layout fits wide trees much better
-    dot.attr(nodesep='0.2')           # Tighter packing between nodes
-    dot.attr(ranksep='0.3')           # Tighter packing between tree layers
+    dot.attr(rankdir="LR")  # Left-to-Right layout fits wide trees much better
+    dot.attr(nodesep="0.2")  # Tighter packing between nodes
+    dot.attr(ranksep="0.3")  # Tighter packing between tree layers
 
     visited = set()
 
     def format_node_text(text):
         """Splits long SMT-LIB expressions across multiple lines instead of one huge row."""
-        text = text.replace('\n', ' ')
+        text = text.replace("\n", " ")
         max_line_len = 50
 
         # Hard truncate if the proof step is astronomically massive
@@ -77,7 +80,7 @@ def render_proof(proof_node, output_filename="chc_witness"):
             text = text[:140] + " ... [TRUNCATED] ... " + text[-140:]
 
         # Wrap lines smoothly every ~50 characters
-        words = text.split(' ')
+        words = text.split(" ")
         lines = []
         current_line = []
         current_len = 0
@@ -140,6 +143,7 @@ def render_proof(proof_node, output_filename="chc_witness"):
         print("\n[ERROR] Graphviz executable not found!")
     except Exception as e:
         print(f"Error rendering graph: {e}")
+
 
 if __name__ == "__main__":
     # If an SMT2 file is passed via CLI, use it; otherwise run the dummy example.

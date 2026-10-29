@@ -1,8 +1,9 @@
 """Symbolic engine for the tainting of POPL27 (Sec. 6.1, Rules 1–5 of Fig. 5, CHCs T0–T5 of Fig. 7).
 
-The engine runs over the final labels and pairs of a fixed `LabEngine`: every final label is lifted to a
-`TaintedLabel` with no taint (T0), and the label holding the end of the lace starts the trail of the root
-pointer p̂ (T1). The steps then propagate the taints:
+The engine runs over the final labels and pairs of a fixed `LabEngine` without the runs ending in a memory error
+(`lab_finals`: memory safety is assumed). Every final label is lifted to a `TaintedLabel` with no taint (T0), and
+the label holding the end of the lace starts the trail of the root pointer p̂ (T1). The steps then propagate the
+taints:
 
 * `step_int`  inside a label: the node gets tainted by the trails ending on it (T5) and a tainted node starts
               a trail for every final ⟨pf := p⟩ event of its log (T3);
@@ -25,6 +26,7 @@ from typing_extensions import override
 from treehornx.enum_models.core.Dir import Down, Up
 from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.core.SymbolicEngine import SymbolicEngine
+from treehornx.enum_models.Lab.ExitCode import ExitCode
 from treehornx.enum_models.Lab.helpers import down_links, is_pfield_implicit, points_here, up_links
 from treehornx.enum_models.Lab.initial import is_initial
 from treehornx.enum_models.Lab.Lab import Lab
@@ -42,10 +44,17 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
 
     def __init__(self, lab_engine: LabEngine):
         self.lab_engine = lab_engine
-        final_labels, final_pairs = lab_engine.finals()
+        final_labels, final_pairs = self.lab_finals()
         lifted = {lab: self.initial(lab) for lab in final_labels}
         init_pairs = {Pair(lifted[pair.parent], lifted[pair.child], pair.j) for pair in final_pairs}
         super().__init__(k=lab_engine.k, m=lab_engine.m, initial_pairs=init_pairs, start_states=set(lifted.values()))
+
+    def lab_finals(self) -> tuple[set[Lab], set[Pair[Lab]]]:
+        """The final labels and pairs of the Lab engine without the runs ending in ERR, OOM or label overflow: the
+        tree-shape and postcondition checks assume memory safety, so these runs are unreachable."""
+        labels, pairs = self.lab_engine.finals()
+        kept = {lab for lab in labels if self.lab_engine.label_exit(lab) in (ExitCode.N, ExitCode.C)}
+        return kept, {pair for pair in pairs if pair.parent in kept and pair.child in kept}
 
     @property
     def root(self) -> int:

@@ -1,13 +1,14 @@
-import sys
 import logging
+import sys
 from pathlib import Path
 
 # Import necessary components from the library
 from pychc.chc_system import CHCSystem
 from pychc.solvers.carcara import Carcara
-from pychc.solvers.z3 import Z3CHCSolver
 from pychc.solvers.cvc5 import CVC5Solver
 from pychc.solvers.witness import Status
+from pychc.solvers.z3 import Z3CHCSolver
+
 
 def solve_and_check(smt2_path: str):
     path = Path(smt2_path)
@@ -44,7 +45,7 @@ def solve_and_check(smt2_path: str):
             print("Satisfiable: Validated model found.")
             print("Model definitions:")
             for pred, expr in witness.definitions.items():
-                 print(f"  {pred} := {expr.function_body.serialize()}")
+                print(f"  {pred} := {expr.function_body.serialize()}")
 
         elif status == Status.UNSAT:
             print("Unsatisfiable: Proof validated by Carcara.")
@@ -57,6 +58,7 @@ def solve_and_check(smt2_path: str):
 
     except Exception as e:
         print(f"An error occurred during solving or validation: {e}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:

@@ -12,14 +12,14 @@ Usage:
     python scripts/predicate_and_chc_breakdown.py
 """
 
+import argparse
+import csv
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
-import argparse
 from functools import wraps
 from pathlib import Path
 from typing import Any
-import csv
-import time
 
 from pychc.chc_system import CHCSystem  # pyright: ignore[reportMissingTypeStubs]
 from pychc.solvers.chc_solver import CHCSolver  # pyright: ignore[reportMissingTypeStubs]
@@ -44,6 +44,7 @@ from treehornx.chc.SDTAContext import (
 from treehornx.enum_labels import generate_labels
 from treehornx.ir.sorts import Pointer, Struct
 from treehornx.parser.CParser import CParser
+
 
 DEFAULT_N = 128
 DEFAULT_M = 0
@@ -116,39 +117,60 @@ class VerificationCase:
 
 PRE_CASES: list[VerificationCase] = [
     VerificationCase(
-        "test_avl_safe_check_balance_and_root_height", "pre",
-        "avl_safe_check_balance_and_root_height.c", Status.SAT,
-        pre_ctx=avl_ctx(), exit_code=ExitCodeKind.ERR,
+        "test_avl_safe_check_balance_and_root_height",
+        "pre",
+        "avl_safe_check_balance_and_root_height.c",
+        Status.SAT,
+        pre_ctx=avl_ctx(),
+        exit_code=ExitCodeKind.ERR,
     ),
     VerificationCase(
-        "test_avl_unsafe_check_balance", "pre",
-        "avl_unsafe_check_balance.c", Status.UNSAT,
-        pre_ctx=avl_ctx(), exit_code=ExitCodeKind.ERR,
+        "test_avl_unsafe_check_balance",
+        "pre",
+        "avl_unsafe_check_balance.c",
+        Status.UNSAT,
+        pre_ctx=avl_ctx(),
+        exit_code=ExitCodeKind.ERR,
     ),
     VerificationCase(
-        "test_avl_unsafe_check_root_height", "pre",
-        "avl_unsafe_check_root_height.c", Status.UNSAT,
-        pre_ctx=avl_ctx(), exit_code=ExitCodeKind.ERR,
+        "test_avl_unsafe_check_root_height",
+        "pre",
+        "avl_unsafe_check_root_height.c",
+        Status.UNSAT,
+        pre_ctx=avl_ctx(),
+        exit_code=ExitCodeKind.ERR,
     ),
     VerificationCase(
-        "test_bst_safe_min_lt_max", "pre",
-        "bst_safe_min_lt_max.c", Status.SAT,
-        pre_ctx=bst_strict_ctx(), exit_code=ExitCodeKind.ERR,
+        "test_bst_safe_min_lt_max",
+        "pre",
+        "bst_safe_min_lt_max.c",
+        Status.SAT,
+        pre_ctx=bst_strict_ctx(),
+        exit_code=ExitCodeKind.ERR,
     ),
     VerificationCase(
-        "test_bst_unsafe_min_lt_max", "pre",
-        "bst_unsafe_min_lt_max.c", Status.UNSAT,
-        pre_ctx=bst_strict_ctx(), exit_code=ExitCodeKind.ERR,
+        "test_bst_unsafe_min_lt_max",
+        "pre",
+        "bst_unsafe_min_lt_max.c",
+        Status.UNSAT,
+        pre_ctx=bst_strict_ctx(),
+        exit_code=ExitCodeKind.ERR,
     ),
     VerificationCase(
-        "test_sll_sorted_safe_first_lt_last", "pre",
-        "sll_sorted_safe_first_lt_last.c", Status.SAT,
-        pre_ctx=sll_sorted_strict_ctx(), exit_code=ExitCodeKind.ERR,
+        "test_sll_sorted_safe_first_lt_last",
+        "pre",
+        "sll_sorted_safe_first_lt_last.c",
+        Status.SAT,
+        pre_ctx=sll_sorted_strict_ctx(),
+        exit_code=ExitCodeKind.ERR,
     ),
     VerificationCase(
-        "test_sll_sorted_unsafe_first_lt_last", "pre",
-        "sll_sorted_unsafe_first_lt_last.c", Status.UNSAT,
-        pre_ctx=sll_sorted_strict_ctx(), exit_code=ExitCodeKind.ERR,
+        "test_sll_sorted_unsafe_first_lt_last",
+        "pre",
+        "sll_sorted_unsafe_first_lt_last.c",
+        Status.UNSAT,
+        pre_ctx=sll_sorted_strict_ctx(),
+        exit_code=ExitCodeKind.ERR,
     ),
 ]
 
@@ -156,36 +178,64 @@ PRE_CASES: list[VerificationCase] = [
 
 POST_CASES: list[VerificationCase] = [
     VerificationCase(
-        "test_bst_safe_find_without_pre", "post",
-        "bst_safe_find.c", Status.UNSAT, post_ctx=not_bst_ctx(),
+        "test_bst_safe_find_without_pre",
+        "post",
+        "bst_safe_find.c",
+        Status.UNSAT,
+        post_ctx=not_bst_ctx(),
     ),
     VerificationCase(
-        "test_bst_safe_find_without_pre_strict", "post",
-        "bst_safe_find.c", Status.UNSAT, post_ctx=not_bst_strict_ctx(),
+        "test_bst_safe_find_without_pre_strict",
+        "post",
+        "bst_safe_find.c",
+        Status.UNSAT,
+        post_ctx=not_bst_strict_ctx(),
     ),
     VerificationCase(
-        "test_bst_safe_insert_without_pre", "post",
-        "bst_safe_insert.c", Status.UNSAT, m=1, post_ctx=not_bst_ctx(),
+        "test_bst_safe_insert_without_pre",
+        "post",
+        "bst_safe_insert.c",
+        Status.UNSAT,
+        m=1,
+        post_ctx=not_bst_ctx(),
     ),
     VerificationCase(
-        "test_bst_safe_insert_without_pre_strict", "post",
-        "bst_safe_insert.c", Status.UNSAT, m=1, post_ctx=not_bst_strict_ctx(),
+        "test_bst_safe_insert_without_pre_strict",
+        "post",
+        "bst_safe_insert.c",
+        Status.UNSAT,
+        m=1,
+        post_ctx=not_bst_strict_ctx(),
     ),
     VerificationCase(
-        "test_sll_safe_find_without_pre", "post",
-        "sll_safe_find.c", Status.UNSAT, post_ctx=sll_sorted_ctx(),
+        "test_sll_safe_find_without_pre",
+        "post",
+        "sll_safe_find.c",
+        Status.UNSAT,
+        post_ctx=sll_sorted_ctx(),
     ),
     VerificationCase(
-        "test_sll_safe_find_without_pre_strict", "post",
-        "sll_safe_find.c", Status.UNSAT, post_ctx=sll_sorted_strict_ctx(),
+        "test_sll_safe_find_without_pre_strict",
+        "post",
+        "sll_safe_find.c",
+        Status.UNSAT,
+        post_ctx=sll_sorted_strict_ctx(),
     ),
     VerificationCase(
-        "test_sll_safe_insert_sorted_without_pre", "post",
-        "sll_safe_insert_sorted.c", Status.UNSAT, m=1, post_ctx=not_sll_sorted_ctx(),
+        "test_sll_safe_insert_sorted_without_pre",
+        "post",
+        "sll_safe_insert_sorted.c",
+        Status.UNSAT,
+        m=1,
+        post_ctx=not_sll_sorted_ctx(),
     ),
     VerificationCase(
-        "test_sll_safe_insert_sorted_without_pre_strict", "post",
-        "sll_safe_insert_sorted.c", Status.UNSAT, m=1, post_ctx=not_sll_sorted_strict_ctx(),
+        "test_sll_safe_insert_sorted_without_pre_strict",
+        "post",
+        "sll_safe_insert_sorted.c",
+        Status.UNSAT,
+        m=1,
+        post_ctx=not_sll_sorted_strict_ctx(),
     ),
 ]
 
@@ -193,44 +243,100 @@ POST_CASES: list[VerificationCase] = [
 
 PRE_POST_CASES: list[VerificationCase] = [
     VerificationCase(
-        "test_bst_safe_find_with_pre", "pre_post",
-        "bst_safe_find.c", Status.SAT, pre_ctx=bst_ctx(), post_ctx=not_bst_ctx(), timeout=1200,
+        "test_bst_safe_find_with_pre",
+        "pre_post",
+        "bst_safe_find.c",
+        Status.SAT,
+        pre_ctx=bst_ctx(),
+        post_ctx=not_bst_ctx(),
+        timeout=1200,
     ),
     VerificationCase(
-        "test_bst_safe_find_with_strict_pre", "pre_post",
-        "bst_safe_find.c", Status.SAT, pre_ctx=bst_strict_ctx(), post_ctx=not_bst_strict_ctx(), timeout=1200,
+        "test_bst_safe_find_with_strict_pre",
+        "pre_post",
+        "bst_safe_find.c",
+        Status.SAT,
+        pre_ctx=bst_strict_ctx(),
+        post_ctx=not_bst_strict_ctx(),
+        timeout=1200,
     ),
     VerificationCase(
-        "test_bst_safe_insert_with_pre", "pre_post",
-        "bst_safe_insert.c", Status.SAT, m=1, pre_ctx=bst_ctx(), post_ctx=not_bst_ctx(), timeout=1200,
+        "test_bst_safe_insert_with_pre",
+        "pre_post",
+        "bst_safe_insert.c",
+        Status.SAT,
+        m=1,
+        pre_ctx=bst_ctx(),
+        post_ctx=not_bst_ctx(),
+        timeout=1200,
     ),
     VerificationCase(
-        "test_bst_safe_insert_with_strict_pre", "pre_post",
-        "bst_safe_insert.c", Status.UNSAT, m=1, pre_ctx=bst_strict_ctx(), post_ctx=not_bst_strict_ctx(), timeout=1200,
+        "test_bst_safe_insert_with_strict_pre",
+        "pre_post",
+        "bst_safe_insert.c",
+        Status.UNSAT,
+        m=1,
+        pre_ctx=bst_strict_ctx(),
+        post_ctx=not_bst_strict_ctx(),
+        timeout=1200,
     ),
     VerificationCase(
-        "test_sll_safe_find_with_pre", "pre_post",
-        "sll_safe_find.c", Status.SAT, pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_ctx(), timeout=1200,
+        "test_sll_safe_find_with_pre",
+        "pre_post",
+        "sll_safe_find.c",
+        Status.SAT,
+        pre_ctx=sll_sorted_strict_ctx(),
+        post_ctx=not_sll_sorted_ctx(),
+        timeout=1200,
     ),
     VerificationCase(
-        "test_sll_safe_find_with_pre_strict", "pre_post",
-        "sll_safe_find.c", Status.SAT, pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_strict_ctx(), timeout=1200,
+        "test_sll_safe_find_with_pre_strict",
+        "pre_post",
+        "sll_safe_find.c",
+        Status.SAT,
+        pre_ctx=sll_sorted_strict_ctx(),
+        post_ctx=not_sll_sorted_strict_ctx(),
+        timeout=1200,
     ),
     VerificationCase(
-        "test_sll_safe_insert_sorted_with_pre", "pre_post",
-        "sll_safe_insert_sorted.c", Status.SAT, m=1, pre_ctx=sll_sorted_ctx(), post_ctx=not_sll_sorted_ctx(), timeout=1200,
+        "test_sll_safe_insert_sorted_with_pre",
+        "pre_post",
+        "sll_safe_insert_sorted.c",
+        Status.SAT,
+        m=1,
+        pre_ctx=sll_sorted_ctx(),
+        post_ctx=not_sll_sorted_ctx(),
+        timeout=1200,
     ),
     VerificationCase(
-        "test_sll_safe_insert_sorted_with_pre_strict", "pre_post",
-        "sll_safe_insert_sorted.c", Status.UNSAT, m=1, pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_strict_ctx(), timeout=1200,
+        "test_sll_safe_insert_sorted_with_pre_strict",
+        "pre_post",
+        "sll_safe_insert_sorted.c",
+        Status.UNSAT,
+        m=1,
+        pre_ctx=sll_sorted_strict_ctx(),
+        post_ctx=not_sll_sorted_strict_ctx(),
+        timeout=1200,
     ),
     VerificationCase(
-        "test_sll_safe_insert_sorted_with_pre_strict_and_post_non_strict", "pre_post",
-        "sll_safe_insert_sorted.c", Status.SAT, m=1, pre_ctx=sll_sorted_strict_ctx(), post_ctx=not_sll_sorted_ctx(), timeout=1200,
+        "test_sll_safe_insert_sorted_with_pre_strict_and_post_non_strict",
+        "pre_post",
+        "sll_safe_insert_sorted.c",
+        Status.SAT,
+        m=1,
+        pre_ctx=sll_sorted_strict_ctx(),
+        post_ctx=not_sll_sorted_ctx(),
+        timeout=1200,
     ),
     VerificationCase(
-        "test_sll_safe_insert_sorted_with_pre_non_strict_and_post_strict", "pre_post",
-        "sll_safe_insert_sorted.c", Status.UNSAT, m=1, pre_ctx=sll_sorted_ctx(), post_ctx=not_sll_sorted_strict_ctx(), timeout=1200,
+        "test_sll_safe_insert_sorted_with_pre_non_strict_and_post_strict",
+        "pre_post",
+        "sll_safe_insert_sorted.c",
+        Status.UNSAT,
+        m=1,
+        pre_ctx=sll_sorted_ctx(),
+        post_ctx=not_sll_sorted_strict_ctx(),
+        timeout=1200,
     ),
 ]
 
@@ -240,8 +346,20 @@ TREE_SHAPE_CASES: list[VerificationCase] = [
     VerificationCase("test_bst_safe_find", "tree_shape", "bst_safe_find.c", Status.SAT, post_ctx=True),
     VerificationCase("test_sll_safe_find", "tree_shape", "sll_safe_find.c", Status.SAT, post_ctx=True),
     VerificationCase("test_sll_unsafe_circular", "tree_shape", "sll_unsafe_circular.c", Status.UNSAT, post_ctx=True),
-    VerificationCase("test_bst_unsafe_shape_share_children", "tree_shape", "bst_unsafe_shape_share_children.c", Status.UNSAT, post_ctx=True),
-    VerificationCase("test_bst_unsafe_shape_leftmost_to_root", "tree_shape", "bst_unsafe_shape_leftmost_to_root.c", Status.UNSAT, post_ctx=True),
+    VerificationCase(
+        "test_bst_unsafe_shape_share_children",
+        "tree_shape",
+        "bst_unsafe_shape_share_children.c",
+        Status.UNSAT,
+        post_ctx=True,
+    ),
+    VerificationCase(
+        "test_bst_unsafe_shape_leftmost_to_root",
+        "tree_shape",
+        "bst_unsafe_shape_leftmost_to_root.c",
+        Status.UNSAT,
+        post_ctx=True,
+    ),
     VerificationCase("test_sll_safe_reverse", "tree_shape", "sll_safe_reverse.c", Status.SAT, post_ctx=True),
     VerificationCase("test_bst_safe_remove_root", "tree_shape", "bst_safe_remove_root.c", Status.SAT, post_ctx=True),
     VerificationCase("test_bst_safe_insert", "tree_shape", "bst_safe_insert.c", Status.SAT, m=1, post_ctx=True),

@@ -1,13 +1,14 @@
-import sys
 import logging
+import sys
 from pathlib import Path
 
 # Import necessary components from the library
 from pychc.chc_system import CHCSystem
 from pychc.solvers.carcara import Carcara
-from pychc.solvers.z3 import Z3CHCSolver, Z3SMTSolver
 from pychc.solvers.cvc5 import CVC5Solver
 from pychc.solvers.witness import SatWitness, Status
+from pychc.solvers.z3 import Z3CHCSolver, Z3SMTSolver
+
 
 def solve_and_check(smt2_path: str):
     path = Path(smt2_path)
@@ -57,6 +58,7 @@ def solve_and_check(smt2_path: str):
 
     except Exception as e:
         print(f"An error occurred during solving or validation: {e}")
+
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
