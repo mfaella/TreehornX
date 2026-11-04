@@ -39,7 +39,7 @@ class PostRunner(TreeShapeRunner):
 
     @cached_property
     def post_sym(self) -> PostSymbols:
-        return PostSymbols(self.post, self.k)
+        return PostSymbols(self.post, self.k, self.engine.child_fields)
 
     @override
     def node_data_symbols(self, label: TaintedLabel, prefix: str) -> list[sx.Var]:
@@ -53,7 +53,8 @@ class PostRunner(TreeShapeRunner):
         """S4: ψ of A¬post at the output node of `label`."""
         sym, sigma = self.post_sym, label.lab
         children: dict[str, dict[str, sx.Var] | None] = {}
-        for j, pfield in enumerate(self.function.node.pointer_fields):
+        for j in self.engine.child_fields:
+            pfield = self.function.node.pointer_fields[j]
             ptr = get_pfield_ptr(sigma, len(sigma), j)
             if child_is_struct(sigma, j, self.k):
                 children[pfield.name] = sym.slot(j, prefix)

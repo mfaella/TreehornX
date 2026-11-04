@@ -22,6 +22,8 @@ from treehornx.enum_models.Taint.TaintPtr import Key
 class PostSymbols:
     ctx: SDTAContext
     k: int
+    child_fields: tuple[int, ...]
+    """The pointer fields that are children of the output tree (all but the parent field)."""
 
     def _smt_type(self, state: str) -> sx.Type:
         return sx.Type.Int if self.ctx.states[state] == "int" else sx.Type.Bool
@@ -36,7 +38,7 @@ class PostSymbols:
         """The structural children of an output node."""
         if not self.has_node_state(label):
             return []
-        return [j for j in range(self.k) if child_is_struct(label.lab, j, self.k)]
+        return [j for j in self.child_fields if child_is_struct(label.lab, j, self.k)]
 
     def keys(self, label: TaintedLabel) -> list[Key]:
         return sorted(label.taint_ptr)

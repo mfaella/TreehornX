@@ -30,10 +30,10 @@ def _first_frame(num_ptrs: int, active: bool, active_child: tuple[bool, ...]) ->
 
 
 def input_shapes(function: ir.Function) -> Iterable[tuple[bool, ...]]:
-    """active_child flags of the first k children of an input node: a field declared nil by default never points
-    to an input child."""
-    nil_fields = function.node.nil_fields
-    return product(*(((False,) if j in nil_fields else (True, False)) for j in range(function.node.k)))
+    """active_child flags of the first k children of an input node: the parent field never points to an input
+    child."""
+    node = function.node
+    return product(*(((True, False) if node.is_child_field(j) else (False,)) for j in range(node.k)))
 
 
 def backbone_labels(function: ir.Function, m: int) -> Iterable[Lab]:

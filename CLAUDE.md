@@ -172,11 +172,16 @@ everything. The implementation follows the paper's "Efficient Implementation" fu
   statements rather than being reduced to `p = q` via auxiliary variables.
 - **No MemSafety loop.** The CLI checks one `(m, n)` (defaults m=0, n=128 — far above the paper's typical n ≤ 10)
   and reports each exit status separately; it does not increment m/n. Flags `-c`, `--partial-correctness`,
-  `--interactive-check-sat`, `--parent` and the dependency-graph options are accepted but ignored.
+  `--interactive-check-sat` and the dependency-graph options are accepted but ignored.
 - **Preconditions** (beyond CAV25, sketched in its Sec. 7): the SDTA reads only the first frame of each input node
   (`is_input_node` = `label[1].active`); non-input/auxiliary nodes get the nil state; the query fires when the root's
   state is accepting (`psiF`) and the propagated error flag is true. An empty input tree is accepted by default
   (`accept_empty`).
+- **Parent field** (`--parent FIELD`, `ir.NodeStruct.parent_field`): the field is nil in every input node
+  (`Lab/initial.py::input_shapes`) and is left out of the children given to ψ, in the precondition runner
+  (`BotUpAutomataRunner._psi`) and in the postcondition runner (`PostRunner._post_psi`). The tainting skips it too
+  (`TaintingEngine.child_fields`): it seeds no trail (T3) and has no structural child (T2), so writes to it are
+  never tree-shape errors and A¬post never reads it.
 - **Tainting** (POPL27 Sec. 6, which defines it as CHCs C_T over a single predicate T) is enumerated like the shape:
   - Rule 4 does not walk the lace frame by frame: like the CAV25 rewind, the trail of p at (σ, i2) jumps to
     `i_upd = last_upd(σ, i2, p)` and continues on the frame linked to σ^{i_upd} by its **prev** link

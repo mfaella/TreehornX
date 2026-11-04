@@ -46,7 +46,7 @@ def pointer_witnesses(label: TaintedLabel) -> list[Key]:
 
 def seeds(engine: TaintingEngine, label: TaintedLabel) -> set[Key]:
     """The trails started by the final field updates of a tainted node (Rule 3)."""
-    return set(field_trails(label.lab, engine.k)) if label.taint_node else set()
+    return set(field_trails(label.lab, engine.child_fields)) if label.taint_node else set()
 
 
 def label_errors(engine: TaintingEngine, label: TaintedLabel) -> list[ShapeError]:

@@ -194,11 +194,11 @@ class BotUpAutomataRunner(ABC, Generic[NS]):
         return sx.Clause(self.apply(label, PARENT), *body)
 
     def _psi(self, parent: NS) -> sx.SExpr:
+        node = self.function.node
         children_states = {
-            self.function.node.pointer_fields[j].name: (
-                self.state_symbols(child_role(j)) if self.is_input_child(parent, j) else None
-            )
+            node.pointer_fields[j].name: (self.state_symbols(child_role(j)) if self.is_input_child(parent, j) else None)
             for j in range(self.k)
+            if node.is_child_field(j)
         }
         fields = {f.name: self.node_field_symbol(f.id, 1, data_prefix(PARENT)) for f in self.function.node.data_fields}
         return self.ctx.psi(children_states, fields, self.state_symbols(PARENT))

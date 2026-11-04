@@ -1,7 +1,7 @@
 """Runs the cases of the integration tests and measures their performance.
 
 The cases are imported from `tests/integration`, so they stay the same as the tests (program, bounds,
-precondition, nil fields, feature flags, solver, timeout). For every case it reports:
+precondition, parent field, feature flags, solver, timeout). For every case it reports:
 - the result given by the solver, compared with the one expected by the test;
 - the solver deciding it (`solver`: for the portfolio the racer that won, `golem-<engine>` for golem run with an
   engine; empty when no solver decides);

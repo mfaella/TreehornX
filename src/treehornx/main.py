@@ -184,7 +184,6 @@ def display_option_messages(
     check_sat: bool,
     interactive_check_sat: bool,
     solvers: list[str],
-    parent: str | None,
     dependency_graphs: bool,
 ) -> None:
     if function_name is None:
@@ -203,8 +202,6 @@ def display_option_messages(
         critical("--interactive-check-sat not supported, it is ignored.")
     if len(solvers) > 1:
         warning(f"Multiple solvers specified, using {solvers[0]}.")
-    if parent is not None:
-        critical("--parent not supported: the parser does not accept parent pointers, it is ignored.")
     if dependency_graphs:
         critical("dependency graphs are not supported by the current encoding, they are ignored.")
 
@@ -221,18 +218,17 @@ def check_names(function: ir.Function, function_name: str | None, root_name: str
     return True
 
 
-def with_nil_fields(function: ir.Function, names: list[str]) -> ir.Function | None:
-    """Declares the pointer fields `names` nil in every input node, None if one of them is not a pointer field."""
+def with_parent_field(function: ir.Function, name: str) -> ir.Function | None:
+    """Declares the pointer field `name` the parent field: nil in every input node and not a child for the pre- and
+    postcondition automata. None if it is not a pointer field."""
     pointer_fields = {f.name: f.id for f in function.node.pointer_fields}
-    unknown = [name for name in names if name not in pointer_fields]
-    if unknown:
+    if name not in pointer_fields:
         error(
-            f"--nil-field: struct {function.node.name} has no pointer field {', '.join(map(repr, unknown))}, "
+            f"--parent: struct {function.node.name} has no pointer field {name!r}, "
             f"its pointer fields are {', '.join(pointer_fields)}."
         )
         return None
-    nil_fields = function.node.nil_fields | {pointer_fields[name] for name in names}
-    return replace(function, node=replace(function.node, nil_fields=nil_fields))
+    return replace(function, node=replace(function.node, parent_field=pointer_fields[name]))
 
 
 def display_outcome(check: str, status: Status) -> None:
@@ -421,10 +417,12 @@ def verify_cmd(
         bool, typer.Option("--idg", "--internal-dep-graph", help="not supported")
     ] = False,
     pre: Annotated[PreType | None, typer.Option("--pre")] = None,
-    parent: Annotated[str | None, typer.Option("--parent", help="not supported")] = None,
-    nil_fields: Annotated[
-        list[str] | None,
-        typer.Option("--nil-field", help="pointer field that is nil in every input node (repeatable)"),
+    parent: Annotated[
+        str | None,
+        typer.Option(
+            "--parent",
+            help="pointer field to the parent: nil in every input node, not a child for the --pre/--post automata",
+        ),
     ] = None,
     produce_csv: Annotated[bool, typer.Option("--csv", help="dump the statistics in a CSV file")] = False,
     produce_json: Annotated[bool, typer.Option("--json", help="dump the statistics in a JSON file")] = False,
@@ -457,7 +455,6 @@ def verify_cmd(
         check_sat_flag,
         interactive_check_sat,
         solvers,
-        parent,
         full_dep_graph or compressed_dep_graph or internal_dependency_graph,
     )
     root_name = root_name or DEFAULT_ROOT
@@ -469,11 +466,11 @@ def verify_cmd(
         raise typer.Exit(1) from e
     if not check_names(function, function_name, root_name):
         raise typer.Exit(1)
-    if nil_fields:
-        function = with_nil_fields(function, nil_fields)
+    if parent is not None:
+        function = with_parent_field(function, parent)
         if function is None:
             raise typer.Exit(1)
-        info(f"Pointer fields nil in every input node: {', '.join(nil_fields)}.")
+        info(f"Parent field: {parent}, nil in every input node and not a child for the automata.")
 
     try:
         solver = make_solver(solvers, solvers_dir) if check_sat_flag else None

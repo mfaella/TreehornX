@@ -311,7 +311,12 @@ class NodeStruct:
     name: str
     data_fields: Tuple[DataField, ...]
     pointer_fields: Tuple[PointerField, ...]
-    nil_fields: frozenset[int] = frozenset()  # pointer fields that are nil in every input node
+    parent_field: int | None = None
+    """Pointer field to the parent (`--parent`): nil in every input node, and not a child for the automata."""
+
+    def is_child_field(self, fid: int) -> bool:
+        """Whether the pointer field `fid` is a child of the node for the automata (not the parent field)."""
+        return fid != self.parent_field
 
     @property
     def k(self) -> int:

@@ -24,9 +24,10 @@ def trail_origin(sigma: Lab, i2: int, p: int) -> tuple[int, Dir] | None:
     return i_upd, prev
 
 
-def field_trails(sigma: Lab, k: int) -> Iterable[tuple[int, int]]:
-    """(p, i) for every pointer field pf whose final value is the target of p: child_is_ptr(σ, pf, p, i)."""
-    for pfield in range(k):
+def field_trails(sigma: Lab, fields: Iterable[int]) -> Iterable[tuple[int, int]]:
+    """(p, i) for every pointer field pf among `fields` whose final value is the target of p:
+    child_is_ptr(σ, pf, p, i)."""
+    for pfield in fields:
         ptr = get_pfield_ptr(sigma, len(sigma), pfield)
         if ptr is not None:
             yield ptr

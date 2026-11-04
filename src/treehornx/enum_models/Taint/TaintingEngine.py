@@ -19,6 +19,7 @@ fails (returns None) when the taints do not change. Taints are merged by join in
 """
 
 from dataclasses import dataclass, replace
+from functools import cached_property
 from typing import Iterable, Iterator
 
 from typing_extensions import override
@@ -56,6 +57,13 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
         kept = {lab for lab in labels if self.lab_engine.label_exit(lab) in (ExitCode.N, ExitCode.C)}
         return kept, {pair for pair in pairs if pair.parent in kept and pair.child in kept}
 
+    @cached_property
+    def child_fields(self) -> tuple[int, ...]:
+        """The pointer fields that are edges of the output tree: all of them but the parent field (`--parent`),
+        which neither seeds a trail (T3) nor has a structural child (T2)."""
+        node = self.lab_engine.function.node
+        return tuple(j for j in range(self.k) if node.is_child_field(j))
+
     @property
     def root(self) -> int:
         return self.lab_engine.function.ROOT
@@ -85,7 +93,7 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
                         new_node = new_node.join(v)
             # T3: start of pointer tainting
             if new_node:
-                for key in field_trails(sigma, self.k):
+                for key in field_trails(sigma, self.child_fields):
                     new_ptr = new_ptr.join(key, BoolPlus.Top)
             if new_node == taint_node and new_ptr == taint_ptr:
                 break
@@ -131,8 +139,8 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
 
     def is_structural_child(self, pair: Pair[TaintedLabel]) -> bool:
         """child_is_dflt(σ, j) for a pointer field j: at the end, the j-th field of the parent is still the input
-        child (nil when the parent had none)."""
-        return pair.j < self.k and is_pfield_implicit(pair.parent.lab, len(pair.parent.lab), pair.j)
+        child (nil when the parent had none). The parent field has no structural child."""
+        return pair.j in self.child_fields and is_pfield_implicit(pair.parent.lab, len(pair.parent.lab), pair.j)
 
     @override
     def step_up(self, pair: Pair[TaintedLabel]) -> Pair[TaintedLabel] | None:

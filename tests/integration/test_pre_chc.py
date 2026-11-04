@@ -36,7 +36,7 @@ CASES = params(
         "rb_safe_insert",
         SAT,
         m=1,
-        nil_fields=("parent",),
+        parent="parent",
         pre="rb",
         solver="eldarica",
         timeout=1200,

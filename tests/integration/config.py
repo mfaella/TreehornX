@@ -1,7 +1,7 @@
 """Per-test configuration of the integration tests.
 
 Every case is a `TestConfig`, turned into a `pytest.param` by `params` and run by `run`: it fixes the
-program, the bounds, the input restrictions (nil fields, precondition), the feature flags, the solver and
+program, the bounds, the input restrictions (parent field, precondition), the feature flags, the solver and
 the expected status, the same choices as the `treehornx verify` options.
 """
 
@@ -20,7 +20,7 @@ from treehornx.chc.core import ExitCodeKind
 from treehornx.chc.smt.sexpr import CHCSystem
 from treehornx.chc.solvers import CHCSolver, EldaricaSolver, GolemSolver, PortfolioSolver, Status, Z3Solver
 from treehornx.feature_flags import FeatureFlags
-from treehornx.main import DEFAULT_N, POST, PRE, PostType, PreType, with_nil_fields
+from treehornx.main import DEFAULT_N, POST, PRE, PostType, PreType, with_parent_field
 from treehornx.parser import parse_file
 
 
@@ -55,8 +55,8 @@ class TestConfig:
     """sat = safe, unsat = `exit_code` is reachable."""
     m: int = 0
     n: int = DEFAULT_N
-    nil_fields: tuple[str, ...] = ()
-    """Pointer fields nil in every input node (`--nil-field`)."""
+    parent: str | None = None
+    """Pointer field to the parent (`--parent`)."""
     pre: PreType | None = None
     post: PostType | None = None
     """Postcondition checked by the `post` layer (its negated automaton is run on the output tree)."""
@@ -106,9 +106,9 @@ def params(*configs: TestConfig) -> list[ParameterSet]:
 
 def make_system(config: TestConfig) -> CHCSystem:
     function = parse_file(str(C_FILES / f"{config.program}.c"))
-    if config.nil_fields:
-        restricted = with_nil_fields(function, list(config.nil_fields))
-        assert restricted is not None, f"{config.program} has no pointer field among {config.nil_fields}"
+    if config.parent is not None:
+        restricted = with_parent_field(function, config.parent)
+        assert restricted is not None, f"{config.program} has no pointer field {config.parent}"
         function = restricted
     k = function.node.k
     ctx = PRE[config.pre]() if config.pre is not None else None
