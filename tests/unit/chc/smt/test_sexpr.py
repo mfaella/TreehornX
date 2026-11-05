@@ -175,3 +175,45 @@ def test_transform_runs_when_printing() -> None:
     assert "declare-fun P" not in out.getvalue() and "(declare-fun Q (Int) Bool)" in out.getvalue()
     # printed_clauses, write, to_smt: every clause is rewritten at each printing
     assert calls == [fact, query] * 3
+
+
+R = sx.Predicate("R", [sx.Type.Int])
+EQ0 = sx.OpExpr(sx.Operator.EQ, X, 0)
+P_FACT = sx.Clause(sx.Application(P, X, B), EQ0)
+P_STEP = sx.Clause(sx.Application(P, sx.OpExpr(sx.Operator.ADD, X, 1), B), sx.Application(P, X, B))
+Q_FROM_P = sx.Clause(sx.Application(Q, X), sx.Application(P, X, B))
+R_FACT = sx.Clause(sx.Application(R, X), EQ0)
+Q_QUERY = sx.Clause(False, sx.Application(Q, X))
+R_QUERY = sx.Clause(False, sx.Application(R, X))
+
+
+def cone_system() -> sx.CHCSystem:
+    return sx.CHCSystem([P, Q, R], [P_FACT, R_FACT, P_STEP, Q_QUERY, Q_FROM_P, R_QUERY])
+
+
+def test_queries() -> None:
+    assert cone_system().queries() == [Q_QUERY, R_QUERY]
+
+
+def test_cone_of_query() -> None:
+    """The cone follows Q to P (recursive, so the walk must stop) and drops the chain of R."""
+    cone = cone_system().get_reachability_cone(Q_QUERY)
+    assert cone.clauses == [P_FACT, P_STEP, Q_QUERY, Q_FROM_P]
+    assert cone.predicates == [P, Q]
+    assert cone_system().get_reachability_cone(R_QUERY).clauses == [R_FACT, R_QUERY]
+
+
+def test_cone_of_clause_not_in_system() -> None:
+    query = sx.Clause(False, sx.Application(R, X), sx.Application(Q, X))
+    cone = cone_system().get_reachability_cone(query)
+    assert cone.clauses == [P_FACT, R_FACT, P_STEP, Q_FROM_P, query]
+
+
+def test_cone_keeps_transform() -> None:
+    def identity(clause: sx.Clause) -> sx.Clause:
+        return clause
+
+    system = sx.CHCSystem([P, Q, R], cone_system().clauses, identity)
+    cone = system.get_reachability_cone(R_QUERY)
+    assert cone.transform is identity
+    assert "declare-fun P" not in cone.to_smt() and "(declare-fun R (Int) Bool)" in cone.to_smt()

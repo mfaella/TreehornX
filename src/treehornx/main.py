@@ -25,9 +25,14 @@ from treehornx.chc.sdta.SDTAContext import (
     not_avl_ctx,
     not_bst_ctx,
     not_bst_strict_ctx,
+    not_rb_black_height_ctx,
+    not_rb_red_ctx,
+    not_rb_root_black_ctx,
+    not_rb_struct_ctx,
     not_sll_sorted_ctx,
     not_sll_sorted_strict_ctx,
     rb_ctx,
+    rb_struct_ctx,
     sll_sorted_ctx,
     sll_sorted_strict_ctx,
     true_ctx,
@@ -60,7 +65,7 @@ DEFAULT_N = 128
 DEFAULT_M = 0
 DEFAULT_ROOT = "root"
 
-PreType: TypeAlias = Literal["bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl", "rb"]
+PreType: TypeAlias = Literal["bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl", "rb", "rb_struct"]
 
 PRE: dict[str, Callable[[], SDTAContext]] = {
     "bst": bst_ctx,
@@ -69,9 +74,20 @@ PRE: dict[str, Callable[[], SDTAContext]] = {
     "sll_sorted_strict": sll_sorted_strict_ctx,
     "avl": avl_ctx,
     "rb": rb_ctx,
+    "rb_struct": rb_struct_ctx,
 }
 
-PostType: TypeAlias = Literal["bst", "bst_strict", "sll_sorted", "sll_sorted_strict", "avl"]
+PostType: TypeAlias = Literal[
+    "bst",
+    "bst_strict",
+    "sll_sorted",
+    "sll_sorted_strict",
+    "avl",
+    "rb_struct",
+    "rb_red",
+    "rb_black_height",
+    "rb_root_black",
+]
 
 POST: dict[str, Callable[[], SDTAContext]] = {
     "bst": not_bst_ctx,
@@ -79,6 +95,10 @@ POST: dict[str, Callable[[], SDTAContext]] = {
     "sll_sorted": not_sll_sorted_ctx,
     "sll_sorted_strict": not_sll_sorted_strict_ctx,
     "avl": not_avl_ctx,
+    "rb_struct": not_rb_struct_ctx,
+    "rb_red": not_rb_red_ctx,
+    "rb_black_height": not_rb_black_height_ctx,
+    "rb_root_black": not_rb_root_black_ctx,
 }
 """The negated automaton of each postcondition: it accepts the output trees that violate it."""
 

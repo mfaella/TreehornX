@@ -384,6 +384,116 @@ def psi_rb(
     return _psi_rb_template(children_states, fields, states, psi_bst_strict)
 
 
+def psi_rb_struct(
+    children_states: Mapping[str, Mapping[str, sx.SExpr] | None],
+    fields: Mapping[str, sx.SExpr],
+    states: Mapping[str, sx.SExpr],
+) -> sx.SExpr:
+    """The red-black structure of `psi_rb` without its bst check: same black height on both children, no red node
+    with a red child. The root being black is checked by `root_is_black`."""
+    return _psi_rb_template(children_states, fields, states, psi_true)
+
+
+def not_psi_rb_struct(
+    children_states: Mapping[str, Mapping[str, sx.SExpr] | None],
+    fields: Mapping[str, sx.SExpr],
+    states: Mapping[str, sx.SExpr],
+) -> sx.SExpr:
+    """The negation of the red-black structure of `psi_rb` without its bst check: `error` holds iff some node of the
+    subtree has children of different black heights, or is red with a red child. A nil child is black with black
+    height 0. The other states are computed for every subtree, so the relation is total; the root being red is
+    checked by `rb_struct_error_psiF`."""
+    conditions: list[sx.SExpr] = []
+    error_conditions: list[sx.SExpr] = []
+
+    left_state = children_states["left"]
+    right_state = children_states["right"]
+
+    red = fields["red"]
+    # a black node adds 1 to the black height, a red one 0
+    own_height = sx.OpExpr(sx.Operator.ITE, red, sx.Constant(0), sx.Constant(1))
+    conditions.append(sx.OpExpr(sx.Operator.EQ, states["red"], red))
+
+    if left_state is None and right_state is None:
+        conditions.append(sx.OpExpr(sx.Operator.EQ, states["black_height"], own_height))
+        conditions.append(sx.OpExpr(sx.Operator.NOT, states["error"]))
+        return sx.OpExpr(sx.Operator.AND, *conditions)
+
+    if left_state is not None:
+        # a red node has no red child
+        error_conditions.append(sx.OpExpr(sx.Operator.AND, red, left_state["red"]))
+        error_conditions.append(left_state["error"])
+
+    if right_state is not None:
+        error_conditions.append(sx.OpExpr(sx.Operator.AND, red, right_state["red"]))
+        error_conditions.append(right_state["error"])
+
+    # a nil child is black with black height 0
+    left_height = left_state["black_height"] if left_state is not None else sx.Constant(0)
+    right_height = right_state["black_height"] if right_state is not None else sx.Constant(0)
+    # the black height is taken from the left child only, so it is defined also when the two heights differ
+    conditions.append(
+        sx.OpExpr(sx.Operator.EQ, states["black_height"], sx.OpExpr(sx.Operator.ADD, left_height, own_height))
+    )
+    error_conditions.append(sx.OpExpr(sx.Operator.NOT, sx.OpExpr(sx.Operator.EQ, left_height, right_height)))
+
+    error = sx.OpExpr(sx.Operator.EQ, states["error"], sx.OpExpr(sx.Operator.OR, *error_conditions))
+    conditions.append(error)
+    return sx.OpExpr(sx.Operator.AND, *conditions)
+
+
+def not_psi_rb_red(
+    children_states: Mapping[str, Mapping[str, sx.SExpr] | None],
+    fields: Mapping[str, sx.SExpr],
+    states: Mapping[str, sx.SExpr],
+) -> sx.SExpr:
+    """The negation of "a red node has only black children": `error` holds iff some node of the subtree is red with
+    a red child. A nil child is black. The relation is total."""
+    red = fields["red"]
+    children = [state for state in (children_states["left"], children_states["right"]) if state is not None]
+    error_conditions: list[sx.SExpr] = [sx.FALSE]
+    for child in children:
+        error_conditions.append(sx.OpExpr(sx.Operator.AND, red, child["red"]))
+        error_conditions.append(child["error"])
+    return sx.OpExpr(
+        sx.Operator.AND,
+        sx.OpExpr(sx.Operator.EQ, states["red"], red),
+        sx.OpExpr(sx.Operator.EQ, states["error"], sx.OpExpr(sx.Operator.OR, *error_conditions)),
+    )
+
+
+def not_psi_rb_black_height(
+    children_states: Mapping[str, Mapping[str, sx.SExpr] | None],
+    fields: Mapping[str, sx.SExpr],
+    states: Mapping[str, sx.SExpr],
+) -> sx.SExpr:
+    """The negation of "every path from a node down to nil has the same number of black nodes": `error` holds iff
+    some node of the subtree has children of different black heights. A nil child has black height 0, a black node
+    adds 1. The black height is taken from the left child, so the relation is total."""
+    left_state, right_state = children_states["left"], children_states["right"]
+    left_height = left_state["black_height"] if left_state is not None else sx.Constant(0)
+    right_height = right_state["black_height"] if right_state is not None else sx.Constant(0)
+    own_height = sx.OpExpr(sx.Operator.ITE, fields["red"], sx.Constant(0), sx.Constant(1))
+    error_conditions: list[sx.SExpr] = [
+        sx.OpExpr(sx.Operator.NOT, sx.OpExpr(sx.Operator.EQ, left_height, right_height)),
+        *(state["error"] for state in (left_state, right_state) if state is not None),
+    ]
+    return sx.OpExpr(
+        sx.Operator.AND,
+        sx.OpExpr(sx.Operator.EQ, states["black_height"], sx.OpExpr(sx.Operator.ADD, left_height, own_height)),
+        sx.OpExpr(sx.Operator.EQ, states["error"], sx.OpExpr(sx.Operator.OR, *error_conditions)),
+    )
+
+
+def not_psi_rb_root_black(
+    children_states: Mapping[str, Mapping[str, sx.SExpr] | None],
+    fields: Mapping[str, sx.SExpr],
+    states: Mapping[str, sx.SExpr],
+) -> sx.SExpr:
+    """Carries the colour of the node; with `root_is_red` as ψ_F it is the negation of "the root is black"."""
+    return sx.OpExpr(sx.Operator.EQ, states["red"], fields["red"])
+
+
 # def not_psi_rb(
 #     children_states: Mapping[str, Mapping[str, sx.SExpr] | None],
 #     fields: Mapping[str, sx.SExpr],
@@ -552,3 +662,12 @@ def error_psiF(states: Mapping[str, sx.SExpr]) -> sx.SExpr:  # noqa: N802
 
 def root_is_black(states: Mapping[str, sx.SExpr]) -> sx.SExpr:
     return sx.OpExpr(sx.Operator.NOT, states["red"])
+
+
+def root_is_red(states: Mapping[str, sx.SExpr]) -> sx.SExpr:
+    return states["red"]
+
+
+def rb_struct_error_psiF(states: Mapping[str, sx.SExpr]) -> sx.SExpr:  # noqa: N802
+    """The negation of `root_is_black` on a tree without errors: an error below, or a red root."""
+    return sx.OpExpr(sx.Operator.OR, states["error"], states["red"])

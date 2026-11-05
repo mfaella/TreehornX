@@ -10,17 +10,24 @@ from treehornx.chc.sdta.psi import (
     not_psi_avl,
     not_psi_bst,
     not_psi_bst_strict,
+    not_psi_rb_black_height,
+    not_psi_rb_red,
+    not_psi_rb_root_black,
+    not_psi_rb_struct,
     not_psi_sll_sorted,
     not_psi_sll_sorted_strict,
     psi_avl,
     psi_bst,
     psi_bst_strict,
     psi_rb,
+    psi_rb_struct,
     psi_sll_sorted,
     psi_sll_sorted_strict,
     psi_true,
     psiF_empty,
+    rb_struct_error_psiF,
     root_is_black,
+    root_is_red,
 )
 from treehornx.enum_models.core.Label import Label
 
@@ -117,6 +124,48 @@ def rb_ctx() -> SDTAContext:
         "black_height": "int",
         "red": "bool",
     }
+    return SDTAContext(psi, psiF, states)
+
+
+def rb_struct_ctx() -> SDTAContext:
+    """`rb_ctx` without the bst check: the tree has the red-black structure (same black height on every path, no
+    red node with a red child, black root)."""
+    logger.debug("Creating RB structure context")
+    psi, psiF = psi_rb_struct, root_is_black  # noqa: N806
+    states: dict[str, Literal["int", "bool"]] = {"black_height": "int", "red": "bool"}
+    return SDTAContext(psi, psiF, states)
+
+
+def not_rb_struct_ctx() -> SDTAContext:
+    """The negation of `rb_ctx` without the bst check: the tree breaks the red-black structure (same black height
+    on every path, no red node with a red child, black root)."""
+    logger.debug("Creating not-RB structure context")
+    psi, psiF = not_psi_rb_struct, rb_struct_error_psiF  # noqa: N806
+    states: dict[str, Literal["int", "bool"]] = {"black_height": "int", "red": "bool", "error": "bool"}
+    return SDTAContext(psi, psiF, states)
+
+
+def not_rb_red_ctx() -> SDTAContext:
+    """The negation of "a red node has only black children"."""
+    logger.debug("Creating not-RB red context")
+    psi, psiF = not_psi_rb_red, error_psiF  # noqa: N806
+    states: dict[str, Literal["int", "bool"]] = {"red": "bool", "error": "bool"}
+    return SDTAContext(psi, psiF, states)
+
+
+def not_rb_black_height_ctx() -> SDTAContext:
+    """The negation of "every path down to nil has the same number of black nodes"."""
+    logger.debug("Creating not-RB black height context")
+    psi, psiF = not_psi_rb_black_height, error_psiF  # noqa: N806
+    states: dict[str, Literal["int", "bool"]] = {"black_height": "int", "error": "bool"}
+    return SDTAContext(psi, psiF, states)
+
+
+def not_rb_root_black_ctx() -> SDTAContext:
+    """The negation of "the root is black"."""
+    logger.debug("Creating not-RB root black context")
+    psi, psiF = not_psi_rb_root_black, root_is_red  # noqa: N806
+    states: dict[str, Literal["int", "bool"]] = {"red": "bool"}
     return SDTAContext(psi, psiF, states)
 
 
