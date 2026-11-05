@@ -115,7 +115,7 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
    no separate per-pair query.
 7. **Postcondition (`--post NAME`, check `POST`)** — runs after the tree-shape check and assumes it holds (no shape
    errors in this system). `NAME` is the positive property; `main.POST` maps it to the negated automaton A¬post
-   (`not_*_ctx`; rb has none). `chc/Post/PostRunner.py::PostRunner` is a `TreeShapeRunner` whose labels also carry
+   (`not_*_ctx`; rb has none, `rb_struct` checks the red-black structure without the bst order). `chc/Post/PostRunner.py::PostRunner` is a `TreeShapeRunner` whose labels also carry
    the states of A¬post as data (`chc/Post/symbols.py`): `post_n` for an output node (tainted and active),
    `post_s<j>` for each structural child (`Taint/helpers.py::child_is_struct`), `post_t<p>_<i>` for each key of
    `taint_ptr`. Constraints: S1 (a trail ending on the node carries its state) and S4 (ψ of A¬post on the final
