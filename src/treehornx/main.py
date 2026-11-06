@@ -23,11 +23,13 @@ from treehornx.chc.sdta.SDTAContext import (
     bst_ctx,
     bst_strict_ctx,
     not_avl_ctx,
+    not_avl_struct_ctx,
     not_bst_ctx,
     not_bst_strict_ctx,
     not_rb_black_height_ctx,
     not_rb_red_ctx,
     not_rb_root_black_ctx,
+    not_rb_struct_height_ctx,
     not_rb_struct_ctx,
     not_sll_sorted_ctx,
     not_sll_sorted_strict_ctx,
@@ -87,6 +89,8 @@ PostType: TypeAlias = Literal[
     "rb_red",
     "rb_black_height",
     "rb_root_black",
+    "avl_struct",
+    "rb_struct_height",
 ]
 
 POST: dict[str, Callable[[], SDTAContext]] = {
@@ -99,6 +103,8 @@ POST: dict[str, Callable[[], SDTAContext]] = {
     "rb_red": not_rb_red_ctx,
     "rb_black_height": not_rb_black_height_ctx,
     "rb_root_black": not_rb_root_black_ctx,
+    "avl_struct": not_avl_struct_ctx,
+    "rb_struct_height": not_rb_struct_height_ctx,
 }
 """The negated automaton of each postcondition: it accepts the output trees that violate it."""
 

@@ -8,11 +8,13 @@ from treehornx.chc.sdta.psi import (
     PsiType,
     error_psiF,
     not_psi_avl,
+    not_psi_avl_struct,
     not_psi_bst,
     not_psi_bst_strict,
     not_psi_rb_black_height,
     not_psi_rb_red,
     not_psi_rb_root_black,
+    not_psi_rb_struct_height,
     not_psi_rb_struct,
     not_psi_sll_sorted,
     not_psi_sll_sorted_strict,
@@ -166,6 +168,24 @@ def not_rb_root_black_ctx() -> SDTAContext:
     logger.debug("Creating not-RB root black context")
     psi, psiF = not_psi_rb_root_black, root_is_red  # noqa: N806
     states: dict[str, Literal["int", "bool"]] = {"red": "bool"}
+    return SDTAContext(psi, psiF, states)
+
+
+def not_avl_struct_ctx() -> SDTAContext:
+    """The negation of `avl_ctx` without the bst check: some `bal` field is not height(right) - height(left) or is
+    outside {-1, 0, 1}."""
+    logger.debug("Creating not-AVL structure context")
+    psi, psiF = not_psi_avl_struct, error_psiF  # noqa: N806
+    states: dict[str, Literal["int", "bool"]] = {"height": "int", "error": "bool"}
+    return SDTAContext(psi, psiF, states)
+
+
+def not_rb_struct_height_ctx() -> SDTAContext:
+    """`not_rb_struct_ctx` with a height check in place of the black-height check: some red node has a red child,
+    some node has a subtree more than twice as high as the other, or the root is red."""
+    logger.debug("Creating not-RB structure (height) context")
+    psi, psiF = not_psi_rb_struct_height, rb_struct_error_psiF  # noqa: N806
+    states: dict[str, Literal["int", "bool"]] = {"height": "int", "red": "bool", "error": "bool"}
     return SDTAContext(psi, psiF, states)
 
 

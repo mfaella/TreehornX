@@ -348,6 +348,33 @@ def not_psi_avl(
     return sx.OpExpr(sx.Operator.AND, *conditions)
 
 
+def not_psi_avl_struct(
+    children_states: Mapping[str, Mapping[str, sx.SExpr] | None],
+    fields: Mapping[str, sx.SExpr],
+    states: Mapping[str, sx.SExpr],
+) -> sx.SExpr:
+    """The negation of the AVL structure of `psi_avl` without its bst check: `error` holds iff some node of the
+    subtree has a `bal` field different from height(right) - height(left) or outside {-1, 0, 1}. A nil child has
+    height 0. The height is computed for every subtree, so the relation is total."""
+    left_state, right_state = children_states["left"], children_states["right"]
+    left_height = left_state["height"] if left_state is not None else sx.Constant(0)
+    right_height = right_state["height"] if right_state is not None else sx.Constant(0)
+    bal = fields["bal"]
+    error_conditions: list[sx.SExpr] = [
+        sx.OpExpr(
+            sx.Operator.NOT, sx.OpExpr(sx.Operator.EQ, bal, sx.OpExpr(sx.Operator.SUB, right_height, left_height))
+        ),
+        sx.OpExpr(sx.Operator.GT, bal, sx.Constant(1)),
+        sx.OpExpr(sx.Operator.LT, bal, sx.Constant(-1)),
+        *(state["error"] for state in (left_state, right_state) if state is not None),
+    ]
+    return sx.OpExpr(
+        sx.Operator.AND,
+        sx.OpExpr(sx.Operator.EQ, states["height"], sx.OpExpr(sx.Operator.ADD, sx.Max(left_height, right_height), 1)),
+        sx.OpExpr(sx.Operator.EQ, states["error"], sx.OpExpr(sx.Operator.OR, *error_conditions)),
+    )
+
+
 def _psi_rb_template(
     children_states: Mapping[str, Mapping[str, sx.SExpr] | None],
     fields: Mapping[str, sx.SExpr],
@@ -481,6 +508,37 @@ def not_psi_rb_black_height(
     return sx.OpExpr(
         sx.Operator.AND,
         sx.OpExpr(sx.Operator.EQ, states["black_height"], sx.OpExpr(sx.Operator.ADD, left_height, own_height)),
+        sx.OpExpr(sx.Operator.EQ, states["error"], sx.OpExpr(sx.Operator.OR, *error_conditions)),
+    )
+
+
+def not_psi_rb_struct_height(
+    children_states: Mapping[str, Mapping[str, sx.SExpr] | None],
+    fields: Mapping[str, sx.SExpr],
+    states: Mapping[str, sx.SExpr],
+) -> sx.SExpr:
+    """`not_psi_rb_struct` with a height check in place of the black-height check: `error` holds iff some node of
+    the subtree is red with a red child, or has a subtree more than twice as high as the other. Heights count the
+    nil leaves (a nil child has height 1), so every red-black tree passes the check: a subtree with black height b
+    has height between b + 1 and 2b + 2. The relation is total; the root being red is checked by
+    `rb_struct_error_psiF`."""
+    left_state, right_state = children_states["left"], children_states["right"]
+    red = fields["red"]
+    left_height = left_state["height"] if left_state is not None else sx.Constant(1)
+    right_height = right_state["height"] if right_state is not None else sx.Constant(1)
+    two = sx.Constant(2)
+    error_conditions: list[sx.SExpr] = [
+        sx.OpExpr(sx.Operator.GT, left_height, sx.OpExpr(sx.Operator.MUL, two, right_height)),
+        sx.OpExpr(sx.Operator.GT, right_height, sx.OpExpr(sx.Operator.MUL, two, left_height)),
+    ]
+    for state in (left_state, right_state):
+        if state is not None:
+            error_conditions.append(sx.OpExpr(sx.Operator.AND, red, state["red"]))
+            error_conditions.append(state["error"])
+    return sx.OpExpr(
+        sx.Operator.AND,
+        sx.OpExpr(sx.Operator.EQ, states["red"], red),
+        sx.OpExpr(sx.Operator.EQ, states["height"], sx.OpExpr(sx.Operator.ADD, sx.Max(left_height, right_height), 1)),
         sx.OpExpr(sx.Operator.EQ, states["error"], sx.OpExpr(sx.Operator.OR, *error_conditions)),
     )
 
