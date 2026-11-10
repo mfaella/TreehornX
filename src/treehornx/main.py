@@ -16,6 +16,7 @@ from humanfriendly import format_timespan
 
 from treehornx import ir
 from treehornx.chc.core import ExitCodeKind
+from treehornx.chc.Lab.prune import PairPruner
 from treehornx.chc.Lab.system import LabCHC, build_lab, to_system, write_smt2
 from treehornx.chc.Post import post_clauses
 from treehornx.chc.pre import PreRunner, label_exit
@@ -431,6 +432,7 @@ def verify(
     flags: FeatureFlags,
     tree_shape: bool = False,
     post_ctx: SDTAContext | None = None,
+    pruner: PairPruner | None = None,
 ) -> Stats:
     """Enumerates the labels, reports the exit statuses that are trivially unreachable and builds, dumps, prints
     and solves the CHC systems of the others. With `tree_shape` or `post_ctx`, memory safety is assumed: the memory
@@ -482,6 +484,15 @@ def verify(
         "The tree-shape and postcondition checks assume memory safety: the memory systems are not built and the runs "
         "ending in ERR, OOM or LABEL_OVERFLOW are dropped."
     )
+
+    if pruner is not None:
+        full_lab = lab
+        pruned, elapsed = progress("Checking the Lab pairs with yices2", lambda: pruner.prune(full_lab, timeout))
+        lab = pruned.lab
+        console.print(
+            f"Lab pairs checked in {format_timespan(elapsed)}: {pruned.checked} pairs, {pruned.removed} unsatisfiable "
+            f"removed, {pruned.unknown} unknown kept."
+        )
 
     shape, stats.taints_generation_elapsed_time = progress("Generating taints", lambda: tree_shape_from_lab(lab))
     stats.tainted_labels_count = len(shape.labels)
@@ -601,6 +612,14 @@ def verify_cmd(
             "--smt2 writes the systems into <function>_<check>_split<N>/",
         ),
     ] = 0,
+    prune_pairs: Annotated[
+        bool,
+        typer.Option(
+            "--prune-pairs",
+            help="with --tree-shape or --post, remove the Lab pairs whose data constraints are unsatisfiable "
+            "(checked with yices-smt2, found in --solvers-dir or on PATH) before the tainting",
+        ),
+    ] = False,
 ) -> None:
     solver_flags = {"z3": z3, "eldarica": eldarica, "golem": golem, "portfolio": portfolio}
     solvers = [name for name, chosen in solver_flags.items() if chosen]
@@ -633,6 +652,7 @@ def verify_cmd(
 
     try:
         solver = make_solver(solvers, solvers_dir) if check_sat_flag else None
+        pruner = PairPruner.find(solvers_dir) if prune_pairs else None
     except SolverError as e:
         error(str(e))
         raise typer.Exit(1) from e
@@ -645,9 +665,10 @@ def verify_cmd(
         print_chc,
         solver,
         timeout,
-        FeatureFlags(clean_clause, split),
+        FeatureFlags(clean_clause, split, prune_pairs),
         tree_shape,
         POST[post]() if post else None,
+        pruner,
     )
     dump_stats(function, stats, produce_csv, produce_json)
 

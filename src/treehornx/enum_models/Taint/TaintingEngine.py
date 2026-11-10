@@ -44,17 +44,20 @@ from treehornx.enum_models.Taint.TaintPtr import Key, TaintPtr
 class TaintingEngine(SymbolicEngine[TaintedLabel]):
     lab_engine: LabEngine
 
-    def __init__(self, lab_engine: LabEngine):
+    def __init__(self, lab_engine: LabEngine, lab_tree: SymbolicTree[Lab] | None = None):
+        """`lab_tree` (the final labels and pairs of `lab_engine` by default) is the Lab part to taint, possibly
+        with some pairs removed (`chc/Lab/prune.py`)."""
         self.lab_engine = lab_engine
-        final_labels, final_pairs = self.lab_finals()
+        final_labels, final_pairs = self.lab_finals(lab_tree)
         lifted = {lab: self.initial(lab) for lab in final_labels}
         init_pairs = {Pair(lifted[pair.parent], lifted[pair.child], pair.j) for pair in final_pairs}
         super().__init__(k=lab_engine.k, m=lab_engine.m, initial_pairs=init_pairs, start_states=set(lifted.values()))
 
-    def lab_finals(self) -> tuple[set[Lab], set[Pair[Lab]]]:
-        """The final labels and pairs of the Lab engine without the runs ending in ERR, OOM or label overflow: the
-        tree-shape and postcondition checks assume memory safety, so these runs are unreachable."""
-        finals = self.lab_engine.finals()
+    def lab_finals(self, lab_tree: SymbolicTree[Lab] | None = None) -> tuple[set[Lab], set[Pair[Lab]]]:
+        """The labels and pairs of `lab_tree` (the final ones of the Lab engine by default) without the runs ending
+        in ERR, OOM or label overflow: the tree-shape and postcondition checks assume memory safety, so these runs are
+        unreachable."""
+        finals = self.lab_engine.finals() if lab_tree is None else lab_tree
         labels, pairs = finals.states, finals.pairs
         kept = {lab for lab in labels if self.lab_engine.label_exit(lab) in (ExitCode.N, ExitCode.C)}
         return kept, {pair for pair in pairs if pair.parent in kept and pair.child in kept}

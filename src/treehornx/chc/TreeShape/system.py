@@ -10,7 +10,7 @@ from treehornx.enum_models.Taint import TaintedLabel, TaintingEngine
 
 
 def enumerate_taints(lab: LabCHC) -> TaintingEngine:
-    engine = TaintingEngine(lab.engine)
+    engine = TaintingEngine(lab.engine, lab.tree)
     engine.fix()
     return engine
 
