@@ -52,7 +52,7 @@ from treehornx.enum_models.Lab.helpers import (
     up_links,
     upd_since,
 )
-from treehornx.enum_models.Lab.initial import backbone_labels, initial_pairs, start_labels
+from treehornx.enum_models.Lab.initial import backbone_labels, initial_pairs, is_initial, start_labels
 from treehornx.enum_models.Lab.Lab import Lab
 from treehornx.enum_models.Lab.next_dir import predict_next_dir
 
@@ -708,3 +708,7 @@ class LabEngine(SymbolicEngine[Lab]):
     @override
     def is_end_of_computation(self, state: Lab) -> bool:
         return self.is_end_of_lace(state)
+
+    @override
+    def is_root(self, state: Lab) -> bool:
+        return is_initial(state)

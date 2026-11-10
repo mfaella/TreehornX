@@ -11,11 +11,12 @@ from treehornx.chc.sdta.psi import (
     not_psi_avl_struct,
     not_psi_bst,
     not_psi_bst_strict,
+    not_psi_rb,
     not_psi_rb_black_height,
     not_psi_rb_red,
     not_psi_rb_root_black,
-    not_psi_rb_struct_height,
     not_psi_rb_struct,
+    not_psi_rb_struct_height,
     not_psi_sll_sorted,
     not_psi_sll_sorted_strict,
     psi_avl,
@@ -125,6 +126,22 @@ def rb_ctx() -> SDTAContext:
         "data": "int",
         "black_height": "int",
         "red": "bool",
+    }
+    return SDTAContext(psi, psiF, states)
+
+
+def not_rb_ctx() -> SDTAContext:
+    """The negation of `rb_ctx`: the tree breaks the strict bst order or the red-black structure, or has a red
+    root."""
+    logger.debug("Creating not-RB context")
+    psi, psiF = not_psi_rb, rb_struct_error_psiF  # noqa: N806
+    states: dict[str, Literal["int", "bool"]] = {
+        "min": "int",
+        "max": "int",
+        "data": "int",
+        "black_height": "int",
+        "red": "bool",
+        "error": "bool",
     }
     return SDTAContext(psi, psiF, states)
 

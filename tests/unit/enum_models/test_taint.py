@@ -154,7 +154,8 @@ def test_finals_one_supported_alternative_is_enough() -> None:
 
 
 def test_engine_finals(engine: TaintingEngine) -> None:
-    states, pairs = engine.finals()
+    finals = engine.finals()
+    states, pairs = finals.states, finals.pairs
     assert any(state.taint_node is TopPlus for state in states)
     assert any(not state.lab[1].active and state.lab.frame.active and state.taint_node for state in states)
     for pair in pairs:
@@ -223,7 +224,8 @@ def saturate(engine: TaintingEngine, tree: Tree) -> tuple[list[TaintedLabel], li
 
 
 def test_engine_finals_contain_every_saturated_tree(engine: TaintingEngine) -> None:
-    states, pairs = engine.finals()
+    finals = engine.finals()
+    states, pairs = finals.states, finals.pairs
     trees = list(concrete_trees(engine, depth=8))
     assert trees
     for tree in trees:

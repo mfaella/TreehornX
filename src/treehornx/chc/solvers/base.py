@@ -75,11 +75,13 @@ class Outcome:
 
 
 def resolve_binary(name: str, solvers_dir: Path | None) -> Path:
-    """The executable `name` in `solvers_dir`, or on PATH when the directory does not have it."""
+    """The executable `name` in `solvers_dir`, or on PATH when the directory does not have it.
+
+    The path is absolute: `Path("./z3")` prints as `z3`, which `subprocess` would look up on PATH again."""
     if solvers_dir is not None and (found := shutil.which(name, path=str(solvers_dir))) is not None:
-        return Path(found)
+        return Path(found).absolute()
     if (found := shutil.which(name)) is not None:
-        return Path(found)
+        return Path(found).absolute()
     where = f"in {solvers_dir} nor on PATH" if solvers_dir is not None else "on PATH"
     raise SolverError(f"{name} not found {where}")
 

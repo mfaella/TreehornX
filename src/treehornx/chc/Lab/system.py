@@ -8,6 +8,7 @@ from treehornx.chc.clean import clean_clause
 from treehornx.chc.Lab.symbols import ChcLabUtils
 from treehornx.chc.smt.sexpr import CHCSystem, Clause, Predicate, Transform, write_horn
 from treehornx.enum_models.core.Pair import Pair
+from treehornx.enum_models.core.SymbolicTree import SymbolicTree
 from treehornx.enum_models.Lab import Lab, LabEngine
 
 
@@ -25,19 +26,26 @@ def enumerate_labels(function: ir.Function, k: int, m: int, n: int) -> LabEngine
 
 @dataclass
 class LabCHC:
-    """The enumerated part of the knitted-trees and the symbols of their data."""
+    """The enumerated part of the knitted-trees (the final labels and pairs, or a part of them after a split) and
+    the symbols of their data."""
 
     engine: LabEngine
     sym: ChcLabUtils
-    labels: list[Lab]
-    pairs: list[Pair[Lab]]
+    tree: SymbolicTree[Lab]
+
+    @property
+    def labels(self) -> list[Lab]:
+        return list(self.tree.states)
+
+    @property
+    def pairs(self) -> list[Pair[Lab]]:
+        return list(self.tree.pairs)
 
 
 def build_lab(function: ir.Function, k: int, m: int, n: int) -> LabCHC:
     """Enumerates the labels, keeping only the final labels and pairs."""
     engine = enumerate_labels(function, k, m, n)
-    final_labels, final_pairs = engine.finals()
-    return LabCHC(engine, ChcLabUtils(function, engine), labels=list(final_labels), pairs=list(final_pairs))
+    return LabCHC(engine, ChcLabUtils(function, engine), engine.finals())
 
 
 def printing_transform(clean: bool) -> Transform | None:

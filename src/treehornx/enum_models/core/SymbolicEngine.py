@@ -9,6 +9,7 @@ from treehornx.enum_models.core.Dir import Dir, Down, Internal, Up
 from treehornx.enum_models.core.InternedPool import InternedPool, InternedPoolView
 from treehornx.enum_models.core.Label import Label
 from treehornx.enum_models.core.Pair import Pair
+from treehornx.enum_models.core.SymbolicTree import SymbolicTree
 
 
 SN = TypeVar("SN")
@@ -211,7 +212,21 @@ class SymbolicEngine(ABC, Generic[SN]):
     @abstractmethod
     def is_end_of_computation(self, state: SN) -> bool: ...
 
-    def finals(self) -> tuple[set[SN], set[Pair[SN]]]:
+    @abstractmethod
+    def is_root(self, state: SN) -> bool:
+        """Whether `state` is the root of a tree, where the queries fire."""
+
+    def make_tree(self, states: Iterable[SN], pairs: Iterable[Pair[SN]]) -> SymbolicTree[SN]:
+        """The tree of `states` and `pairs`, its roots are the states with `is_root`."""
+        kept = frozenset(states)
+        return SymbolicTree(kept, frozenset(pairs), frozenset(state for state in kept if self.is_root(state)))
+
+    def tree(self) -> SymbolicTree[SN]:
+        """All the states and pairs enumerated so far."""
+        return self.make_tree(self.states, self.pairs)
+
+    def finals(self) -> SymbolicTree[SN]:
+        """The states and pairs that reach the end of a computation."""
         q: deque[tuple[SN, Dir]] = deque((ns, Internal()) for ns in iter(self.states) if self.is_end_of_computation(ns))
         visited: set[tuple[SN, Dir]] = set()
         final_states: set[SN] = set()
@@ -235,7 +250,7 @@ class SymbolicEngine(ABC, Generic[SN]):
                     final_pairs.add(pair)
                     q.append((pair.parent, Down(pair.j)))
 
-        return final_states, final_pairs
+        return self.make_tree(final_states, final_pairs)
 
     def clear(self):
         self.transitions.clear()

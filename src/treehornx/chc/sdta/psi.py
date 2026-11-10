@@ -421,6 +421,36 @@ def psi_rb_struct(
     return _psi_rb_template(children_states, fields, states, psi_true)
 
 
+def _rb_struct_parts(
+    children_states: Mapping[str, Mapping[str, sx.SExpr] | None],
+    fields: Mapping[str, sx.SExpr],
+    states: Mapping[str, sx.SExpr],
+) -> tuple[list[sx.SExpr], list[sx.SExpr]]:
+    """The constraints on `red` and `black_height` of `not_psi_rb_struct` and the conditions of its error (the
+    error of a child, a red node with a red child, children of different black heights)."""
+    left_state, right_state = children_states["left"], children_states["right"]
+    red = fields["red"]
+    # a black node adds 1 to the black height, a red one 0
+    own_height = sx.OpExpr(sx.Operator.ITE, red, sx.Constant(0), sx.Constant(1))
+    # a nil child is black with black height 0
+    left_height = left_state["black_height"] if left_state is not None else sx.Constant(0)
+    right_height = right_state["black_height"] if right_state is not None else sx.Constant(0)
+    conditions: list[sx.SExpr] = [
+        sx.OpExpr(sx.Operator.EQ, states["red"], red),
+        # the black height is taken from the left child only, so it is defined also when the two heights differ
+        sx.OpExpr(sx.Operator.EQ, states["black_height"], sx.OpExpr(sx.Operator.ADD, left_height, own_height)),
+    ]
+    error_conditions: list[sx.SExpr] = [
+        sx.OpExpr(sx.Operator.NOT, sx.OpExpr(sx.Operator.EQ, left_height, right_height))
+    ]
+    for state in (left_state, right_state):
+        if state is not None:
+            # a red node has no red child
+            error_conditions.append(sx.OpExpr(sx.Operator.AND, red, state["red"]))
+            error_conditions.append(state["error"])
+    return conditions, error_conditions
+
+
 def not_psi_rb_struct(
     children_states: Mapping[str, Mapping[str, sx.SExpr] | None],
     fields: Mapping[str, sx.SExpr],
@@ -430,43 +460,38 @@ def not_psi_rb_struct(
     subtree has children of different black heights, or is red with a red child. A nil child is black with black
     height 0. The other states are computed for every subtree, so the relation is total; the root being red is
     checked by `rb_struct_error_psiF`."""
-    conditions: list[sx.SExpr] = []
-    error_conditions: list[sx.SExpr] = []
-
-    left_state = children_states["left"]
-    right_state = children_states["right"]
-
-    red = fields["red"]
-    # a black node adds 1 to the black height, a red one 0
-    own_height = sx.OpExpr(sx.Operator.ITE, red, sx.Constant(0), sx.Constant(1))
-    conditions.append(sx.OpExpr(sx.Operator.EQ, states["red"], red))
-
-    if left_state is None and right_state is None:
-        conditions.append(sx.OpExpr(sx.Operator.EQ, states["black_height"], own_height))
-        conditions.append(sx.OpExpr(sx.Operator.NOT, states["error"]))
-        return sx.OpExpr(sx.Operator.AND, *conditions)
-
-    if left_state is not None:
-        # a red node has no red child
-        error_conditions.append(sx.OpExpr(sx.Operator.AND, red, left_state["red"]))
-        error_conditions.append(left_state["error"])
-
-    if right_state is not None:
-        error_conditions.append(sx.OpExpr(sx.Operator.AND, red, right_state["red"]))
-        error_conditions.append(right_state["error"])
-
-    # a nil child is black with black height 0
-    left_height = left_state["black_height"] if left_state is not None else sx.Constant(0)
-    right_height = right_state["black_height"] if right_state is not None else sx.Constant(0)
-    # the black height is taken from the left child only, so it is defined also when the two heights differ
-    conditions.append(
-        sx.OpExpr(sx.Operator.EQ, states["black_height"], sx.OpExpr(sx.Operator.ADD, left_height, own_height))
+    conditions, error_conditions = _rb_struct_parts(children_states, fields, states)
+    return sx.OpExpr(
+        sx.Operator.AND,
+        *conditions,
+        sx.OpExpr(sx.Operator.EQ, states["error"], sx.OpExpr(sx.Operator.OR, *error_conditions)),
     )
-    error_conditions.append(sx.OpExpr(sx.Operator.NOT, sx.OpExpr(sx.Operator.EQ, left_height, right_height)))
 
-    error = sx.OpExpr(sx.Operator.EQ, states["error"], sx.OpExpr(sx.Operator.OR, *error_conditions))
-    conditions.append(error)
-    return sx.OpExpr(sx.Operator.AND, *conditions)
+
+def not_psi_rb(
+    children_states: Mapping[str, Mapping[str, sx.SExpr] | None],
+    fields: Mapping[str, sx.SExpr],
+    states: Mapping[str, sx.SExpr],
+) -> sx.SExpr:
+    """The negation of `psi_rb`: `error` holds iff some node of the subtree breaks the red-black structure (see
+    `not_psi_rb_struct`) or the strict bst order (a left key >= the node key, or a right key <= it). `min`/`max`
+    are the extreme keys of the subtree, computed also when the order is broken, so the relation is total; the root
+    being red is checked by `rb_struct_error_psiF`."""
+    left_state, right_state = children_states["left"], children_states["right"]
+    data = fields["data"]
+    conditions, error_conditions = _rb_struct_parts(children_states, fields, states)
+    if left_state is not None:
+        error_conditions.append(sx.OpExpr(sx.Operator.GE, left_state["max"], data))
+    if right_state is not None:
+        error_conditions.append(sx.OpExpr(sx.Operator.LE, right_state["min"], data))
+    return sx.OpExpr(
+        sx.Operator.AND,
+        *conditions,
+        sx.OpExpr(sx.Operator.EQ, states["data"], data),
+        sx.OpExpr(sx.Operator.EQ, states["min"], left_state["min"] if left_state is not None else data),
+        sx.OpExpr(sx.Operator.EQ, states["max"], right_state["max"] if right_state is not None else data),
+        sx.OpExpr(sx.Operator.EQ, states["error"], sx.OpExpr(sx.Operator.OR, *error_conditions)),
+    )
 
 
 def not_psi_rb_red(

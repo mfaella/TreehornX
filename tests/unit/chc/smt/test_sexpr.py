@@ -187,33 +187,9 @@ Q_QUERY = sx.Clause(False, sx.Application(Q, X))
 R_QUERY = sx.Clause(False, sx.Application(R, X))
 
 
-def cone_system() -> sx.CHCSystem:
+def queries_system() -> sx.CHCSystem:
     return sx.CHCSystem([P, Q, R], [P_FACT, R_FACT, P_STEP, Q_QUERY, Q_FROM_P, R_QUERY])
 
 
 def test_queries() -> None:
-    assert cone_system().queries() == [Q_QUERY, R_QUERY]
-
-
-def test_cone_of_query() -> None:
-    """The cone follows Q to P (recursive, so the walk must stop) and drops the chain of R."""
-    cone = cone_system().get_reachability_cone(Q_QUERY)
-    assert cone.clauses == [P_FACT, P_STEP, Q_QUERY, Q_FROM_P]
-    assert cone.predicates == [P, Q]
-    assert cone_system().get_reachability_cone(R_QUERY).clauses == [R_FACT, R_QUERY]
-
-
-def test_cone_of_clause_not_in_system() -> None:
-    query = sx.Clause(False, sx.Application(R, X), sx.Application(Q, X))
-    cone = cone_system().get_reachability_cone(query)
-    assert cone.clauses == [P_FACT, R_FACT, P_STEP, Q_FROM_P, query]
-
-
-def test_cone_keeps_transform() -> None:
-    def identity(clause: sx.Clause) -> sx.Clause:
-        return clause
-
-    system = sx.CHCSystem([P, Q, R], cone_system().clauses, identity)
-    cone = system.get_reachability_cone(R_QUERY)
-    assert cone.transform is identity
-    assert "declare-fun P" not in cone.to_smt() and "(declare-fun R (Int) Bool)" in cone.to_smt()
+    assert queries_system().queries() == [Q_QUERY, R_QUERY]

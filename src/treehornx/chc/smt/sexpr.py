@@ -266,47 +266,12 @@ def write_horn(clauses: Iterable[Clause], out: IO[str], transform: Transform | N
 class CHCSystem:
     predicates: list[Predicate] = field(default_factory=list[Predicate])
     clauses: list[Clause] = field(default_factory=list[Clause])
-    """The clauses as built, `transform` is applied only when they are printed. Do not change them after the first
-    call of `get_reachability_cone`: the head index is built once."""
+    """The clauses as built, `transform` is applied only when they are printed."""
     transform: Transform | None = None
-    _head_index: dict[Predicate, list[Clause]] | None = field(default=None, init=False, repr=False, compare=False)
-
-    def _heads(self) -> dict[Predicate, list[Clause]]:
-        """Predicate → the clauses with that predicate as head (queries excluded), built on the first call."""
-        if self._head_index is None:
-            index: dict[Predicate, list[Clause]] = {}
-            for clause in self.clauses:
-                if isinstance(clause.head, Application):
-                    index.setdefault(clause.head.predicate, []).append(clause)
-            self._head_index = index
-        return self._head_index
 
     def queries(self) -> list[Clause]:
         """The clauses with head False, in order."""
         return [clause for clause in self.clauses if clause.head is False]
-
-    def get_reachability_cone(self, clause: Clause) -> CHCSystem:
-        """The system of `clause` and of every clause whose head predicate is reachable backwards from the body of
-        `clause`. The clauses keep the order of `self.clauses` (`clause` goes last when it is not one of them); only
-        the predicates they use are kept, and `transform` is the same."""
-        heads = self._heads()
-        cone: set[Clause] = {clause}
-        seen: set[Predicate] = set()
-        worklist = [b.predicate for b in clause.body if isinstance(b, Application)]
-        while worklist:
-            predicate = worklist.pop()
-            if predicate in seen:
-                continue
-            seen.add(predicate)
-            for rule in heads.get(predicate, ()):
-                cone.add(rule)
-                worklist.extend(b.predicate for b in rule.body if isinstance(b, Application))
-        clauses = [c for c in self.clauses if c in cone]
-        if clause not in clauses:
-            clauses.append(clause)
-        used = {app.predicate for c in clauses for app in c.applications()}
-        predicates = [p for p in self.predicates if p in used]
-        return CHCSystem(predicates, clauses, self.transform)
 
     def printed_clauses(self) -> Iterator[Clause]:
         """The clauses as they are printed, rewritten lazily by `transform`."""

@@ -6,6 +6,7 @@ from treehornx import ir
 from treehornx.chc.core import ExitCodeKind
 from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.core.SymbolicEngine import Transition
+from treehornx.enum_models.core.SymbolicTree import SymbolicTree
 from treehornx.enum_models.Lab import (
     ERR,
     OOM,
@@ -97,7 +98,7 @@ class KnittedTrees:
     def pairs_by_parent_and_child_key(self, parent: Lab, j: int) -> Iterable[Pair[Frame]]:
         return (p for p in self.engine.pair_parent_index[parent] if p.j == j)
 
-    def finals(self) -> tuple[set[Lab], set[Pair[Frame]]]:
+    def finals(self) -> SymbolicTree[Lab]:
         """Labels and pairs connected to the end of some lace."""
         return self.engine.finals()
 

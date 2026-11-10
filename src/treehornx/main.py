@@ -3,11 +3,13 @@
 import csv
 import itertools
 import json
+import math
 import shutil
 import sys
+import time
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Annotated, Callable, Iterable, Literal, TypeAlias, cast
+from typing import Annotated, Callable, Iterable, Literal, TypeAlias, TypeVar, cast
 
 import typer
 from humanfriendly import format_timespan
@@ -27,10 +29,11 @@ from treehornx.chc.sdta.SDTAContext import (
     not_bst_ctx,
     not_bst_strict_ctx,
     not_rb_black_height_ctx,
+    not_rb_ctx,
     not_rb_red_ctx,
     not_rb_root_black_ctx,
-    not_rb_struct_height_ctx,
     not_rb_struct_ctx,
+    not_rb_struct_height_ctx,
     not_sll_sorted_ctx,
     not_sll_sorted_strict_ctx,
     rb_ctx,
@@ -50,6 +53,7 @@ from treehornx.chc.solvers import (
     Z3Solver,
 )
 from treehornx.chc.TreeShape import tree_shape_clauses, tree_shape_from_lab
+from treehornx.enum_models.core.SymbolicTree import NO_SPLIT, SymbolicTree, ordered
 from treehornx.feature_flags import FeatureFlags
 from treehornx.parser import SubsetError, parse_file
 from treehornx.tui import console, critical, error, fail, info, progress, success, warning
@@ -85,6 +89,7 @@ PostType: TypeAlias = Literal[
     "sll_sorted",
     "sll_sorted_strict",
     "avl",
+    "rb",
     "rb_struct",
     "rb_red",
     "rb_black_height",
@@ -99,6 +104,7 @@ POST: dict[str, Callable[[], SDTAContext]] = {
     "sll_sorted": not_sll_sorted_ctx,
     "sll_sorted_strict": not_sll_sorted_strict_ctx,
     "avl": not_avl_ctx,
+    "rb": not_rb_ctx,
     "rb_struct": not_rb_struct_ctx,
     "rb_red": not_rb_red_ctx,
     "rb_black_height": not_rb_black_height_ctx,
@@ -154,14 +160,23 @@ def memory_clauses(
     return runner.predicates(), itertools.chain(runner.clauses(), runner.queries())
 
 
+NS = TypeVar("NS")
+
 Clauses: TypeAlias = Callable[[], tuple[list[Predicate], Iterable[Clause]]]
 """Builds the predicates and the (lazily generated) clauses of a check's system."""
 
 
 def dump_system(
-    function: ir.Function, check: str, clauses: Clauses, smt2: bool, print_chc: bool, flags: FeatureFlags
+    function: ir.Function,
+    check: str,
+    clauses: Clauses,
+    smt2: bool,
+    print_chc: bool,
+    flags: FeatureFlags,
+    folder: Path | None = None,
 ) -> Path | None:
-    """Streams the system to `<function>_<check>.smt2` and/or stdout without building a `CHCSystem`."""
+    """Streams the system to `<function>_<check>.smt2` (in `folder`, created if needed) and/or stdout without
+    building a `CHCSystem`."""
     _, body = clauses()
     if not smt2:
         sys.stdout.write(f"; CHC system for {check}\n")
@@ -169,6 +184,9 @@ def dump_system(
         sys.stdout.flush()
         return None
     file_path = Path(f"{function.name}_{check}.smt2")
+    if folder is not None:
+        folder.mkdir(parents=True, exist_ok=True)
+        file_path = folder / file_path
     with file_path.open("w") as f:
         write_smt2(body, f, flags.clean_clause)
     if print_chc:
@@ -270,6 +288,93 @@ def display_outcome(check: str, status: Status) -> None:
 def run_check(
     function: ir.Function,
     check: str,
+    tree: SymbolicTree[NS],
+    clauses_of: Callable[[SymbolicTree[NS]], Clauses],
+    smt2: bool,
+    print_chc: bool,
+    solver: CHCSolver | None,
+    timeout: int | None,
+    flags: FeatureFlags,
+    stats: Stats,
+) -> None:
+    """Dumps, prints and solves the system of `check` built by `clauses_of` on `tree`.
+
+    With `flags.split` > 0 the tree is split first (`SymbolicTree.split`) and each part gets its own system:
+    `smt2` writes them into `<function>_<check>_split<N>/` with an `index.csv`, and the check is sat iff every system
+    is sat (solving stops at the first unsat one; `timeout` is the budget of all the systems together)."""
+    if flags.split == NO_SPLIT:
+        run_system(function, check, clauses_of(tree), smt2, print_chc, solver, timeout, flags, stats)
+        return
+
+    trees, elapsed = progress(f"Splitting {check}", lambda: ordered(tree.split(flags.split), tree))
+    console.print(f"{check} split in {format_timespan(elapsed)}: {len(tree.roots)} roots, {len(trees)} systems.")
+    root_index = {root: i for i, root in enumerate(tree.roots)}
+
+    def root_ids(part: SymbolicTree[NS]) -> str:
+        return " ".join(map(str, sorted(root_index[root] for root in part.roots)))
+
+    if smt2 or print_chc:
+
+        def dump() -> Path | None:
+            folder = Path(f"{function.name}_{check}_split{flags.split}") if smt2 else None
+            rows: list[list[object]] = []
+            for g, part in enumerate(trees):
+                path = dump_system(function, f"{check}_group{g:03d}", clauses_of(part), smt2, print_chc, flags, folder)
+                if path is not None:
+                    body = len(part.states - part.roots)
+                    rows.append([g, path.name, root_ids(part), body, len(part.pairs), *smt2_counts(path)])
+            if folder is None:
+                return None
+            folder.mkdir(parents=True, exist_ok=True)
+            with (folder / "index.csv").open("w", newline="") as index:
+                writer = csv.writer(index)
+                writer.writerow(["group", "file", "root_ids", "body", "pairs", "predicates", "clauses", "queries"])
+                writer.writerows(rows)
+            return folder
+
+        folder, elapsed = progress(f"Writing the CHC systems for {check}", dump)
+        stats.smt2_dumping_elapsed_time[check] = elapsed
+        where = f": {folder}" if folder else " on stdout"
+        console.print(f"{len(trees)} CHC systems for {check} written in {format_timespan(elapsed)}{where}.")
+
+    if solver is None:
+        return
+    deadline = None if timeout is None else time.monotonic() + timeout
+    result = Status.SAT
+    stats.system_creation_elapsed_time[check] = 0.0
+    stats.check_sat_elapsed_time[check] = 0.0
+    for g, part in enumerate(trees):
+        left = None
+        if deadline is not None:
+            left = math.ceil(deadline - time.monotonic())
+            if left <= 0:
+                result = Status.UNKNOWN
+                break
+        clauses = clauses_of(part)
+        system, elapsed = progress(
+            f"Creating the CHC system {g + 1}/{len(trees)} for {check}",
+            lambda: to_system(*clauses(), flags.clean_clause),
+        )
+        stats.system_creation_elapsed_time[check] += elapsed
+        status, elapsed = progress(f"Solving {check} {g + 1}/{len(trees)}", lambda: check_sat(solver, system, left))
+        stats.check_sat_elapsed_time[check] += elapsed
+        console.print(
+            f"{check} system {g + 1}/{len(trees)} (roots {root_ids(part)}) solved in "
+            f"{format_timespan(elapsed)}: {status.value}."
+        )
+        if status is Status.UNSAT:
+            result = Status.UNSAT
+            break
+        if status is Status.UNKNOWN:
+            result = Status.UNKNOWN
+    stats.outcome[check] = result.value
+    console.print(f"{check} solved in {format_timespan(stats.check_sat_elapsed_time[check])}: {result.value}.")
+    display_outcome(check, result)
+
+
+def run_system(
+    function: ir.Function,
+    check: str,
     clauses: Clauses,
     smt2: bool,
     print_chc: bool,
@@ -278,7 +383,7 @@ def run_check(
     flags: FeatureFlags,
     stats: Stats,
 ) -> None:
-    """Dumps, prints and solves the system of `check`."""
+    """Dumps, prints and solves the single system of `check`."""
     if smt2 or print_chc:
         file_path, elapsed = progress(
             f"Writing the CHC system for {check}",
@@ -299,6 +404,19 @@ def run_check(
         stats.outcome[check] = status.value
         console.print(f"{check} solved in {format_timespan(elapsed)}: {status.value}.")
         display_outcome(check, status)
+
+
+def smt2_counts(path: Path) -> tuple[int, int, int]:
+    """The predicates, clauses (queries included) and queries of a HORN script written by `write_smt2`."""
+    predicates = clauses = queries = 0
+    with path.open() as f:
+        for line in f:
+            if line.startswith("(declare-fun"):
+                predicates += 1
+            elif line.startswith("(assert"):
+                clauses += 1
+                queries += line.rstrip().rstrip(")").endswith(" false")
+    return predicates, clauses, queries
 
 
 def verify(
@@ -349,7 +467,8 @@ def verify(
             run_check(
                 function,
                 code.name,
-                lambda code=code: memory_clauses(function, lab, m, n, code, pre_ctx),
+                lab.tree,
+                lambda tree, code=code: lambda: memory_clauses(function, replace(lab, tree=tree), m, n, code, pre_ctx),
                 smt2,
                 print_chc,
                 solver,
@@ -376,7 +495,8 @@ def verify(
         run_check(
             function,
             TREE_SHAPE,
-            lambda: tree_shape_clauses(function, shape, m, n, pre_ctx),
+            shape.tree,
+            lambda tree: lambda: tree_shape_clauses(function, replace(shape, tree=tree), m, n, pre_ctx),
             smt2,
             print_chc,
             solver,
@@ -390,7 +510,8 @@ def verify(
         run_check(
             function,
             POST_CHECK,
-            lambda: post_clauses(function, shape, m, n, pre_ctx, post_ctx),
+            shape.tree,
+            lambda tree: lambda: post_clauses(function, replace(shape, tree=tree), m, n, pre_ctx, post_ctx),
             smt2,
             print_chc,
             solver,
@@ -468,6 +589,18 @@ def verify_cmd(
             help="check that the output tree satisfies this postcondition (under --pre), assuming memory safety",
         ),
     ] = None,
+    split: Annotated[
+        int,
+        typer.Option(
+            "--split",
+            min=0,
+            max=3,
+            help="split every system on the final labels before building it: 0 no split, 1 one system per maximal "
+            "body (the roots whose body is included in another are collapsed into the smallest maximal one), "
+            "2 one system per body (roots with the same derivations), 3 one system per root (query); "
+            "--smt2 writes the systems into <function>_<check>_split<N>/",
+        ),
+    ] = 0,
 ) -> None:
     solver_flags = {"z3": z3, "eldarica": eldarica, "golem": golem, "portfolio": portfolio}
     solvers = [name for name, chosen in solver_flags.items() if chosen]
@@ -512,7 +645,7 @@ def verify_cmd(
         print_chc,
         solver,
         timeout,
-        FeatureFlags(clean_clause),
+        FeatureFlags(clean_clause, split),
         tree_shape,
         POST[post]() if post else None,
     )

@@ -2,7 +2,6 @@ from treehornx.chc.solvers.base import CHCSolver, Outcome, ProcessSolver, Solver
 from treehornx.chc.solvers.eldarica import EldaricaSolver
 from treehornx.chc.solvers.golem import GolemSolver
 from treehornx.chc.solvers.portfolio import PortfolioSolver
-from treehornx.chc.solvers.query_splitter import QuerySplitterCHCSolver
 from treehornx.chc.solvers.z3 import Z3Solver
 
 
@@ -13,7 +12,6 @@ __all__ = [
     "Outcome",
     "PortfolioSolver",
     "ProcessSolver",
-    "QuerySplitterCHCSolver",
     "SolverError",
     "Status",
     "Z3Solver",

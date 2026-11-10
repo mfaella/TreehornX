@@ -128,7 +128,14 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
 `feature_flags.py::FeatureFlags` (CLI: `--clean-clause`): `clean_clause` (merge variables equated in a clause body,
 `chc/clean.py`; clauses are built uncleaned and cleaned lazily one at a time when printed, via
 `CHCSystem.transform`/`write_smt2(..., clean)`). It changes the size/shape of the systems, not their meaning, and
-defaults to off.
+defaults to off. `split_roots` (CLI: `--split-roots`) splits the tree-shape and post systems after the tainting
+(`chc/TreeShape/split.py::split_by_root`): the roots of the final tainted labels are grouped by the set of labels
+reachable below them through the final pairs, and each group gets its own system (the final pairs whose parent is a
+root of the group or below it). `main.run_split_check` solves the systems one by one (sat iff all sat, stops at the
+first unsat, `--timeout` shared) and `--smt2` writes them into `<function>_<check>_split/` with an `index.csv`
+(roots, labels, pairs, predicates, clauses, queries of each system). `collapse_roots` (CLI: `--collapse-roots`, with
+`--split-roots`) merges each group whose labels below are strictly included in another group's into the smallest
+maximal group including them; the systems go into `<function>_<check>_collapsed/`.
 
 Conventions: positions inside a label are **1-based** like the paper (`sigma[1]` is the first frame,
 `sigma[len(sigma)]` the top one); `σ`/`τ` naming follows the paper (σ sends the lace, τ receives the new frame). Child

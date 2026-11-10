@@ -27,6 +27,7 @@ from typing_extensions import override
 from treehornx.enum_models.core.Dir import Down, Up
 from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.core.SymbolicEngine import SymbolicEngine
+from treehornx.enum_models.core.SymbolicTree import SymbolicTree
 from treehornx.enum_models.Lab.ExitCode import ExitCode
 from treehornx.enum_models.Lab.helpers import down_links, is_pfield_implicit, points_here, up_links
 from treehornx.enum_models.Lab.initial import is_initial
@@ -53,7 +54,8 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
     def lab_finals(self) -> tuple[set[Lab], set[Pair[Lab]]]:
         """The final labels and pairs of the Lab engine without the runs ending in ERR, OOM or label overflow: the
         tree-shape and postcondition checks assume memory safety, so these runs are unreachable."""
-        labels, pairs = self.lab_engine.finals()
+        finals = self.lab_engine.finals()
+        labels, pairs = finals.states, finals.pairs
         kept = {lab for lab in labels if self.lab_engine.label_exit(lab) in (ExitCode.N, ExitCode.C)}
         return kept, {pair for pair in pairs if pair.parent in kept and pair.child in kept}
 
@@ -191,10 +193,14 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
         return self.lab_engine.is_end_of_lace(state.lab)
 
     @override
-    def finals(self) -> tuple[set[TaintedLabel], set[Pair[TaintedLabel]]]:
+    def is_root(self, state: TaintedLabel) -> bool:
+        return is_initial(state.lab)
+
+    @override
+    def finals(self) -> SymbolicTree[TaintedLabel]:
         """The saturated labels and pairs composing a whole tree from a root (see `saturated_finals`)."""
         sat_pairs = {pair for pair in self.pairs if self.is_saturated_p(pair)}
         states = [state for state in self.states if self.is_saturated_l(state)]
-        return saturated_finals(
-            states, sat_pairs, self.pair_parent_index, self.pair_child_index, lambda state: is_initial(state.lab)
+        return self.make_tree(
+            *saturated_finals(states, sat_pairs, self.pair_parent_index, self.pair_child_index, self.is_root)
         )
