@@ -205,5 +205,7 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
         sat_pairs = {pair for pair in self.pairs if self.is_saturated_p(pair)}
         states = [state for state in self.states if self.is_saturated_l(state)]
         return self.make_tree(
-            *saturated_finals(states, sat_pairs, self.pair_parent_index, self.pair_child_index, self.is_root)
+            *saturated_finals(
+                states, sat_pairs, self.pair_parent_index, self.pair_child_index, self.is_root, self.k + self.m
+            )
         )

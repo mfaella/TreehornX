@@ -111,9 +111,13 @@ def test_saturation(engine: TaintingEngine) -> None:
 
 
 def run_finals(
-    edges: list[tuple[str, str, int]], saturated: set[str], unsaturated_pairs: frozenset[Pair[str]] = frozenset()
+    edges: list[tuple[str, str, int]],
+    saturated: set[str],
+    unsaturated_pairs: frozenset[Pair[str]] = frozenset(),
+    arity: int | None = None,
 ) -> tuple[set[str], set[Pair[str]]]:
-    """saturated_finals on a toy graph rooted in "R": a pair is saturated when both its states are."""
+    """saturated_finals on a toy graph rooted in "R": a pair is saturated when both its states are. The arity is
+    one more than the largest child index of the edges by default."""
     pairs = {Pair(a, b, j) for a, b, j in edges}
     parent_index: defaultdict[str, set[Pair[str]]] = defaultdict(set)
     child_index: defaultdict[str, set[Pair[str]]] = defaultdict(set)
@@ -121,7 +125,9 @@ def run_finals(
         parent_index[pair.parent].add(pair)
         child_index[pair.child].add(pair)
     sat_pairs = {p for p in pairs if p.parent in saturated and p.child in saturated} - unsaturated_pairs
-    return saturated_finals(saturated, sat_pairs, parent_index, child_index, lambda s: s == "R")
+    if arity is None:
+        arity = 1 + max(j for _, _, j in edges)
+    return saturated_finals(saturated, sat_pairs, parent_index, child_index, lambda s: s == "R", arity)
 
 
 def test_finals_cycle_falls_with_its_only_support() -> None:
@@ -145,6 +151,13 @@ def test_finals_leaves_and_unreachable_states() -> None:
 def test_finals_slot_with_only_unsaturated_pairs_removes_the_parent() -> None:
     states, _ = run_finals([("R", "A", 0), ("R", "B", 1)], {"R", "A", "B"}, frozenset({Pair("R", "B", 1)}))
     assert states == set()
+
+
+def test_finals_parent_missing_a_child_index_falls_with_its_ancestors() -> None:
+    """A has a pair for index 0 only: with arity 2 it has no clause, so A and the root R needing it fall."""
+    states, pairs = run_finals([("R", "A", 0), ("R", "L", 1), ("A", "L", 0)], {"R", "A", "L"}, arity=2)
+    assert states == set()
+    assert pairs == set()
 
 
 def test_finals_one_supported_alternative_is_enough() -> None:
