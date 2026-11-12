@@ -20,7 +20,7 @@ Data fields and data variables are not part of the frame, so instructions over d
 advance the pc and data conditions take both branches.
 """
 
-from dataclasses import dataclass, field, replace
+from dataclasses import dataclass, replace
 from functools import cached_property
 from typing import Iterable
 
@@ -28,8 +28,6 @@ from typing_extensions import override
 
 from treehornx import ir
 from treehornx.enum_models.core.Dir import Dir, Down, Internal, Up
-from treehornx.enum_models.core.Pair import Pair
-from treehornx.enum_models.core.SymbolicEngine import SymbolicEngine
 from treehornx.enum_models.Lab.Event import ERR, OOM, FieldAssignP, Here, Rewind, RwdSpec
 from treehornx.enum_models.Lab.ExitCode import ExitCode
 from treehornx.enum_models.Lab.Frame import Frame, MutableFrame
@@ -53,22 +51,40 @@ from treehornx.enum_models.Lab.helpers import (
     upd_since,
 )
 from treehornx.enum_models.Lab.initial import backbone_labels, initial_pairs, is_initial, start_labels
-from treehornx.enum_models.Lab.Lab import Lab
+from treehornx.enum_models.Lab.Lab import Lab, LabFactory, intern_lab
 from treehornx.enum_models.Lab.next_dir import predict_next_dir
+from treehornx.symbolic import Pair, SymbolicEngine
 
 
 @dataclass(init=False)
-class LabEngine(SymbolicEngine[Lab]):
+class LabEngine(SymbolicEngine[Lab, int]):
+    k: int
+    m: int
     n: int
     function: ir.Function
+    lab_factory: LabFactory
+    consume_internal_steps: bool
 
-    def __init__(self, k: int, m: int, n: int, function: ir.Function):
-        starts = set(start_labels(function, m, n))
-        backbones = set(backbone_labels(function, m))
-        init_pairs = set(initial_pairs(function, m, starts, backbones))
-        super().__init__(k=k, m=m, initial_pairs=init_pairs, start_states=starts)
-        self.n = n
+    def __init__(
+        self,
+        k: int,
+        m: int,
+        n: int,
+        function: ir.Function,
+        lab_factory: LabFactory = intern_lab,
+        consume_internal_steps: bool = False,
+    ):
+        """`lab_factory` builds every label of the engine (interning them by default). With
+        `consume_internal_steps`, `step_int` chains the internal steps of a label and returns only the labels with
+        no internal step left."""
+        self.k, self.m, self.n = k, m, n
+        self.consume_internal_steps = consume_internal_steps
         self.function = function
+        self.lab_factory = lab_factory
+        starts = set(start_labels(function, m, n, lab_factory))
+        backbones = set(backbone_labels(function, m, lab_factory))
+        init_pairs = set(initial_pairs(function, m, starts, backbones))
+        super().__init__(initial_edges=init_pairs, start_states=starts, child_indexes=set(range(k + m)))
 
     @cached_property
     def pointers(self) -> range:
@@ -89,7 +105,7 @@ class LabEngine(SymbolicEngine[Lab]):
         """Appends f to label, after setting its prev link and predicting its next one."""
         f.prev = prev
         f.next = self.predict_next_dir(label, f)
-        return Lab(f.to_frozen(), label)
+        return self.lab_factory(f.to_frozen(), label)
 
     def is_continuos(self, label: Lab) -> bool:
         # a label of length 1 holds only the frame before the lace reaches the node: it cannot step
@@ -127,12 +143,11 @@ class LabEngine(SymbolicEngine[Lab]):
             and len(frames_with_next(child, Up())) == len(frames_with_prev(parent, Down(j))) + 1
         )
 
-    @override
     def consistent(self, pair: Pair[Lab]) -> bool:
         """Every pair is consistent by construction.
 
         Initial pairs are filtered by consistent_first_frames, step_up/step_down extend a pair
-        with matching prev/next links, and find_new_pairs only propagates the parent's internal steps
+        with matching prev/next links, and _find_new_edges only propagates the parent's internal steps
         and steps from children j' != j, and the child's non-Up steps. Since a label either steps
         internally or sends the lace out (never both, as its next link says), the parent cannot
         advance while the lace is in the j-th child, so the links of the two labels never contradict
@@ -141,6 +156,25 @@ class LabEngine(SymbolicEngine[Lab]):
 
     @override
     def step_int(self, label: Lab) -> Iterable[Lab] | None:
+        """One internal step of label, or a chain of them up to the labels with no internal step left when
+        `consume_internal_steps` is set."""
+        labels = self.step_int_once(label)
+        if labels is None or not self.consume_internal_steps:
+            return labels
+        return self._consume_internal(labels)
+
+    def _consume_internal(self, labels: Iterable[Lab]) -> Iterable[Lab]:
+        """The ends of the chains of internal steps from `labels`."""
+        work = list(labels)
+        while work:
+            label = work.pop()
+            successors = self.step_int_once(label)
+            if successors is None:
+                yield label
+            else:
+                work.extend(successors)
+
+    def step_int_once(self, label: Lab) -> Iterable[Lab] | None:
         if not self.is_continuos(label) or label.frame.next != Internal():
             return None
         frames = [f for f in self.step_int_frames(label, Internal()) if f is not None]
@@ -706,8 +740,10 @@ class LabEngine(SymbolicEngine[Lab]):
         return default("active", "pc", "isnil", "active_child")(f, tau.frame, f2)
 
     @override
-    def is_end_of_computation(self, state: Lab) -> bool:
-        return self.is_end_of_lace(state)
+    def is_leaf(self, state: Lab) -> bool:
+        """A node inactive in the input that is not the root: an auxiliary node, which has no children
+        (`consistent_first_frames` requires initial(σ) ∨ σ.active^1 of a parent)."""
+        return not state[1].active and not is_initial(state)
 
     @override
     def is_root(self, state: Lab) -> bool:

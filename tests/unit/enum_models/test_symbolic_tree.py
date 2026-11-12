@@ -10,17 +10,17 @@ included in every body: it goes into the smallest maximal one, {E}."""
 
 import pytest
 
-from treehornx.enum_models.core.Pair import Pair
-from treehornx.enum_models.core.SymbolicTree import SymbolicTree, ordered
+from treehornx.symbolic import Edge
+from treehornx.symbolic.SymbolicTree import SymbolicTree, ordered
 
 
 EDGES = [("R1", "A"), ("R2", "A"), ("A", "B"), ("R3", "B"), ("R6", "C"), ("C", "B"), ("C", "D"), ("R5", "E")]
-PAIRS = frozenset(Pair(parent, child, 0) for parent, child in EDGES)
+PAIRS = frozenset(Edge(parent, child, 0) for parent, child in EDGES)
 ROOTS = frozenset({"R1", "R2", "R3", "R4", "R5", "R6"})
-TREE = SymbolicTree(ROOTS | {"A", "B", "C", "D", "E"}, PAIRS, ROOTS)
+TREE = SymbolicTree(PAIRS, ROOTS)
 
 
-def roots_of(trees: set[SymbolicTree[str]]) -> set[frozenset[str]]:
+def roots_of(trees: set[SymbolicTree[str, int]]) -> set[frozenset[str]]:
     return {tree.roots for tree in trees}
 
 
@@ -36,7 +36,7 @@ def test_split_by_root() -> None:
     assert roots_of(trees) == {frozenset({root}) for root in ROOTS}
     (r6,) = (tree for tree in trees if tree.roots == {"R6"})
     assert r6.states == {"R6", "B", "C", "D"}
-    assert r6.pairs == {Pair("R6", "C", 0), Pair("C", "B", 0), Pair("C", "D", 0)}
+    assert r6.edges == {Edge("R6", "C", 0), Edge("C", "B", 0), Edge("C", "D", 0)}
 
 
 def test_split_by_body() -> None:
@@ -54,7 +54,7 @@ def test_split_by_partial_body() -> None:
     assert roots_of(trees) == {frozenset({"R1", "R2", "R3"}), frozenset({"R4", "R5"}), frozenset({"R6"})}
     (abr,) = (tree for tree in trees if "R1" in tree.roots)
     assert abr.states == {"R1", "R2", "R3", "A", "B"}
-    assert abr.pairs == {Pair("R1", "A", 0), Pair("R2", "A", 0), Pair("A", "B", 0), Pair("R3", "B", 0)}
+    assert abr.edges == {Edge("R1", "A", 0), Edge("R2", "A", 0), Edge("A", "B", 0), Edge("R3", "B", 0)}
 
 
 @pytest.mark.parametrize("level", [0, 1, 2, 3])

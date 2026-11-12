@@ -59,8 +59,21 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
    fields are four separately-numbered namespaces; the root is pointer var 0; the only branch is `IfGoto`.
    Uninitialised data vars are inputs (nondeterministic), pointer vars are nil.
 2. **Enumerate the shape** — `enum_models/Lab/LabEngine.py` (on top of the generic worklist fixpoint in
-   `enum_models/core/SymbolicEngine.py`) computes every *label* (a node's log of frames) and every *pair*
+   `symbolic/SymbolicEngine.py`) computes every *label* (a node's log of frames) and every *pair*
    (parent label, child label, child index j) reachable within bounds m (allocations) and n (frames per label).
+   The `symbolic` package holds what is generic: `SymbolicEngine[S, C]` over states S and child indices C,
+   `Edge[S, C]` (`Pair = Edge[S, int]`; build edges with `Edge(...)`, pyright cannot infer S through the alias),
+   `SymbolicTree[S, C]` (field `edges`, the splits). The engine keeps plain sets (no interning):
+   each subclass builds its states through a factory taking the constructor fields (`Lab.py::intern_lab`,
+   `TaintedLabel.py::intern_tainted_label` by default, weak pools). Internal transitions use the private
+   `_TransitionDirection` (`_Up | _Internal | _Down[C]`). The engine takes one internal step at a time; the
+   subclasses can chain them in their `step_int` (`LabEngine(consume_internal_steps=True)` returns only the labels
+   with no internal step left, default False; `TaintingEngine.step_int` already loops to a local fixpoint). `steppable` holds the states and edges on which a step
+   was taken; `finals()` is a least fixpoint over the saturated edges (no step taken on the edge or its states),
+   computed bottom-up from the leaves (`is_leaf`) in linear time (`_final_states`): a state is final when it is a
+   leaf or every child index has a saturated edge to a final child. Then a DFS from the final `is_root` states keeps
+   the saturated edges to final children. Infinite trees (a label paired with itself while the lace walks down a
+   list) are dropped: their clauses have no base case, so they cannot change the verdict.
    Initial labels/pairs come from `Lab/initial.py` (CHC I/II), step predicates of Appendix C are methods
    `step_*_{int,ext,down}`, auxiliary predicates (`points_here`, `stop_rewind`, `rewind_target`, …) live in
    `Lab/helpers.py`.
@@ -91,17 +104,17 @@ uv run python scripts/benchmarks.py [--only SUBSTR] [--timeout S] [--out FILE.cs
    assumption): with `--tree-shape` or `--post` the CLI does not build the memory systems of step 5, and
    `TaintingEngine.lab_finals` drops the final Lab labels ending in ERR, OOM or label overflow (and their pairs)
    before tainting, so these runs are not in the tree-shape and post systems. Steps:
-   - `enum_models/Taint/TaintingEngine.py` (a `SymbolicEngine[TaintedLabel]`) lifts the final Lab labels/pairs to
+   - `enum_models/Taint/TaintingEngine.py` (a `SymbolicEngine[TaintedLabel, int]`) lifts the final Lab labels/pairs to
      `TaintedLabel(taint_node, taint_ptr, lab)` and saturates Rules 1–5 of POPL27 Fig. 5: `step_int` = T5 (a trail
      ending on the node, via `points_here`, taints it) + T3 (a tainted node seeds a ⊤ trail at the last
      ⟨pf := p⟩ of each field), `step_down` = T2 (structural child) + T4 down, `step_up` = T4 up; T1 seeds
      `taint_ptr[(ROOT, last frame)] = ⊤+` on the end-of-lace label at initialisation. Taints are `BoolPlus`
      (⊥ < ⊤ < ⊤+, merged by join; hashed by value so the systems come out in a fixed order); `TaintPtr` stores only
      non-⊥ keys `(p, frame)`. A step returns None when nothing changes.
-   - `finals()` (`Taint/finals.py::saturated_finals`) keeps the saturated labels (`is_saturated_l`) and pairs
-     (`is_saturated_p`) that compose a tree: a greatest fixpoint by removal with per-(label, j) support counters
-     (an unvisited input tail is a label paired with itself, so revisits must count as true), then a BFS from the
-     `is_initial` roots. It over-approximates: each child slot is satisfied independently.
+   - `finals()` is the generic one (step 2): the labels and pairs on which no step changes the taints, composing
+     a tree from the `is_initial` roots. Each child slot is satisfied independently; this is exact because a step
+     through slot j excludes the other edges of slot j from the propagation of the new parent
+     (`SymbolicEngine._excluded_child`) and steps only join taints.
    - `Taint/shape.py` reads the violations off the taints (`ShapeError`, POPL27 Fig. 9): `label_errors` (two trails
      ending on a node, a trail ending on a freed node, trails merging, a self-loop) and `pair_errors` (a trail
      landing on a seed, a structural child that is also a trail end or was freed).
@@ -167,7 +180,7 @@ everything. The implementation follows the paper's "Efficient Implementation" fu
   `label_constraints`, the links between nodes the consistency constraints, and both are conjoined in the
   bottom-up automaton clauses over complete backbone trees. Frames strictly inside a chain of internal steps are
   dropped from the predicate's arguments (`ChcLabUtils.kept_frames`) and only occur as quantified variables.
-- **Only labels that can reach the end of a lace are kept** (`SymbolicEngine.finals`), and the query CHC VI is
+- **Only labels on which no step is possible are kept** (`SymbolicEngine.finals`), and the query CHC VI is
   issued on the root of the automaton run (with the trivial automaton when there is no precondition).
 - **Event set extended** (`Lab/Event.py`, rationale in `FORMULAS_UPDATES.md`, in Italian): `FieldHere(pfield)`
   (⟨pfield := here⟩) disambiguates `p->pfield := q` when q already points to the current node; `LOF` marks label

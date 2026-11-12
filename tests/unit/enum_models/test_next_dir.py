@@ -44,7 +44,7 @@ def test_predicted_internal_step_exists(engine: LabEngine) -> None:
 
 def test_every_arrival_is_linked(engine: LabEngine) -> None:
     """Each frame of a pair entered from the other node is linked to the frame that sent the lace there."""
-    for pair in engine.pairs:
+    for pair in engine.edges:
         parent, child, j = pair.parent, pair.child, pair.j
         links = list(linked_frames(parent, child, j))
         assert {c for _, c in links if child[c].prev == Up()} == set(frames_with_prev(child, Up()))

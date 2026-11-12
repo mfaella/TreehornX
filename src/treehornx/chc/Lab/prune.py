@@ -17,8 +17,8 @@ from treehornx.chc.Lab.clauses import consistency_constraint, label_constraints
 from treehornx.chc.Lab.system import LabCHC
 from treehornx.chc.smt import sexpr as sx
 from treehornx.chc.solvers.base import SolverError, Status, resolve_binary
-from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.Lab import Lab
+from treehornx.symbolic import Pair
 
 
 YICES = "yices-smt2"
@@ -98,9 +98,9 @@ class PairPruner:
 
     def prune(self, lab: LabCHC, timeout: int | None = None) -> PruneResult:
         """`lab` without the pairs whose constraints are unsatisfiable (unknown pairs are kept)."""
-        pairs = list(lab.tree.pairs)
+        pairs = list(lab.tree.edges)
         statuses = self.statuses([pair_constraints(lab, pair) for pair in pairs], timeout)
         kept = frozenset(pair for pair, status in zip(pairs, statuses) if status is not Status.UNSAT)
-        tree = replace(lab.tree, pairs=kept)
+        tree = replace(lab.tree, edges=kept)
         unknown = sum(status is Status.UNKNOWN for status in statuses)
         return PruneResult(replace(lab, tree=tree), len(pairs), len(pairs) - len(kept), unknown)

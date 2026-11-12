@@ -10,7 +10,7 @@ from typing_extensions import override
 F = TypeVar("F")
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, weakref_slot=True)
 class Label(Generic[F]):
     frame: F
     prefix: Label[F] | None = field(default=None)

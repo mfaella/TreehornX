@@ -27,7 +27,7 @@ from treehornx import ir
 from treehornx.chc.sdta.SDTAContext import SDTAContext
 from treehornx.chc.smt import sexpr as sx
 from treehornx.enum_models.core.InternedPool import InternedPool
-from treehornx.enum_models.core.Pair import Pair
+from treehornx.symbolic import Pair
 
 
 NS = TypeVar("NS")

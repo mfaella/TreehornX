@@ -54,9 +54,9 @@ from treehornx.chc.solvers import (
     Z3Solver,
 )
 from treehornx.chc.TreeShape import tree_shape_clauses, tree_shape_from_lab
-from treehornx.enum_models.core.SymbolicTree import NO_SPLIT, SymbolicTree, ordered
 from treehornx.feature_flags import FeatureFlags
 from treehornx.parser import SubsetError, parse_file
+from treehornx.symbolic.SymbolicTree import NO_SPLIT, SymbolicTree, ordered
 from treehornx.tui import console, critical, error, fail, info, progress, success, warning
 
 
@@ -181,7 +181,7 @@ def dump_system(
     _, body = clauses()
     if not smt2:
         sys.stdout.write(f"; CHC system for {check}\n")
-        write_smt2(body, sys.stdout, flags.clean_clause)
+        write_smt2(body, sys.stdout, flags.clean_clause, flags.merge_leaf_constants)
         sys.stdout.flush()
         return None
     file_path = Path(f"{function.name}_{check}.smt2")
@@ -189,7 +189,7 @@ def dump_system(
         folder.mkdir(parents=True, exist_ok=True)
         file_path = folder / file_path
     with file_path.open("w") as f:
-        write_smt2(body, f, flags.clean_clause)
+        write_smt2(body, f, flags.clean_clause, flags.merge_leaf_constants)
     if print_chc:
         sys.stdout.write(f"; CHC system for {check}\n")
         with file_path.open() as f:
@@ -289,8 +289,8 @@ def display_outcome(check: str, status: Status) -> None:
 def run_check(
     function: ir.Function,
     check: str,
-    tree: SymbolicTree[NS],
-    clauses_of: Callable[[SymbolicTree[NS]], Clauses],
+    tree: SymbolicTree[NS, int],
+    clauses_of: Callable[[SymbolicTree[NS, int]], Clauses],
     smt2: bool,
     print_chc: bool,
     solver: CHCSolver | None,
@@ -311,7 +311,7 @@ def run_check(
     console.print(f"{check} split in {format_timespan(elapsed)}: {len(tree.roots)} roots, {len(trees)} systems.")
     root_index = {root: i for i, root in enumerate(tree.roots)}
 
-    def root_ids(part: SymbolicTree[NS]) -> str:
+    def root_ids(part: SymbolicTree[NS, int]) -> str:
         return " ".join(map(str, sorted(root_index[root] for root in part.roots)))
 
     if smt2 or print_chc:
@@ -323,7 +323,7 @@ def run_check(
                 path = dump_system(function, f"{check}_group{g:03d}", clauses_of(part), smt2, print_chc, flags, folder)
                 if path is not None:
                     body = len(part.states - part.roots)
-                    rows.append([g, path.name, root_ids(part), body, len(part.pairs), *smt2_counts(path)])
+                    rows.append([g, path.name, root_ids(part), body, len(part.edges), *smt2_counts(path)])
             if folder is None:
                 return None
             folder.mkdir(parents=True, exist_ok=True)
@@ -354,7 +354,7 @@ def run_check(
         clauses = clauses_of(part)
         system, elapsed = progress(
             f"Creating the CHC system {g + 1}/{len(trees)} for {check}",
-            lambda: to_system(*clauses(), flags.clean_clause),
+            lambda: to_system(*clauses(), flags.clean_clause, flags.merge_leaf_constants),
         )
         stats.system_creation_elapsed_time[check] += elapsed
         status, elapsed = progress(f"Solving {check} {g + 1}/{len(trees)}", lambda: check_sat(solver, system, left))
@@ -396,7 +396,8 @@ def run_system(
 
     if solver is not None:
         system, elapsed = progress(
-            f"Creating the CHC system for {check}", lambda: to_system(*clauses(), flags.clean_clause)
+            f"Creating the CHC system for {check}",
+            lambda: to_system(*clauses(), flags.clean_clause, flags.merge_leaf_constants),
         )
         stats.system_creation_elapsed_time[check] = elapsed
         console.print(f"CHC system for {check} created in {format_timespan(elapsed)}.")
@@ -612,6 +613,14 @@ def verify_cmd(
             "--smt2 writes the systems into <function>_<check>_split<N>/",
         ),
     ] = 0,
+    merge_leaf_constants: Annotated[
+        bool,
+        typer.Option(
+            "--merge-leaf-constants",
+            help="with --clean-clause, in a clause without predicates in the body, merge the variables equal to the "
+            "same constant",
+        ),
+    ] = False,
     prune_pairs: Annotated[
         bool,
         typer.Option(
@@ -665,7 +674,7 @@ def verify_cmd(
         print_chc,
         solver,
         timeout,
-        FeatureFlags(clean_clause, split, prune_pairs),
+        FeatureFlags(clean_clause, split, merge_leaf_constants, prune_pairs),
         tree_shape,
         POST[post]() if post else None,
         pruner,

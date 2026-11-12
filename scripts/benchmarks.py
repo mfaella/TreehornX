@@ -30,10 +30,10 @@ from treehornx.chc.sdta.SDTAContext import (
 )
 from treehornx.chc.smt.sexpr import Application, CHCSystem, Clause
 from treehornx.chc.solvers import SolverError, Status, Z3Solver
-from treehornx.enum_models.core.SymbolicEngine import SymbolicEngine
 from treehornx.enum_models.Lab import LabEngine
 from treehornx.feature_flags import FeatureFlags
 from treehornx.parser import parse_file
+from treehornx.symbolic import SymbolicEngine
 
 
 ROOT = Path(__file__).parent.parent
@@ -115,7 +115,7 @@ def enumeration_timer() -> Iterator[tuple[defaultdict[type, float], dict[int, An
     labels: dict[int, Any] = {}
     original = SymbolicEngine.fix
 
-    def timed_fix(self: SymbolicEngine[Any]) -> Any:
+    def timed_fix(self: SymbolicEngine[Any, Any]) -> Any:
         start = time.perf_counter()
         try:
             return original(self)

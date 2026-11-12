@@ -15,7 +15,8 @@ Unlike the paper, a trail does not walk the lace frame by frame: like the rewind
 It ends where p points to the node (`points_here`). Every step propagates all the taints it can at once, and
 fails (returns None) when the taints do not change. Taints are merged by join in ⊥ < ⊤ < ⊤+.
 
-`finals` keeps the saturated labels and pairs (no step changes them) that compose a whole tree from a root.
+`finals` (the generic one of `SymbolicEngine`) keeps the labels and pairs on which no step changes the taints and
+that compose a whole tree from a root.
 """
 
 from dataclasses import dataclass, replace
@@ -25,40 +26,57 @@ from typing import Iterable, Iterator
 from typing_extensions import override
 
 from treehornx.enum_models.core.Dir import Down, Up
-from treehornx.enum_models.core.Pair import Pair
-from treehornx.enum_models.core.SymbolicEngine import SymbolicEngine
-from treehornx.enum_models.core.SymbolicTree import SymbolicTree
 from treehornx.enum_models.Lab.ExitCode import ExitCode
 from treehornx.enum_models.Lab.helpers import down_links, is_pfield_implicit, points_here, up_links
 from treehornx.enum_models.Lab.initial import is_initial
 from treehornx.enum_models.Lab.Lab import Lab
 from treehornx.enum_models.Lab.LabEngine import LabEngine
 from treehornx.enum_models.Taint.BoolPlus import BoolPlus
-from treehornx.enum_models.Taint.finals import saturated_finals
 from treehornx.enum_models.Taint.helpers import field_trails, trail_origin
-from treehornx.enum_models.Taint.TaintedLabel import TaintedLabel
+from treehornx.enum_models.Taint.TaintedLabel import TaintedLabel, TaintedLabelFactory, intern_tainted_label
 from treehornx.enum_models.Taint.TaintPtr import Key, TaintPtr
+from treehornx.symbolic import Edge, Pair, SymbolicEngine, SymbolicTree
 
 
 @dataclass(init=False)
-class TaintingEngine(SymbolicEngine[TaintedLabel]):
+class TaintingEngine(SymbolicEngine[TaintedLabel, int]):
     lab_engine: LabEngine
+    label_factory: TaintedLabelFactory
 
-    def __init__(self, lab_engine: LabEngine, lab_tree: SymbolicTree[Lab] | None = None):
+    def __init__(
+        self,
+        lab_engine: LabEngine,
+        lab_tree: SymbolicTree[Lab, int] | None = None,
+        label_factory: TaintedLabelFactory = intern_tainted_label,
+    ):
         """`lab_tree` (the final labels and pairs of `lab_engine` by default) is the Lab part to taint, possibly
-        with some pairs removed (`chc/Lab/prune.py`)."""
+        with some pairs removed (`chc/Lab/prune.py`). `label_factory` builds every tainted label of the engine
+        (interning them by default)."""
         self.lab_engine = lab_engine
+        self.label_factory = label_factory
         final_labels, final_pairs = self.lab_finals(lab_tree)
         lifted = {lab: self.initial(lab) for lab in final_labels}
-        init_pairs = {Pair(lifted[pair.parent], lifted[pair.child], pair.j) for pair in final_pairs}
-        super().__init__(k=lab_engine.k, m=lab_engine.m, initial_pairs=init_pairs, start_states=set(lifted.values()))
+        init_pairs = {Edge(lifted[pair.parent], lifted[pair.child], pair.j) for pair in final_pairs}
+        super().__init__(
+            initial_edges=init_pairs,
+            start_states=set(lifted.values()),
+            child_indexes=set(range(lab_engine.k + lab_engine.m)),
+        )
 
-    def lab_finals(self, lab_tree: SymbolicTree[Lab] | None = None) -> tuple[set[Lab], set[Pair[Lab]]]:
+    @property
+    def k(self) -> int:
+        return self.lab_engine.k
+
+    @property
+    def m(self) -> int:
+        return self.lab_engine.m
+
+    def lab_finals(self, lab_tree: SymbolicTree[Lab, int] | None = None) -> tuple[set[Lab], set[Pair[Lab]]]:
         """The labels and pairs of `lab_tree` (the final ones of the Lab engine by default) without the runs ending
         in ERR, OOM or label overflow: the tree-shape and postcondition checks assume memory safety, so these runs are
         unreachable."""
         finals = self.lab_engine.finals() if lab_tree is None else lab_tree
-        labels, pairs = finals.states, finals.pairs
+        labels, pairs = finals.states, finals.edges
         kept = {lab for lab in labels if self.lab_engine.label_exit(lab) in (ExitCode.N, ExitCode.C)}
         return kept, {pair for pair in pairs if pair.parent in kept and pair.child in kept}
 
@@ -78,7 +96,7 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
         taint_ptr = TaintPtr()
         if self.lab_engine.is_end_of_lace(lab) and not lab.frame.isnil[self.root]:
             taint_ptr = taint_ptr.set((self.root, len(lab)), BoolPlus.TopPlus)
-        return TaintedLabel(BoolPlus.Bottom, taint_ptr, lab)
+        return self.label_factory(BoolPlus.Bottom, taint_ptr, lab)
 
     # -----------------------------------------------------------------------
     # SymbolicEngine interface
@@ -103,7 +121,7 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
             if new_node == taint_node and new_ptr == taint_ptr:
                 break
             taint_node, taint_ptr = new_node, new_ptr
-        new_label = TaintedLabel(taint_node, taint_ptr, sigma)
+        new_label = self.label_factory(taint_node, taint_ptr, sigma)
         if new_label == label:
             return None
         return [new_label]
@@ -156,7 +174,7 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
             taint_ptr = taint_ptr.join(key, v)
         if taint_ptr == parent.taint_ptr:
             return None
-        return replace(pair, parent=replace(parent, taint_ptr=taint_ptr))
+        return replace(pair, parent=self.label_factory(parent.taint_node, taint_ptr, parent.lab))
 
     @override
     def step_down(self, pair: Pair[TaintedLabel]) -> Pair[TaintedLabel] | None:
@@ -169,43 +187,15 @@ class TaintingEngine(SymbolicEngine[TaintedLabel]):
         # T4: pointer tainting propagation
         for key, v in self.jumps_down(pair):
             taint_ptr = taint_ptr.join(key, v)
-        new_child = TaintedLabel(taint_node, taint_ptr, child.lab)
+        new_child = self.label_factory(taint_node, taint_ptr, child.lab)
         if new_child == child:
             return None
         return replace(pair, child=new_child)
 
-    def is_saturated_l(self, label: TaintedLabel) -> bool:
-        """No internal step changes the taints of label."""
-        return self.step_int(label) is None
-
-    def is_saturated_p(self, pair: Pair[TaintedLabel]) -> bool:
-        """Both labels are saturated and no step across the pair changes their taints."""
-        return (
-            self.is_saturated_l(pair.parent)
-            and self.is_saturated_l(pair.child)
-            and self.step_up(pair) is None
-            and self.step_down(pair) is None
-        )
-
     @override
-    def consistent(self, pair: Pair[TaintedLabel]) -> bool:
-        return True
-
-    @override
-    def is_end_of_computation(self, state: TaintedLabel) -> bool:
-        return self.lab_engine.is_end_of_lace(state.lab)
+    def is_leaf(self, state: TaintedLabel) -> bool:
+        return self.lab_engine.is_leaf(state.lab)
 
     @override
     def is_root(self, state: TaintedLabel) -> bool:
         return is_initial(state.lab)
-
-    @override
-    def finals(self) -> SymbolicTree[TaintedLabel]:
-        """The saturated labels and pairs composing a whole tree from a root (see `saturated_finals`)."""
-        sat_pairs = {pair for pair in self.pairs if self.is_saturated_p(pair)}
-        states = [state for state in self.states if self.is_saturated_l(state)]
-        return self.make_tree(
-            *saturated_finals(
-                states, sat_pairs, self.pair_parent_index, self.pair_child_index, self.is_root, self.k + self.m
-            )
-        )

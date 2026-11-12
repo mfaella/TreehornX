@@ -20,12 +20,12 @@ Every merge is an error: both trails come from seeds of tainted nodes or from pÌ
 from collections import Counter
 from enum import Enum
 
-from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.Lab.helpers import last_upd, points_here
 from treehornx.enum_models.Taint.helpers import field_trails
 from treehornx.enum_models.Taint.TaintedLabel import TaintedLabel
 from treehornx.enum_models.Taint.TaintingEngine import TaintingEngine
 from treehornx.enum_models.Taint.TaintPtr import Key
+from treehornx.symbolic import Pair
 
 
 class ShapeError(Enum):

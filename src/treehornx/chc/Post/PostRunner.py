@@ -23,10 +23,10 @@ from treehornx.chc.pre.runner import disjunction
 from treehornx.chc.sdta.SDTAContext import SDTAContext
 from treehornx.chc.smt import sexpr as sx
 from treehornx.chc.TreeShape.TreeShapeRunner import TreeShapeRunner
-from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.Lab.helpers import get_pfield_ptr, points_here
 from treehornx.enum_models.Taint import BoolPlus, TaintedLabel
 from treehornx.enum_models.Taint.helpers import child_is_struct
+from treehornx.symbolic import Edge
 
 
 @dataclass
@@ -83,7 +83,7 @@ class PostRunner(TreeShapeRunner):
         self, parent: TaintedLabel, child: TaintedLabel, j: int, parent_prefix: str, child_prefix: str
     ) -> list[sx.SExpr]:
         constraints = super().node_consistency(parent, child, j, parent_prefix, child_prefix)
-        sym, pair = self.post_sym, Pair(parent, child, j)
+        sym, pair = self.post_sym, Edge(parent, child, j)
         # S2: the trails jumping across the pair
         for child_key, parent_key, _ in self.engine.links_up(pair):
             constraints += equal_states(sym.trail(parent_key, parent_prefix), sym.trail(child_key, child_prefix))

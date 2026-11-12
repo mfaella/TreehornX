@@ -4,9 +4,6 @@ from typing import Iterable
 
 from treehornx import ir
 from treehornx.chc.core import ExitCodeKind
-from treehornx.enum_models.core.Pair import Pair
-from treehornx.enum_models.core.SymbolicEngine import Transition
-from treehornx.enum_models.core.SymbolicTree import SymbolicTree
 from treehornx.enum_models.Lab import (
     ERR,
     OOM,
@@ -17,6 +14,8 @@ from treehornx.enum_models.Lab import (
     initial_pairs,
     start_labels,
 )
+from treehornx.symbolic import Pair, Transition
+from treehornx.symbolic.SymbolicTree import SymbolicTree
 
 
 @dataclass(frozen=True)
@@ -86,9 +85,9 @@ class KnittedTrees:
         return iter(self._labels)
 
     def pairs(self) -> Iterable[Pair[Frame]]:
-        return iter(self.engine.pairs)
+        return iter(self.engine.edges)
 
-    def steps(self) -> Iterable[Transition[Frame]]:
+    def steps(self) -> Iterable[Transition[Lab, int]]:
         for transitions in self.engine.transitions.values():
             yield from transitions
 
@@ -96,9 +95,9 @@ class KnittedTrees:
         return self._ids[lab]
 
     def pairs_by_parent_and_child_key(self, parent: Lab, j: int) -> Iterable[Pair[Frame]]:
-        return (p for p in self.engine.pair_parent_index[parent] if p.j == j)
+        return (p for p in self.engine.edge_parent_index[parent] if p.j == j)
 
-    def finals(self) -> SymbolicTree[Lab]:
+    def finals(self) -> SymbolicTree[Lab, int]:
         """Labels and pairs connected to the end of some lace."""
         return self.engine.finals()
 

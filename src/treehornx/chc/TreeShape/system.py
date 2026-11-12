@@ -4,9 +4,9 @@ from dataclasses import dataclass
 
 from treehornx import ir
 from treehornx.chc.Lab.system import LabCHC, build_lab
-from treehornx.enum_models.core.Pair import Pair
-from treehornx.enum_models.core.SymbolicTree import SymbolicTree
 from treehornx.enum_models.Taint import TaintedLabel, TaintingEngine
+from treehornx.symbolic import Pair
+from treehornx.symbolic.SymbolicTree import SymbolicTree
 
 
 def enumerate_taints(lab: LabCHC) -> TaintingEngine:
@@ -22,7 +22,7 @@ class TreeShapeCHC:
 
     lab: LabCHC
     engine: TaintingEngine
-    tree: SymbolicTree[TaintedLabel]
+    tree: SymbolicTree[TaintedLabel, int]
 
     @property
     def labels(self) -> list[TaintedLabel]:
@@ -30,7 +30,7 @@ class TreeShapeCHC:
 
     @property
     def pairs(self) -> list[Pair[TaintedLabel]]:
-        return list(self.tree.pairs)
+        return list(self.tree.edges)
 
 
 def tree_shape_from_lab(lab: LabCHC) -> TreeShapeCHC:

@@ -9,11 +9,11 @@ from typing import Iterable
 
 from treehornx import ir
 from treehornx.enum_models.core.Dir import Internal
-from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.Lab.Event import NOP, Here
 from treehornx.enum_models.Lab.Frame import Frame
-from treehornx.enum_models.Lab.Lab import Lab
+from treehornx.enum_models.Lab.Lab import Lab, LabFactory, intern_lab
 from treehornx.enum_models.Lab.next_dir import predict_next_dir
+from treehornx.symbolic import Edge, Pair
 
 
 def _first_frame(num_ptrs: int, active: bool, active_child: tuple[bool, ...]) -> Frame:
@@ -36,7 +36,7 @@ def input_shapes(function: ir.Function) -> Iterable[tuple[bool, ...]]:
     return product(*(((True, False) if node.is_child_field(j) else (False,)) for j in range(node.k)))
 
 
-def backbone_labels(function: ir.Function, m: int) -> Iterable[Lab]:
+def backbone_labels(function: ir.Function, m: int, factory: LabFactory = intern_lab) -> Iterable[Lab]:
     """Labels of non-root nodes before the lace reaches them (CHC I).
 
     first_frame(f) = f.active ∧ ∧_{j∈[k+1,k+m]} ¬f.active_child_j ∨
@@ -48,11 +48,11 @@ def backbone_labels(function: ir.Function, m: int) -> Iterable[Lab]:
     """
     k, num_ptrs = function.node.k, len(function.pointer_vars)
     for named in input_shapes(function):
-        yield Lab(_first_frame(num_ptrs, True, named + (False,) * m))
-    yield Lab(_first_frame(num_ptrs, False, (False,) * k + (True,) * m))
+        yield factory(_first_frame(num_ptrs, True, named + (False,) * m), None)
+    yield factory(_first_frame(num_ptrs, False, (False,) * k + (True,) * m), None)
 
 
-def start_labels(function: ir.Function, m: int, n: int) -> Iterable[Lab]:
+def start_labels(function: ir.Function, m: int, n: int, factory: LabFactory = intern_lab) -> Iterable[Lab]:
     """Labels of the root holding the first frame of the lace (CHC II, predicate start).
 
     The first frame copies active and active_child from the second one (Section 3.1), the
@@ -88,10 +88,10 @@ def start_labels(function: ir.Function, m: int, n: int) -> Iterable[Lab]:
         )
     )
     for f2 in second_frames:
-        first = Lab(_first_frame(num_ptrs, f2.active, f2.active_child))
+        first = factory(_first_frame(num_ptrs, f2.active, f2.active_child), None)
         second = f2.to_mut()
         second.next = predict_next_dir(function, m, n, first, second)
-        yield Lab(second.to_frozen(), prefix=first)
+        yield factory(second.to_frozen(), first)
 
 
 def is_initial(sigma: Lab) -> bool:
@@ -127,4 +127,4 @@ def initial_pairs(
         for tau in backbones:
             for j in range(k + m):
                 if consistent_first_frames(tau, j, sigma, k):
-                    yield Pair(sigma, tau, j)
+                    yield Edge(sigma, tau, j)

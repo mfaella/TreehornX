@@ -6,14 +6,14 @@ from pathlib import Path
 from typing import Iterable
 
 import pytest
+from typing_extensions import override
 
 from treehornx.chc.Lab import enumerate_labels
-from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.Lab.initial import is_initial
 from treehornx.enum_models.Lab.Lab import Lab
 from treehornx.enum_models.Taint import BoolPlus, TaintedLabel, TaintingEngine, TaintPtr
-from treehornx.enum_models.Taint.finals import saturated_finals
 from treehornx.parser import parse_file
+from treehornx.symbolic import Edge, Pair, SymbolicEngine
 
 
 C_FILES = Path(__file__).parents[2] / "integration" / "c_files"
@@ -96,13 +96,11 @@ def test_only_tainted_ptr_keys_are_stored(engine: TaintingEngine) -> None:
     assert all(v for state in engine.states for _, v in state.taint_ptr.items())
 
 
-def test_saturation(engine: TaintingEngine) -> None:
-    """Every saturated pair is made of saturated labels; the lifted initial labels are not all saturated."""
-    assert any(engine.is_saturated_p(pair) for pair in engine.pairs)
-    for pair in engine.pairs:
-        if engine.is_saturated_p(pair):
-            assert engine.is_saturated_l(pair.parent) and engine.is_saturated_l(pair.child)
-    assert not all(engine.is_saturated_l(state) for state in engine.states)
+def test_steppable(engine: TaintingEngine) -> None:
+    """Some pairs take no step; some labels (the lifted initial labels, at least) take one."""
+    assert any(pair not in engine.steppable for pair in engine.edges)
+    assert any(state in engine.steppable for state in engine.states)
+    assert engine.steppable <= engine.states | engine.edges
 
 
 # ---------------------------------------------------------------------------
@@ -110,24 +108,53 @@ def test_saturation(engine: TaintingEngine) -> None:
 # ---------------------------------------------------------------------------
 
 
+class ToyEngine(SymbolicEngine[str, int]):
+    """An engine with no steps over a fixed graph: the roots are given, the leaves are the other states with no
+    edges as parent."""
+
+    def __init__(self, edges: set[Pair[str]], roots: set[str], arity: int):
+        super().__init__(initial_edges=edges, start_states=set(), child_indexes=set(range(arity)))
+        self.roots = roots
+
+    @override
+    def step_up(self, edge: Pair[str], /) -> Pair[str] | None:
+        return None
+
+    @override
+    def step_down(self, edge: Pair[str], /) -> Pair[str] | None:
+        return None
+
+    @override
+    def step_int(self, state: str, /) -> Iterable[str] | None:
+        return None
+
+    @override
+    def is_leaf(self, s: str, /) -> bool:
+        return s not in self.roots and not self.edge_parent_index.get(s)
+
+    @override
+    def is_root(self, s: str, /) -> bool:
+        return s in self.roots
+
+
 def run_finals(
     edges: list[tuple[str, str, int]],
     saturated: set[str],
     unsaturated_pairs: frozenset[Pair[str]] = frozenset(),
     arity: int | None = None,
+    roots: frozenset[str] = frozenset({"R"}),
 ) -> tuple[set[str], set[Pair[str]]]:
-    """saturated_finals on a toy graph rooted in "R": a pair is saturated when both its states are. The arity is
-    one more than the largest child index of the edges by default."""
-    pairs = {Pair(a, b, j) for a, b, j in edges}
-    parent_index: defaultdict[str, set[Pair[str]]] = defaultdict(set)
-    child_index: defaultdict[str, set[Pair[str]]] = defaultdict(set)
-    for pair in pairs:
-        parent_index[pair.parent].add(pair)
-        child_index[pair.child].add(pair)
-    sat_pairs = {p for p in pairs if p.parent in saturated and p.child in saturated} - unsaturated_pairs
+    """`finals` on a toy graph rooted in `roots`: the states out of `saturated` and the pairs in
+    `unsaturated_pairs` are steppable. The arity is one more than the largest child index of the edges by
+    default."""
+    pairs = {Edge(a, b, j) for a, b, j in edges}
+    states = {s for pair in pairs for s in (pair.parent, pair.child)}
     if arity is None:
         arity = 1 + max(j for _, _, j in edges)
-    return saturated_finals(saturated, sat_pairs, parent_index, child_index, lambda s: s == "R", arity)
+    engine = ToyEngine(pairs, set(roots), arity)
+    engine.steppable |= (states - saturated) | set(unsaturated_pairs)
+    finals = engine.finals()
+    return set(finals.states), set(finals.edges)
 
 
 def test_finals_cycle_falls_with_its_only_support() -> None:
@@ -137,10 +164,25 @@ def test_finals_cycle_falls_with_its_only_support() -> None:
     assert pairs == set()
 
 
-def test_finals_accept_an_infinite_tail() -> None:
+def test_finals_reject_an_infinite_tail() -> None:
+    """T is supported only by itself: no finite tree, so T and R fall."""
     states, pairs = run_finals([("R", "T", 0), ("T", "T", 0)], {"R", "T"})
-    assert states == {"R", "T"}
-    assert pairs == {Pair("R", "T", 0), Pair("T", "T", 0)}
+    assert states == set()
+    assert pairs == set()
+
+
+def test_finals_keep_a_cycle_with_a_base_case() -> None:
+    """A is final through the leaf L; the self-loop of A is kept too."""
+    states, pairs = run_finals([("R", "A", 0), ("A", "A", 0), ("A", "L", 0)], {"R", "A", "L"})
+    assert states == {"R", "A", "L"}
+    assert pairs == {Edge("R", "A", 0), Edge("A", "A", 0), Edge("A", "L", 0)}
+
+
+def test_finals_do_not_depend_on_the_path() -> None:
+    """B fails while A is on the path, but Z -> B -> A -> L is a finite tree: B is final from Z."""
+    edges = [("R", "A", 0), ("Z", "B", 0), ("A", "B", 0), ("A", "L", 0), ("B", "A", 0)]
+    states, _ = run_finals(edges, {"R", "Z", "A", "B", "L"}, roots=frozenset({"R", "Z"}))
+    assert states == {"R", "Z", "A", "B", "L"}
 
 
 def test_finals_leaves_and_unreachable_states() -> None:
@@ -149,7 +191,7 @@ def test_finals_leaves_and_unreachable_states() -> None:
 
 
 def test_finals_slot_with_only_unsaturated_pairs_removes_the_parent() -> None:
-    states, _ = run_finals([("R", "A", 0), ("R", "B", 1)], {"R", "A", "B"}, frozenset({Pair("R", "B", 1)}))
+    states, _ = run_finals([("R", "A", 0), ("R", "B", 1)], {"R", "A", "B"}, frozenset({Edge("R", "B", 1)}))
     assert states == set()
 
 
@@ -163,16 +205,17 @@ def test_finals_parent_missing_a_child_index_falls_with_its_ancestors() -> None:
 def test_finals_one_supported_alternative_is_enough() -> None:
     states, pairs = run_finals([("R", "A", 0), ("R", "D", 0)], {"R", "A"})
     assert states == {"R", "A"}
-    assert pairs == {Pair("R", "A", 0)}
+    assert pairs == {Edge("R", "A", 0)}
 
 
 def test_engine_finals(engine: TaintingEngine) -> None:
     finals = engine.finals()
-    states, pairs = finals.states, finals.pairs
+    states, pairs = finals.states, finals.edges
     assert any(state.taint_node is TopPlus for state in states)
     assert any(not state.lab[1].active and state.lab.frame.active and state.taint_node for state in states)
     for pair in pairs:
-        assert engine.is_saturated_p(pair)
+        assert pair not in engine.steppable
+        assert pair.parent not in engine.steppable and pair.child not in engine.steppable
         assert pair.parent in states and pair.child in states
 
 
@@ -225,11 +268,11 @@ def saturate(engine: TaintingEngine, tree: Tree) -> tuple[list[TaintedLabel], li
                 nodes[i] = next(iter(internal))
                 changed = True
         for a, b, j in edges:
-            up = engine.step_up(Pair(nodes[a], nodes[b], j))
+            up = engine.step_up(Edge(nodes[a], nodes[b], j))
             if up is not None:
                 nodes[a] = up.parent
                 changed = True
-            down = engine.step_down(Pair(nodes[a], nodes[b], j))
+            down = engine.step_down(Edge(nodes[a], nodes[b], j))
             if down is not None:
                 nodes[b] = down.child
                 changed = True
@@ -238,10 +281,10 @@ def saturate(engine: TaintingEngine, tree: Tree) -> tuple[list[TaintedLabel], li
 
 def test_engine_finals_contain_every_saturated_tree(engine: TaintingEngine) -> None:
     finals = engine.finals()
-    states, pairs = finals.states, finals.pairs
+    states, pairs = finals.states, finals.edges
     trees = list(concrete_trees(engine, depth=8))
     assert trees
     for tree in trees:
         nodes, edges = saturate(engine, tree)
         assert all(node in states for node in nodes)
-        assert all(Pair(nodes[a], nodes[b], j) in pairs for a, b, j in edges)
+        assert all(Edge(nodes[a], nodes[b], j) in pairs for a, b, j in edges)

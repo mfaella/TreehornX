@@ -15,10 +15,10 @@ from treehornx.chc.Lab.clauses import consistency_constraint, label_constraints
 from treehornx.chc.Lab.symbols import ChcLabUtils
 from treehornx.chc.pre.runner import BotUpAutomataRunner
 from treehornx.chc.smt import sexpr as sx
-from treehornx.enum_models.core.Pair import Pair
 from treehornx.enum_models.Lab.initial import is_initial
 from treehornx.enum_models.Taint import TaintedLabel, TaintingEngine
 from treehornx.enum_models.Taint.shape import label_errors, pair_errors
+from treehornx.symbolic import Edge
 
 
 @dataclass
@@ -58,7 +58,7 @@ class TreeShapeRunner(BotUpAutomataRunner[TaintedLabel]):
     def is_pair_error(
         self, parent: TaintedLabel, child: TaintedLabel, j: int, parent_prefix: str, child_prefix: str
     ) -> sx.SExpr:
-        return sx.Constant(bool(pair_errors(self.engine, Pair(parent, child, j))))
+        return sx.Constant(bool(pair_errors(self.engine, Edge(parent, child, j))))
 
     @override
     def is_input_node(self, label: TaintedLabel) -> bool:
