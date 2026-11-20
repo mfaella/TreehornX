@@ -13,29 +13,24 @@ dependencies = [
     "frozendict",
     "typing-extensions",
     "loguru",
+    "networkx",
     # tui
     "typer",
     "rich",
     "humanfriendly",
-    "types-humanfriendly",
-    "func-timeout",
-    # report generation
-    "pydot",
-    "graphviz",
     # parsing
     "pycparser",
-    "antlr4-python3-runtime",
-    "networkx",
-    "types-networkx>=3.6.1.20260321",
-    "z3-solver",
 ]
 
 [dependency-groups]
 dev = [
     "pyinstrument>=5.1.2; platform_python_implementation == 'CPython'",  # C extension, no PyPy build
     "ruff",
-    "pylint",
+    "isort",
     "pyright",
+    "types-humanfriendly",
+    "types-networkx>=3.6.1.20260321",
+    "z3-solver",  # tests/unit/analysis/chc/test_psi_rb.py
     "pytest",
     "pytest-cov",
     "taskipy",
@@ -43,14 +38,10 @@ dev = [
     "sphinx-rtd-theme",
     "sphinx-autodoc-typehints",
     "snakeviz>=2.2.2",
-    "antlr4-tools"
 ]
 
 [project.scripts]
 treehornx = "treehornx.main:main"
-
-[tool.setuptools.packages.find]
-where = ["src"]
 
 [build-system]
 requires = ["uv_build>=0.8.5,<0.9.0"]
@@ -60,12 +51,12 @@ build-backend = "uv_build"
 minversion = "6.0"
 addopts = "-ra -q"
 testpaths = ["tests"]
-pythonpath = ["src/treehornx"]
+pythonpath = ["tests"]
 markers = ["slow: verification runs taking minutes (deselect with -m \"not slow\")"]
 
 [tool.ruff]
 target-version = "py311"
-src = ["src, tests"]
+src = ["src", "tests"]
 line-length = 120
 indent-width = 4
 
@@ -105,9 +96,8 @@ color_output = true
 [tool.pyright]
 stubPath = "typings"
 include = ["src", "tests"]
-exclude = ["src/treehornx/chc/pplang"]
 pythonVersion = "3.11"
-extraPaths = ["src"]
+extraPaths = ["src", "tests"]
 typeCheckingMode = "strict"
 reportMissingImports = true
 reportMissingModuleSource = true
@@ -162,7 +152,6 @@ reportInvalidStubStatement = true
 reportInvalidStringEscapeSequence = true
 
 [tool.taskipy.tasks]
-generate-pplang = "antlr4 -Dlanguage=Python3 -visitor -no-listener -o src/treehornx/chc/ppcompiler/ grammar/PrePostLang.g4"
 unit-test = "pytest"
 coverage = "coverage run -m pytest --cov=src/treehornx --cov-report=term-missing --cov-report=html --cov-fail-under=85 --cov-branch tests/unit"
 format = "ruff format && isort . "
