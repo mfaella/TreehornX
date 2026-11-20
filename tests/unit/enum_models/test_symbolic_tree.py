@@ -10,17 +10,17 @@ included in every body: it goes into the smallest maximal one, {E}."""
 
 import pytest
 
-from treehornx.symbolic import Edge
-from treehornx.symbolic.SymbolicTree import SymbolicTree, ordered
+from treehornx.analysis.engines import Edge
+from treehornx.analysis.engines.SymbolicTree import SymbolicTree, ordered
 
 
 EDGES = [("R1", "A"), ("R2", "A"), ("A", "B"), ("R3", "B"), ("R6", "C"), ("C", "B"), ("C", "D"), ("R5", "E")]
 PAIRS = frozenset(Edge(parent, child, 0) for parent, child in EDGES)
 ROOTS = frozenset({"R1", "R2", "R3", "R4", "R5", "R6"})
-TREE = SymbolicTree(PAIRS, ROOTS)
+TREE = SymbolicTree(PAIRS, ROOTS, 1, frozenset({"B", "D", "E"}))
 
 
-def roots_of(trees: set[SymbolicTree[str, int]]) -> set[frozenset[str]]:
+def roots_of(trees: set[SymbolicTree[str]]) -> set[frozenset[str]]:
     return {tree.roots for tree in trees}
 
 
@@ -35,7 +35,7 @@ def test_split_by_root() -> None:
     trees = TREE.split_by_root()
     assert roots_of(trees) == {frozenset({root}) for root in ROOTS}
     (r6,) = (tree for tree in trees if tree.roots == {"R6"})
-    assert r6.states == {"R6", "B", "C", "D"}
+    assert r6.labels == {"R6", "B", "C", "D"}
     assert r6.edges == {Edge("R6", "C", 0), Edge("C", "B", 0), Edge("C", "D", 0)}
 
 
@@ -53,7 +53,7 @@ def test_split_by_partial_body() -> None:
     trees = TREE.split_by_partial_body()
     assert roots_of(trees) == {frozenset({"R1", "R2", "R3"}), frozenset({"R4", "R5"}), frozenset({"R6"})}
     (abr,) = (tree for tree in trees if "R1" in tree.roots)
-    assert abr.states == {"R1", "R2", "R3", "A", "B"}
+    assert abr.labels == {"R1", "R2", "R3", "A", "B"}
     assert abr.edges == {Edge("R1", "A", 0), Edge("R2", "A", 0), Edge("A", "B", 0), Edge("R3", "B", 0)}
 
 

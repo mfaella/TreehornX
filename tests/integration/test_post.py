@@ -3,7 +3,7 @@ program is memory safe and builds a tree (checked by `test_tree_shape.py` and `t
 
 import pytest
 
-from treehornx.chc.solvers import Status
+from treehornx.analysis.chc.solvers import Status
 from treehornx.main import PostType, PreType
 
 from .config import TestConfig, params, run

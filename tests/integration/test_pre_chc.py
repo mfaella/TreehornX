@@ -6,8 +6,7 @@ The system is sat when no input accepted by the precondition leads to a null-poi
 
 import pytest
 
-from treehornx.chc.solvers import Status
-from treehornx.feature_flags import FeatureFlags
+from treehornx.analysis.chc.solvers import Status
 
 from .config import TestConfig, params, run
 
@@ -26,7 +25,6 @@ CASES = params(
         pre="avl",
         solver="eldarica",
         timeout=1200,
-        flags=FeatureFlags(clean_clause=True),
         marks=(pytest.mark.slow,),
     ),
     # safe for every input, the precondition must not change the result
@@ -40,7 +38,6 @@ CASES = params(
         pre="rb",
         solver="eldarica",
         timeout=1200,
-        flags=FeatureFlags(clean_clause=True),
     ),
 )
 
@@ -48,7 +45,7 @@ CASES = params(
 WITHOUT_PRECONDITION = params(
     TestConfig("sll_sorted_safe_first_lt_last", UNSAT),
     TestConfig("bst_safe_min_lt_max", UNSAT),
-    TestConfig("avl_safe_insert_bal", UNSAT, m=1, flags=FeatureFlags(True)),
+    TestConfig("avl_safe_insert_bal", UNSAT, m=1),
 )
 
 

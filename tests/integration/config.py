@@ -15,10 +15,10 @@ from typing import Callable, Literal, TypeAlias
 import pytest
 from _pytest.mark import ParameterSet
 
-from treehornx.chc import Post, TreeShape, pre
-from treehornx.chc.core import ExitCodeKind
-from treehornx.chc.smt.sexpr import CHCSystem
-from treehornx.chc.solvers import CHCSolver, EldaricaSolver, GolemSolver, PortfolioSolver, Status, Z3Solver
+from treehornx.analysis.chc import Post, TreeShape, pre
+from treehornx.analysis.chc.core import ExitCodeKind
+from treehornx.analysis.chc.system import CHCSystem
+from treehornx.analysis.chc.solvers import CHCSolver, EldaricaSolver, GolemSolver, PortfolioSolver, Status, Z3Solver
 from treehornx.feature_flags import FeatureFlags
 from treehornx.main import DEFAULT_N, POST, PRE, PostType, PreType, with_parent_field
 from treehornx.parser import parse_file

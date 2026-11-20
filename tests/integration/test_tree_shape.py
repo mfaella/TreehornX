@@ -4,10 +4,10 @@ to an output reachable from the root that is not a tree. Every program here is m
 
 import pytest
 
-from treehornx.chc import TreeShape
-from treehornx.chc.solvers import Status
-from treehornx.enum_models.Lab.initial import is_initial
-from treehornx.enum_models.Taint import BoolPlus
+from treehornx.analysis.chc import TreeShape
+from treehornx.analysis.chc.solvers import Status
+from treehornx.enum_models.labels import is_initial
+from treehornx.enum_models.tainting import BoolPlus
 from treehornx.parser import parse_file
 
 from .config import C_FILES, TestConfig, params, run

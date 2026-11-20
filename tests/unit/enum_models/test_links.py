@@ -4,9 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from treehornx.chc.Lab import enumerate_labels
-from treehornx.enum_models.core.Dir import Up
-from treehornx.enum_models.Lab import Here, LabEngine, Rewind
+from treehornx.enum_models.frame import Here, Rewind, Up
+from treehornx.enum_models.LabEngine import LabEngine
 from treehornx.parser import parse_file
 
 
@@ -17,7 +16,9 @@ N = 24
 @pytest.fixture(scope="module")
 def engine() -> LabEngine:
     function = parse_file(str(C_FILES / "bst_safe_reenter_child.c"))
-    return enumerate_labels(function, function.node.k, 0, N)
+    engine = LabEngine(function.node.k, 0, n=N, function=function)
+    engine.whole()
+    return engine
 
 
 def pointer(engine: LabEngine, name: str) -> int:
@@ -30,7 +31,7 @@ def test_reentering_child_does_not_flag_its_own_update(engine: LabEngine) -> Non
     y = pointer(engine, "y")
     reentries = [
         label[c + 1]
-        for label in engine.states
+        for label in (state.lab for state in engine._states)
         for c in range(2, len(label))
         if label[c].event == Here(y) and label[c].prev == Up() and label[c].next == Up() and label[c + 1].prev == Up()
     ]
@@ -42,7 +43,7 @@ def test_reentering_child_does_not_flag_its_own_update(engine: LabEngine) -> Non
 def test_rewind_for_y_stops_in_the_child(engine: LabEngine) -> None:
     """d = y->data finds y in L without rewinding out of it again."""
     y = pointer(engine, "y")
-    for label in engine.states:
+    for label in (state.lab for state in engine._states):
         frames = list(label)
         for c, f in enumerate(frames[:-1], start=1):
             if f.event == Here(y):

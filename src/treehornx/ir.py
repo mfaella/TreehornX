@@ -20,7 +20,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
-from typing import Iterator, List, Optional, Tuple, Union
+from functools import cached_property
+from typing import Iterator, List, Tuple, Union
+
+from typing_extensions import override
 
 
 # --------------------------------------------------------------------------
@@ -32,6 +35,7 @@ class DataType(Enum):
     INT = "int"
     BOOL = "bool"
 
+    @override
     def __str__(self) -> str:
         return self.value
 
@@ -316,12 +320,7 @@ class NodeStruct:
 
     def is_child_field(self, fid: int) -> bool:
         """Whether the pointer field `fid` is a child of the node for the automata (not the parent field)."""
-        return fid != self.parent_field
-
-    @property
-    def k(self) -> int:
-        """Number of pointer fields (the arity of the tree)."""
-        return len(self.pointer_fields)
+        return fid != self.parent_field and any(fid == pf.id for pf in self.pointer_fields)
 
     def data_field_type(self, fid: int) -> DataType:
         return self.data_fields[fid].type
@@ -337,6 +336,10 @@ class NodeStruct:
             if f.name == name:
                 return f.id
         raise KeyError(name)
+
+    @cached_property
+    def pointer_fields_ids(self) -> tuple[int, ...]:
+        return tuple(pf.id for pf in self.pointer_fields)
 
 
 # --------------------------------------------------------------------------
@@ -441,7 +444,7 @@ class Function:
         return f"({s})" if isinstance(e, (BinOp, UnOp)) else s
 
     def fmt_cond(self, c: Cond) -> str:
-        p = lambda i: self.pointer_vars[i].name  # noqa: E731
+        def p(i: int): return self.pointer_vars[i].name
         if isinstance(c, PtrEq):
             return f"{p(c.left)} {'!=' if c.negated else '=='} {p(c.right)}"
         if isinstance(c, IsNil):
@@ -452,10 +455,10 @@ class Function:
         return self.fmt_expr(c.expr)
 
     def fmt_stmt(self, s: Stmt) -> str:
-        p = lambda i: self.pointer_vars[i].name  # noqa: E731
-        d = lambda i: self.data_vars[i].name  # noqa: E731
-        pf = lambda i: self.node.pointer_fields[i].name  # noqa: E731
-        df = lambda i: self.node.data_fields[i].name  # noqa: E731
+        def p(i: int): return self.pointer_vars[i].name
+        def d(i: int): return self.data_vars[i].name
+        def pf(i: int): return self.node.pointer_fields[i].name
+        def df(i: int): return self.node.data_fields[i].name
         if isinstance(s, AssignData):
             return f"{d(s.target)} := {self.fmt_expr(s.expr)}"
         if isinstance(s, AssignCond):
@@ -482,10 +485,11 @@ class Function:
             return f"if {self.fmt_cond(s.cond)} goto {s.target}"
         if isinstance(s, Goto):
             return f"goto {s.target}"
-        if isinstance(s, Exit):
+        if isinstance(s, Exit): # pyright: ignore[reportUnnecessaryIsInstance]
             return "exit"
         raise TypeError(s)
 
+    @override
     def __str__(self) -> str:
         lines = [f"struct {self.node.name} {{"]
         for f in self.node.data_fields:

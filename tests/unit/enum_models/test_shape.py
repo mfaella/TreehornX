@@ -4,8 +4,9 @@ from pathlib import Path
 
 import pytest
 
-from treehornx.chc import TreeShape
-from treehornx.enum_models.Taint.shape import ShapeError, label_errors, pair_errors
+from treehornx.enum_models.LabEngine import LabEngine
+from treehornx.enum_models.shape import ShapeError, label_errors, pair_errors
+from treehornx.enum_models.TaintingEngine import TaintingEngine
 from treehornx.parser import parse_file
 
 
@@ -15,9 +16,10 @@ N = 24
 
 def shape_errors(program: str, m: int) -> set[ShapeError]:
     function = parse_file(str(C_FILES / f"{program}.c"))
-    shape = TreeShape.build_tree_shape(function, function.node.k, m, N)
-    errors = {e for label in shape.labels for e in label_errors(shape.engine, label)}
-    return errors | {e for pair in shape.pairs for e in pair_errors(shape.engine, pair)}
+    engine = TaintingEngine(LabEngine(function.node.k, m, n=N, function=function))
+    shape = engine.finals()
+    errors = {e for label in shape.labels for e in label_errors(engine, label)}
+    return errors | {e for pair in shape.edges for e in pair_errors(engine, pair)}
 
 
 @pytest.mark.parametrize(

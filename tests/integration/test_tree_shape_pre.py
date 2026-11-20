@@ -4,7 +4,7 @@ input violates (or satisfies, for the unsafe ones) the order the precondition im
 
 import pytest
 
-from treehornx.chc.solvers import Status
+from treehornx.analysis.chc.solvers import Status
 from treehornx.main import PreType
 
 from .config import TestConfig, params, run

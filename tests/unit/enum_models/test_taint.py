@@ -8,12 +8,12 @@ from typing import Iterable
 import pytest
 from typing_extensions import override
 
-from treehornx.chc.Lab import enumerate_labels
-from treehornx.enum_models.Lab.initial import is_initial
-from treehornx.enum_models.Lab.Lab import Lab
-from treehornx.enum_models.Taint import BoolPlus, TaintedLabel, TaintingEngine, TaintPtr
+from treehornx.analysis.engines import Edge, SymbolicExecutionEngine, SymbolicTree
+from treehornx.enum_models.labels import TLab, is_initial
+from treehornx.enum_models.LabEngine import LabEngine
+from treehornx.enum_models.tainting import BoolPlus, TaintPtr
+from treehornx.enum_models.TaintingEngine import TaintingEngine
 from treehornx.parser import parse_file
-from treehornx.symbolic import Edge, Pair, SymbolicEngine
 
 
 C_FILES = Path(__file__).parents[2] / "integration" / "c_files"
@@ -71,36 +71,36 @@ def test_taint_ptr_join_never_downgrades() -> None:
 @pytest.fixture(scope="module")
 def engine() -> TaintingEngine:
     function = parse_file(str(C_FILES / "sll_safe_insert_sorted.c"))
-    engine = TaintingEngine(enumerate_labels(function, function.node.k, 1, N))
-    engine.fix()
+    engine = TaintingEngine(LabEngine(function.node.k, 1, n=N, function=function))
+    engine.whole()
     return engine
 
 
 def test_root_is_tainted_plus(engine: TaintingEngine) -> None:
-    assert any(state.taint_node is TopPlus for state in engine.states)
+    assert any(state.taint_node is TopPlus for state in engine._states)
 
 
 def test_inserted_node_is_tainted(engine: TaintingEngine) -> None:
-    def inserted(state: TaintedLabel) -> bool:
+    def inserted(state: TLab) -> bool:
         return not state.lab[1].active and state.lab.frame.active
 
-    assert any(inserted(state) and state.taint_node for state in engine.states)
+    assert any(inserted(state) and state.taint_node for state in engine._states)
 
 
 def test_input_successor_is_tainted_top(engine: TaintingEngine) -> None:
     """Rule 2: a structural child of a tainted node never overwritten is tainted ⊤."""
-    assert any(state.lab[1].active and state.taint_node is Top for state in engine.states)
+    assert any(state.lab[1].active and state.taint_node is Top for state in engine._states)
 
 
 def test_only_tainted_ptr_keys_are_stored(engine: TaintingEngine) -> None:
-    assert all(v for state in engine.states for _, v in state.taint_ptr.items())
+    assert all(v for state in engine._states for _, v in state.taint_ptr.items())
 
 
 def test_steppable(engine: TaintingEngine) -> None:
     """Some pairs take no step; some labels (the lifted initial labels, at least) take one."""
-    assert any(pair not in engine.steppable for pair in engine.edges)
-    assert any(state in engine.steppable for state in engine.states)
-    assert engine.steppable <= engine.states | engine.edges
+    assert any(pair not in engine._steppable for pair in engine._edges)
+    assert any(state in engine._steppable for state in engine._states)
+    assert engine._steppable <= engine._states | engine._edges
 
 
 # ---------------------------------------------------------------------------
@@ -108,42 +108,36 @@ def test_steppable(engine: TaintingEngine) -> None:
 # ---------------------------------------------------------------------------
 
 
-class ToyEngine(SymbolicEngine[str, int]):
+class ToyEngine(SymbolicExecutionEngine[str]):
     """An engine with no steps over a fixed graph: the roots are given, the leaves are the other states with no
     edges as parent."""
 
-    def __init__(self, edges: set[Pair[str]], roots: set[str], arity: int):
-        super().__init__(initial_edges=edges, start_states=set(), child_indexes=set(range(arity)))
-        self.roots = roots
+    def __init__(self, edges: set[Edge[str]], roots: set[str], arity: int):
+        parents = {edge.parent for edge in edges}
+        states = {state for edge in edges for state in (edge.parent, edge.child)}
+        leaves = frozenset(state for state in states if state not in roots and state not in parents)
+        super().__init__(SymbolicTree(frozenset(edges), frozenset(roots), arity, leaves))
 
     @override
-    def step_up(self, edge: Pair[str], /) -> Pair[str] | None:
+    def step_up(self, edge: Edge[str], /) -> Edge[str] | None:
         return None
 
     @override
-    def step_down(self, edge: Pair[str], /) -> Pair[str] | None:
+    def step_down(self, edge: Edge[str], /) -> Edge[str] | None:
         return None
 
     @override
     def step_int(self, state: str, /) -> Iterable[str] | None:
         return None
 
-    @override
-    def is_leaf(self, s: str, /) -> bool:
-        return s not in self.roots and not self.edge_parent_index.get(s)
-
-    @override
-    def is_root(self, s: str, /) -> bool:
-        return s in self.roots
-
 
 def run_finals(
     edges: list[tuple[str, str, int]],
     saturated: set[str],
-    unsaturated_pairs: frozenset[Pair[str]] = frozenset(),
+    unsaturated_pairs: frozenset[Edge[str]] = frozenset(),
     arity: int | None = None,
     roots: frozenset[str] = frozenset({"R"}),
-) -> tuple[set[str], set[Pair[str]]]:
+) -> tuple[set[str], set[Edge[str]]]:
     """`finals` on a toy graph rooted in `roots`: the states out of `saturated` and the pairs in
     `unsaturated_pairs` are steppable. The arity is one more than the largest child index of the edges by
     default."""
@@ -152,9 +146,9 @@ def run_finals(
     if arity is None:
         arity = 1 + max(j for _, _, j in edges)
     engine = ToyEngine(pairs, set(roots), arity)
-    engine.steppable |= (states - saturated) | set(unsaturated_pairs)
+    engine._steppable |= (states - saturated) | set(unsaturated_pairs)
     finals = engine.finals()
-    return set(finals.states), set(finals.edges)
+    return set(finals.labels), set(finals.edges)
 
 
 def test_finals_cycle_falls_with_its_only_support() -> None:
@@ -210,28 +204,28 @@ def test_finals_one_supported_alternative_is_enough() -> None:
 
 def test_engine_finals(engine: TaintingEngine) -> None:
     finals = engine.finals()
-    states, pairs = finals.states, finals.edges
+    states, pairs = finals.labels, finals.edges
     assert any(state.taint_node is TopPlus for state in states)
     assert any(not state.lab[1].active and state.lab.frame.active and state.taint_node for state in states)
     for pair in pairs:
-        assert pair not in engine.steppable
-        assert pair.parent not in engine.steppable and pair.child not in engine.steppable
+        assert pair not in engine._steppable
+        assert pair.parent not in engine._steppable and pair.child not in engine._steppable
         assert pair.parent in states and pair.child in states
 
 
-Tree = tuple[Lab, "list[Tree] | None"]
+Tree = tuple[TLab, "list[Tree] | None"]
 
 
 def concrete_trees(engine: TaintingEngine, depth: int) -> Iterable[Tree]:
     """The trees built from the final Lab pairs kept by the engine (no memory errors), up to depth; nodes with no
     pairs (never reached by the lace or allocated) are leaves."""
     labels, lab_pairs = engine.lab_finals()
-    children: defaultdict[Lab, defaultdict[int, list[Lab]]] = defaultdict(lambda: defaultdict(list))
+    children: defaultdict[TLab, defaultdict[int, list[TLab]]] = defaultdict(lambda: defaultdict(list))
     for pair in lab_pairs:
         children[pair.parent][pair.j].append(pair.child)
 
-    def trees(label: Lab, d: int) -> Iterable[Tree]:
-        if len(label) == 1 or not children[label]:
+    def trees(label: TLab, d: int) -> Iterable[Tree]:
+        if len(label.lab) == 1 or not children[label]:
             yield label, None
             return
         if d == 0:
@@ -242,13 +236,13 @@ def concrete_trees(engine: TaintingEngine, depth: int) -> Iterable[Tree]:
                 yield label, list(subtrees)
 
     for root in labels:
-        if is_initial(root):
+        if is_initial(root.lab):
             yield from trees(root, depth)
 
 
-def saturate(engine: TaintingEngine, tree: Tree) -> tuple[list[TaintedLabel], list[tuple[int, int, int]]]:
+def saturate(engine: TaintingEngine, tree: Tree) -> tuple[list[TLab], list[tuple[int, int, int]]]:
     """The taints of a concrete tree, by a global fixpoint of the engine's steps."""
-    nodes: list[TaintedLabel] = []
+    nodes: list[TLab] = []
     edges: list[tuple[int, int, int]] = []
 
     def flatten(t: Tree) -> int:
@@ -281,7 +275,7 @@ def saturate(engine: TaintingEngine, tree: Tree) -> tuple[list[TaintedLabel], li
 
 def test_engine_finals_contain_every_saturated_tree(engine: TaintingEngine) -> None:
     finals = engine.finals()
-    states, pairs = finals.states, finals.edges
+    states, pairs = finals.labels, finals.edges
     trees = list(concrete_trees(engine, depth=8))
     assert trees
     for tree in trees:

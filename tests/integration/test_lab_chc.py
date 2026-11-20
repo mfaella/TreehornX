@@ -7,7 +7,7 @@ program is safe within the bounds m, n) and unsat otherwise.
 
 import pytest
 
-from treehornx.chc.solvers import Status
+from treehornx.analysis.chc.solvers import Status
 
 from .config import TestConfig, params, run
 
@@ -21,7 +21,7 @@ CONFIGS = (
     TestConfig("sll_unsafe_insert", UNSAT, m=1),
     TestConfig("sll_safe_length", SAT),
     TestConfig("sll_unsafe_length", UNSAT),
-    TestConfig("sll_safe_find_last", SAT, solver="eldarica"),
+    TestConfig("sll_safe_find_last", SAT, solver="golem"),
     TestConfig("sll_unsafe_find_last", UNSAT),
     TestConfig("bst_safe_find", SAT),
     TestConfig("bst_unsafe_find", UNSAT),

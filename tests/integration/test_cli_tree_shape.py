@@ -5,7 +5,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from treehornx.chc.solvers import Z3Solver
+from treehornx.analysis.chc.solvers import Z3Solver
 from treehornx.feature_flags import FeatureFlags
 from treehornx.main import PRE, TREE_SHAPE, app, verify
 from treehornx.parser import parse_file
