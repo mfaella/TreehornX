@@ -94,7 +94,6 @@ group_by_package = true
 color_output = true
 
 [tool.pyright]
-stubPath = "typings"
 include = ["src", "tests"]
 pythonVersion = "3.11"
 extraPaths = ["src", "tests"]

@@ -208,7 +208,16 @@ __marimo__/
 
 .zed/
 
-# generated
-src/treehornx/chc/ppcompiler/grammar/
+# generated (repository root only: src/treehornx/smt is source code)
 .notes
 .profile
+/*.smt2
+/*.smt2.zip
+/*.log
+/prolog.horn
+/smt/
+/*_split[0-9]/
+/*_stats.csv
+/*_stats.json
+# solver binary used by BEST_Z3_CONFIG.md (the tests ship their own in tests/integration/solvers)
+/z3
